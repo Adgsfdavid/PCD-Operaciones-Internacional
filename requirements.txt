@@ -6,3 +6,6 @@ plotly
 Pillow
 numpy
 openpyxl
+xlrd
+lxml
+html5lib
