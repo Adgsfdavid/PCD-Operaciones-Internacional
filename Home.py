@@ -75,7 +75,9 @@ else:
     elif u_data['pais'] == "DOMINICANA":
         paginas = [
             st.Page("rd/cierre_diario.py", title="Cierre Diario (RD)", icon="📋"),
-            st.Page("rd/flota.py", title="Flota y Combustible (RD)", icon="🚛")
+            st.Page("rd/flota.py", title="Flota y Combustible (RD)", icon="🚛"),
+            st.Page("rd/monitoreo.py", title="Monitoreo de Despachos", icon="🖥️"),
+            st.Page("rd/seguridad.py", title="Prevención y Control", icon="🛡️"),
         ]
     
     # 3. Ejecutar la navegación automática
