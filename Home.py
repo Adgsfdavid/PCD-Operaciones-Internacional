@@ -63,13 +63,13 @@ else:
         st.session_state["logged_in"] = False
         st.rerun()
 
-    # 2. Definir qué páginas ve cada país usando st.Page()
     if u_data['pais'] == "VENEZUELA" or u_data['pais'] == "MASTER_VZLA":
         paginas = [
             st.Page("vzla/cierre_diario.py", title="Cierre Diario Master", icon="📋"),
             st.Page("vzla/flota.py", title="Flota y Mantenimiento", icon="🚛"),
             st.Page("vzla/monitoreo.py", title="Monitoreo de Despachos", icon="🖥️"),
-            st.Page("vzla/seguridad.py", title="Prevención y Control", icon="🛡️")
+            st.Page("vzla/seguridad.py", title="Prevención y Control", icon="🛡️"),
+            st.Page("vzla/app.py", title="Tráfico y Transbordos", icon="🚦")
         ]
         
     elif u_data['pais'] == "DOMINICANA":
