@@ -5,24 +5,25 @@ import time
 st.set_page_config(page_title="PCD Internacional - Login", layout="centered", initial_sidebar_state="collapsed")
 
 # --- BASE DE DATOS DE USUARIOS ---
+# Añadimos enlaces a banderas en Alta Resolución (HD)
 CONFIG_PAISES = {
     "admin_vzla": {
         "clave": "Vzla2026*", 
         "pais": "VENEZUELA", 
         "sheet_name": "PCD_BaseDatos_VZLA",
-        "bandera": "🇻🇪"
+        "bandera_url": "https://flagcdn.com/w160/ve.png"
     },
     "admin_rd": {
         "clave": "Dom2026*", 
         "pais": "DOMINICANA", 
         "sheet_name": "PCD_BaseDatos_DOM",
-        "bandera": "🇩🇴"
+        "bandera_url": "https://flagcdn.com/w160/do.png"
     },
     "david_master": {
         "clave": "Master123", 
         "pais": "MASTER_VZLA", 
         "sheet_name": "PCD_BaseDatos_VZLA",
-        "bandera": "🇻🇪👑"
+        "bandera_url": "https://flagcdn.com/w160/ve.png"
     }
 }
 
@@ -33,25 +34,38 @@ st.markdown("""
         background-color: #f8f9fa;
         border-top: 8px solid #FFD000; /* Amarillo Vzla */
         border-bottom: 8px solid #CE1126; /* Rojo Vzla */
-        padding: 20px;
-        border-radius: 10px;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        padding: 25px 20px 20px 20px;
+        border-radius: 12px;
+        box-shadow: 0 6px 12px rgba(0,0,0,0.15);
         text-align: center;
+        transition: transform 0.3s;
     }
     .card-rd {
         background-color: #f8f9fa;
         border-top: 8px solid #002D62; /* Azul RD */
         border-bottom: 8px solid #CE1126; /* Rojo RD */
-        padding: 20px;
-        border-radius: 10px;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        padding: 25px 20px 20px 20px;
+        border-radius: 12px;
+        box-shadow: 0 6px 12px rgba(0,0,0,0.15);
         text-align: center;
+        transition: transform 0.3s;
+    }
+    .card-vzla:hover, .card-rd:hover {
+        transform: translateY(-5px);
     }
     .titulo-card {
         color: #1a237e;
         font-weight: 900;
-        font-size: 20px;
-        margin-bottom: 5px;
+        font-size: 22px;
+        margin-bottom: 15px;
+        letter-spacing: 1px;
+    }
+    .bandera-img {
+        width: 100px;
+        border-radius: 8px;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        margin-bottom: 15px;
+        border: 1px solid #e0e0e0;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -62,23 +76,21 @@ if "logged_in" not in st.session_state:
 
 # --- PANTALLA DE LOGIN DOBLE ---
 def login():
-    st.markdown("<h1 style='text-align: center; color: #1a237e;'>PCD GLOBAL</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: #666;'>Selecciona tu región operativa para ingresar</p>", unsafe_allow_html=True)
-    st.write("")
-    st.write("")
+    st.markdown("<h1 style='text-align: center; color: #1a237e; font-weight: 900;'>PCD GLOBAL</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: #666; font-size: 16px; margin-bottom: 30px;'>Selecciona tu región operativa para ingresar</p>", unsafe_allow_html=True)
     
     col_v, col_r = st.columns(2)
     
     # --- PANEL VENEZUELA ---
     with col_v:
         st.markdown('<div class="card-vzla">', unsafe_allow_html=True)
-        st.markdown("<div style='font-size: 50px;'>🇻🇪</div>", unsafe_allow_html=True)
+        st.markdown(f'<img src="{CONFIG_PAISES["admin_vzla"]["bandera_url"]}" class="bandera-img">', unsafe_allow_html=True)
         st.markdown('<div class="titulo-card">VENEZUELA</div>', unsafe_allow_html=True)
         
         with st.form("form_vzla"):
             usr_v = st.text_input("Usuario")
             pwd_v = st.text_input("Contraseña", type="password")
-            btn_v = st.form_submit_button("Ingresar 🇻🇪", use_container_width=True)
+            btn_v = st.form_submit_button("Ingresar", use_container_width=True)
             
             if btn_v:
                 if usr_v in CONFIG_PAISES and CONFIG_PAISES[usr_v]["clave"] == pwd_v and "VZLA" in CONFIG_PAISES[usr_v]["pais"]:
@@ -94,13 +106,13 @@ def login():
     # --- PANEL DOMINICANA ---
     with col_r:
         st.markdown('<div class="card-rd">', unsafe_allow_html=True)
-        st.markdown("<div style='font-size: 50px;'>🇩🇴</div>", unsafe_allow_html=True)
+        st.markdown(f'<img src="{CONFIG_PAISES["admin_rd"]["bandera_url"]}" class="bandera-img">', unsafe_allow_html=True)
         st.markdown('<div class="titulo-card">DOMINICANA</div>', unsafe_allow_html=True)
         
         with st.form("form_rd"):
             usr_d = st.text_input("Usuario", key="usr_d")
             pwd_d = st.text_input("Contraseña", type="password", key="pwd_d")
-            btn_d = st.form_submit_button("Ingresar 🇩🇴", use_container_width=True)
+            btn_d = st.form_submit_button("Ingresar", use_container_width=True)
             
             if btn_d:
                 if usr_d in CONFIG_PAISES and CONFIG_PAISES[usr_d]["clave"] == pwd_d and "DOMINICANA" in CONFIG_PAISES[usr_d]["pais"]:
@@ -121,10 +133,14 @@ else:
     # SI YA INICIÓ SESIÓN:
     u_data = st.session_state["user_data"]
     
-    # 1. Menú Lateral (Bandera Gigante y Botón de Cerrar Sesión)
-    st.sidebar.markdown(f"<div style='text-align: center; font-size: 100px; margin-bottom: -20px;'>{u_data['bandera']}</div>", unsafe_allow_html=True)
-    st.sidebar.markdown(f"<h2 style='text-align: center; color: #1a237e;'>{u_data['pais']}</h2>", unsafe_allow_html=True)
-    st.sidebar.caption(f"Base de datos: {u_data['sheet_name']}")
+    # 1. Menú Lateral (Bandera HD Gigante y Botón de Cerrar Sesión)
+    st.sidebar.markdown(f"""
+        <div style='text-align: center; margin-bottom: 10px;'>
+            <img src='{u_data['bandera_url']}' style='width: 120px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); border: 2px solid #fff;'>
+        </div>
+    """, unsafe_allow_html=True)
+    st.sidebar.markdown(f"<h2 style='text-align: center; color: #1a237e; font-weight: 900; margin-top: 0;'>{u_data['pais']}</h2>", unsafe_allow_html=True)
+    st.sidebar.caption(f"<div style='text-align: center;'>Base de datos: <b>{u_data['sheet_name']}</b></div>", unsafe_allow_html=True)
     st.sidebar.markdown("---")
     
     if st.sidebar.button("🚪 Cerrar Sesión", use_container_width=True):
