@@ -10,8 +10,6 @@ import streamlit.components.v1 as components
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
-st.set_page_config(page_title="Reporte Diario Master", layout="wide")
-
 # ==========================================
 # FUNCIONES GLOBALES Y DE GOOGLE SHEETS
 # ==========================================
@@ -40,6 +38,8 @@ CREDENCIALES_GOOGLE = dict(st.secrets["gcp_service_account"])
 def guardar_en_sheets(nombre_hoja, df):
     try:
         alcance = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+        credenciales = ServiceAccountCredentials.from_json_keyfile_dict(CREDENCIALES_GOOGLE, alcance)
+        cliente = gspread.authorize(credenciales)
         
         # --- AQUÍ ESTÁ LA CORRECCIÓN CLAVE ---
         credenciales = ServiceAccountCredentials.from_json_keyfile_dict(CREDENCIALES_GOOGLE, alcance)
