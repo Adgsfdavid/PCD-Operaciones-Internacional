@@ -13,7 +13,6 @@ def guardar_en_google_sheets_directo(nombre_hoja, df):
     try:
         alcance = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
         
-        # Uso de secretos en lugar de archivo físico para evitar el FileNotFoundError
         credenciales = ServiceAccountCredentials.from_json_keyfile_dict(CREDENCIALES_GOOGLE, alcance)
         cliente = gspread.authorize(credenciales)
 
@@ -78,7 +77,7 @@ def login():
         else:
             st.error("Usuario o contraseña incorrectos")
 
-# --- LÓGICA DE ENRUTAMIENTO (RUTAS) ---
+# --- LÓGICA DE ENRUTAMIENTO (RUTAS CORREGIDAS) ---
 if not st.session_state["logged_in"]:
     login()
 else:
@@ -91,21 +90,21 @@ else:
         st.session_state["logged_in"] = False
         st.rerun()
 
-    # Mapeo de páginas según el país del usuario
+    # Eliminamos el prefijo "vnzl/" y "rd/" porque los archivos están en la carpeta raíz
     if u_data['pais'] == "VENEZUELA" or u_data['pais'] == "MASTER_VZLA":
         paginas = [
-            st.Page("vnzl/cierre_diario.py", title="Cierre Diario Master", icon="📋"),
-            st.Page("vnzl/flota.py", title="Flota y Mantenimiento", icon="🚛"),
-            st.Page("vnzl/monitoreo.py", title="Monitoreo de Despachos", icon="🖥️"),
-            st.Page("vnzl/seguridad.py", title="Prevención y Control", icon="🛡️")
+            st.Page("cierre_diario.py", title="Cierre Diario Master", icon="📋"),
+            st.Page("flota.py", title="Flota y Mantenimiento", icon="🚛"),
+            st.Page("monitoreo.py", title="Monitoreo de Despachos", icon="🖥️"),
+            st.Page("seguridad.py", title="Prevención y Control", icon="🛡️")
         ]
         
     elif u_data['pais'] == "DOMINICANA":
+        # Asegúrate de que para Dominicana los archivos se llamen así o cámbialos aquí
         paginas = [
-            st.Page("rd/cierre_diario.py", title="Cierre Diario (RD)", icon="📋"),
-            st.Page("rd/flota.py", title="Flota y Combustible (RD)", icon="🚛")
+            st.Page("cierre_diario.py", title="Cierre Diario (RD)", icon="📋"),
+            st.Page("flota.py", title="Flota y Combustible (RD)", icon="🚛")
         ]
     
-    # Ejecutar la navegación automática con las páginas correspondientes
     nav = st.navigation(paginas)
     nav.run()
