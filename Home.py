@@ -12,24 +12,21 @@ CONFIG_PAISES = {
         "pais": "VENEZUELA", 
         "sheet_name": "PCD_BaseDatos_VZLA",
         "logo": "logo.png",
-        "bandera_url": "https://flagcdn.com/w160/ve.png",
-        "color": "#FFD000"
+        "bandera_url": "https://flagcdn.com/w160/ve.png"
     },
     "admin_rd": {
         "clave": "Dom2026*", 
         "pais": "DOMINICANA", 
         "sheet_name": "PCD_BaseDatos_DOM",
         "logo": "logo_rd.png",
-        "bandera_url": "https://flagcdn.com/w160/do.png",
-        "color": "#002D62"
+        "bandera_url": "https://flagcdn.com/w160/do.png"
     },
     "david_master": {
         "clave": "Master123", 
         "pais": "MASTER_VZLA", 
         "sheet_name": "PCD_BaseDatos_VZLA",
         "logo": "logo.png",
-        "bandera_url": "https://flagcdn.com/w160/ve.png",
-        "color": "#FFD000"
+        "bandera_url": "https://flagcdn.com/w160/ve.png"
     }
 }
 
@@ -77,7 +74,8 @@ def login():
     
     # --- PANEL VENEZUELA ---
     with col_v:
-        st.markdown('<div class="card-login" style="border-top: 5px solid #FFD000;">', unsafe_allow_html=True)
+        # Se eliminó el estilo de borde de color
+        st.markdown('<div class="card-login">', unsafe_allow_html=True)
         # LOGO ARRIBA
         if Path("logo.png").exists():
             st.image("logo.png", width=160)
@@ -101,7 +99,8 @@ def login():
 
     # --- PANEL DOMINICANA ---
     with col_r:
-        st.markdown('<div class="card-login" style="border-top: 5px solid #002D62;">', unsafe_allow_html=True)
+        # Se eliminó el estilo de borde de color
+        st.markdown('<div class="card-login">', unsafe_allow_html=True)
         # LOGO ARRIBA
         if Path("logo_rd.png").exists():
             st.image("logo_rd.png", width=160)
@@ -131,7 +130,7 @@ if not st.session_state["logged_in"]:
 else:
     u_data = st.session_state["user_data"]
     
-    # Sidebar con el LOGO arriba (Eliminamos la bandera gigante de aquí)
+    # Sidebar con el LOGO arriba
     if Path(u_data["logo"]).exists():
         st.sidebar.image(u_data["logo"], use_container_width=True)
     
