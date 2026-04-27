@@ -7,7 +7,7 @@ import os
 # Configuración de página principal
 st.set_page_config(page_title="PCD Internacional - Login", layout="centered")
 
-# --- CREDENCIALES CLOUD ---
+# --- CREDENCIALES CLOUD (SEGURIDAD) ---
 CREDENCIALES_GOOGLE = dict(st.secrets["gcp_service_account"])
 
 def guardar_en_google_sheets_directo(nombre_hoja, df):
@@ -23,11 +23,11 @@ def guardar_en_google_sheets_directo(nombre_hoja, df):
         if "Fecha Sistema" not in df_guardar.columns:
             df_guardar.insert(0, "Fecha Sistema", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
         hoja.append_rows(df_guardar.values.tolist())
-        return True, "Datos sincronizados."
+        return True, "Datos sincronizados correctamente."
     except Exception as e:
         return False, str(e)
 
-# --- USUARIOS ---
+# --- BASE DE DATOS DE USUARIOS ---
 CONFIG_PAISES = {
     "admin_vzla": {"clave": "Vzla2026*", "pais": "VENEZUELA", "sheet_name": "PCD_BaseDatos_VZLA"},
     "admin_rd": {"clave": "Dom2026*", "pais": "DOMINICANA", "sheet_name": "PCD_BaseDatos_DOM"},
@@ -51,6 +51,7 @@ def login():
         else:
             st.error("Usuario o contraseña incorrectos")
 
+# --- LÓGICA DE NAVEGACIÓN (RUTAS CORREGIDAS A MINÚSCULAS) ---
 if not st.session_state["logged_in"]:
     login()
 else:
@@ -60,27 +61,19 @@ else:
         st.session_state["logged_in"] = False
         st.rerun()
 
-    # --- NAVEGACIÓN CORREGIDA ---
-    # Usamos os.path.join para asegurarnos de que la ruta sea válida en el servidor
-    try:
-        if u_data['pais'] in ["VENEZUELA", "MASTER_VZLA"]:
-            paginas = [
-                st.Page("Vnzl/cierre_diario.py", title="Cierre Diario Master", icon="📋"),
-                st.Page("Vnzl/flota.py", title="Flota y Mantenimiento", icon="🚛"),
-                st.Page("Vnzl/monitoreo.py", title="Monitoreo de Despachos", icon="🖥️"),
-                st.Page("Vnzl/seguridad.py", title="Prevención y Control", icon="🛡️")
-            ]
-        elif u_data['pais'] == "DOMINICANA":
-            paginas = [
-                st.Page("Rd/cierre_diario.py", title="Cierre Diario (RD)", icon="📋"),
-                st.Page("Rd/flota.py", title="Flota y Combustible (RD)", icon="🚛")
-            ]
-        
-        nav = st.navigation(paginas)
-        nav.run()
-        
-    except Exception as e:
-        st.error(f"Error de rutas: {e}")
-        st.write("Archivos detectados en el servidor:", os.listdir("."))
-        if os.path.exists("Vnzl"):
-            st.write("Contenido de Vnzl:", os.listdir("Vnzl"))
+    # IMPORTANTE: Aquí usamos "vzla/" y "rd/" en minúsculas como detectó el servidor
+    if u_data['pais'] == "VENEZUELA" or u_data['pais'] == "MASTER_VZLA":
+        paginas = [
+            st.Page("vzla/cierre_diario.py", title="Cierre Diario Master", icon="📋"),
+            st.Page("vzla/flota.py", title="Flota y Mantenimiento", icon="🚛"),
+            st.Page("vzla/monitoreo.py", title="Monitoreo de Despachos", icon="🖥️"),
+            st.Page("vzla/seguridad.py", title="Prevención y Control", icon="🛡️")
+        ]
+    elif u_data['pais'] == "DOMINICANA":
+        paginas = [
+            st.Page("rd/cierre_diario.py", title="Cierre Diario (RD)", icon="📋"),
+            st.Page("rd/flota.py", title="Flota y Combustible (RD)", icon="🚛")
+        ]
+    
+    nav = st.navigation(paginas)
+    nav.run()
