@@ -37,7 +37,7 @@ def procesar_imagen_subida(uploaded_file):
 # ==========================================
 CREDENCIALES_GOOGLE = dict(st.secrets["gcp_service_account"])
 
-ddef guardar_en_sheets(nombre_hoja, df):
+def guardar_en_sheets(nombre_hoja, df):
     try:
         alcance = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
         
