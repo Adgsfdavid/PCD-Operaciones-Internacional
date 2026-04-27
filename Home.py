@@ -7,12 +7,14 @@ from datetime import datetime
 st.set_page_config(page_title="PCD Internacional - Login", layout="centered")
 
 # --- CREDENCIALES CLOUD (CONEXIÓN SEGURA) ---
+# Se extraen los secretos configurados en Streamlit Cloud
 CREDENCIALES_GOOGLE = dict(st.secrets["gcp_service_account"])
 
 def guardar_en_google_sheets_directo(nombre_hoja, df):
     try:
         alcance = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
         
+        # Conexión usando el diccionario de secretos para la nube
         credenciales = ServiceAccountCredentials.from_json_keyfile_dict(CREDENCIALES_GOOGLE, alcance)
         cliente = gspread.authorize(credenciales)
 
@@ -77,7 +79,7 @@ def login():
         else:
             st.error("Usuario o contraseña incorrectos")
 
-# --- LÓGICA DE ENRUTAMIENTO (RUTAS CORREGIDAS SEGÚN TU GITHUB) ---
+# --- LÓGICA DE ENRUTAMIENTO (RUTAS SEGÚN CARPETAS EN GITHUB) ---
 if not st.session_state["logged_in"]:
     login()
 else:
@@ -90,7 +92,8 @@ else:
         st.session_state["logged_in"] = False
         st.rerun()
 
-    # CAMBIO IMPORTANTE: Se usa "Vnzl/" y "Rd/" con mayúscula inicial
+    # RUTAS CORREGIDAS: Coinciden exactamente con "Vnzl" y "Rd" de tu imagen.
+    # El servidor en la nube diferencia entre mayúsculas y minúsculas.
     if u_data['pais'] == "VENEZUELA" or u_data['pais'] == "MASTER_VZLA":
         paginas = [
             st.Page("Vnzl/cierre_diario.py", title="Cierre Diario Master", icon="📋"),
@@ -105,5 +108,6 @@ else:
             st.Page("Rd/flota.py", title="Flota y Combustible (RD)", icon="🚛")
         ]
     
+    # Ejecuta la navegación
     nav = st.navigation(paginas)
     nav.run()
