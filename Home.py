@@ -77,7 +77,7 @@ def login():
         else:
             st.error("Usuario o contraseña incorrectos")
 
-# --- LÓGICA DE ENRUTAMIENTO (RUTAS CORREGIDAS) ---
+# --- LÓGICA DE ENRUTAMIENTO (RUTAS CORREGIDAS SEGÚN TU GITHUB) ---
 if not st.session_state["logged_in"]:
     login()
 else:
@@ -90,20 +90,19 @@ else:
         st.session_state["logged_in"] = False
         st.rerun()
 
-    # Eliminamos el prefijo "vnzl/" y "rd/" porque los archivos están en la carpeta raíz
+    # CAMBIO IMPORTANTE: Se usa "Vnzl/" y "Rd/" con mayúscula inicial
     if u_data['pais'] == "VENEZUELA" or u_data['pais'] == "MASTER_VZLA":
         paginas = [
-            st.Page("cierre_diario.py", title="Cierre Diario Master", icon="📋"),
-            st.Page("flota.py", title="Flota y Mantenimiento", icon="🚛"),
-            st.Page("monitoreo.py", title="Monitoreo de Despachos", icon="🖥️"),
-            st.Page("seguridad.py", title="Prevención y Control", icon="🛡️")
+            st.Page("Vnzl/cierre_diario.py", title="Cierre Diario Master", icon="📋"),
+            st.Page("Vnzl/flota.py", title="Flota y Mantenimiento", icon="🚛"),
+            st.Page("Vnzl/monitoreo.py", title="Monitoreo de Despachos", icon="🖥️"),
+            st.Page("Vnzl/seguridad.py", title="Prevención y Control", icon="🛡️")
         ]
         
     elif u_data['pais'] == "DOMINICANA":
-        # Asegúrate de que para Dominicana los archivos se llamen así o cámbialos aquí
         paginas = [
-            st.Page("cierre_diario.py", title="Cierre Diario (RD)", icon="📋"),
-            st.Page("flota.py", title="Flota y Combustible (RD)", icon="🚛")
+            st.Page("Rd/cierre_diario.py", title="Cierre Diario (RD)", icon="📋"),
+            st.Page("Rd/flota.py", title="Flota y Combustible (RD)", icon="🚛")
         ]
     
     nav = st.navigation(paginas)
