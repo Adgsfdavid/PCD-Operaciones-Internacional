@@ -30,17 +30,20 @@ def obtener_logo_base64():
 # ==========================================
 # CREDENCIALES Y CONEXIÓN DINÁMICA A GOOGLE SHEETS
 # ==========================================
+import textwrap
+
 # 1. Cargamos el diccionario de la "Caja Fuerte"
 CREDENCIALES_GOOGLE = dict(st.secrets["gcp_service_account"])
 
-# 2. EL PARCHE MÁGICO: Cambiamos las letras "\n" por saltos de línea reales
-CREDENCIALES_GOOGLE["private_key"] = CREDENCIALES_GOOGLE["private_key"].replace('\\n', '\n')
+# 2. RECONSTRUCTOR BLINDADO DE LLAVE
+llave_sucia = CREDENCIALES_GOOGLE["private_key"]
+llave_limpia = llave_sucia.replace("-----BEGIN PRIVATE KEY-----", "").replace("-----END PRIVATE KEY-----", "").replace("\\n", "").replace("\n", "").replace(" ", "")
+llave_perfecta = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(textwrap.wrap(llave_limpia, 64)) + "\n-----END PRIVATE KEY-----\n"
 
-# 3. Función de conexión (Asegúrate de que use from_json_keyfile_dict)
-def obtener_cliente_sheets(): # O extraer_datos_sheets según el archivo
+CREDENCIALES_GOOGLE["private_key"] = llave_perfecta
+
+def obtener_cliente_sheets():
     alcance = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    
-    # Aquí es donde le pasamos la llave ya corregida
     credenciales = ServiceAccountCredentials.from_json_keyfile_dict(CREDENCIALES_GOOGLE, alcance)
     return gspread.authorize(credenciales)
 
@@ -83,16 +86,6 @@ def guardar_en_google_sheets(df_para_guardar, nombre_hoja):
     except Exception as e:
         st.error(f"Error de conexión a Sheets: {e}")
         return False
-
-def extraer_datos_sheets(nombre_hoja):
-    try:
-        cliente = obtener_cliente_sheets()
-        doc = cliente.open("PCD_BaseDatos")
-        hoja = doc.worksheet(nombre_hoja)
-        data = hoja.get_all_records()
-        return pd.DataFrame(data)
-    except Exception:
-        return pd.DataFrame()
 
 # ==========================================
 # MOTOR MATEMÁTICO DE REPORTES (CON PARCHE DE MADRUGADA)
