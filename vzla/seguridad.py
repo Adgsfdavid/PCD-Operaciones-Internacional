@@ -68,28 +68,33 @@ def guardar_en_google_sheets(df_para_guardar, nombre_hoja):
     try:
         cliente = obtener_cliente_sheets()
         
-        # --- MEJORA LOGIN MULTITENANT ---
         user_data = st.session_state.get("user_data", {})
         nombre_bd = user_data.get("sheet_name", "PCD_BaseDatos")
         doc = cliente.open(nombre_bd)
-        # --------------------------------
         
         try:
             hoja = doc.worksheet(nombre_hoja)
         except Exception:
-            # CORRECCIÓN VITAL 1: rows y cols DEBEN ser números enteros, NO strings ("")
             hoja = doc.add_worksheet(title=nombre_hoja, rows=1000, cols=20)
             hoja.append_row(list(df_para_guardar.columns))
             
-        # CORRECCIÓN VITAL 2: astype(str) fuerza la limpieza de datos incompatibles con Sheets
         df_clean = df_para_guardar.fillna('').astype(str)
         valores = df_clean.values.tolist()
         
-        hoja.append_rows(valores, value_input_option='USER_ENTERED')
+        try:
+            hoja.append_rows(valores, value_input_option='USER_ENTERED')
+        except Exception as error_interno:
+            if "200" in str(error_interno):
+                pass
+            else:
+                raise error_interno
+                
         return True
+        
     except Exception as e:
-        st.error(f"Error de conexión a Sheets: {e}")
+        st.error(f"🛑 CÓDIGO NUEVO CARGADO - Error real: {e}")
         return False
+    
 # ==========================================
 # MOTOR MATEMÁTICO DE REPORTES (CON PARCHE DE MADRUGADA)
 # ==========================================
