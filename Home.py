@@ -5,6 +5,7 @@ import textwrap
 import traceback
 from datetime import datetime
 import os
+import extra_streamlit_components as stx # <--- LA NUEVA HERRAMIENTA DE COOKIES
 
 # Configuración de página principal
 st.set_page_config(page_title="PCD Internacional - Login", layout="centered")
@@ -29,7 +30,6 @@ def guardar_en_google_sheets_directo(nombre_hoja, df):
     try:
         cliente = obtener_cliente_sheets()
         u_data = st.session_state.get("user_data", {})
-        # USA EL ID DINÁMICO SEGÚN EL USUARIO
         doc = cliente.open_by_key(u_data.get("sheet_id"))
         
         try:
@@ -63,27 +63,39 @@ CONFIG_PAISES = {
     "admin_vzla": {
         "clave": "Vzla2026*", 
         "pais": "VENEZUELA", 
-        "sheet_id": "1wCM3tcfQJtIQ4gDB0gLe9gJ4_ON7Vl6U4cBGuxXTKZ0" #
+        "sheet_id": "1wCM3tcfQJtIQ4gDB0gLe9gJ4_ON7Vl6U4cBGuxXTKZ0" 
     },
     "admin_rd": {
         "clave": "Dom2026*", 
         "pais": "DOMINICANA", 
-        "sheet_id": "1ourNW6VifjXiJFsyVKamjeBL7iACKEpH0ozdWo8rCMc" #
+        "sheet_id": "1ourNW6VifjXiJFsyVKamjeBL7iACKEpH0ozdWo8rCMc" 
     },
     "david_master": {
         "clave": "Master123", 
         "pais": "MASTER_VZLA", 
-        "sheet_id": "1wCM3tcfQJtIQ4gDB0gLe9gJ4_ON7Vl6U4cBGuxXTKZ0" #
+        "sheet_id": "1wCM3tcfQJtIQ4gDB0gLe9gJ4_ON7Vl6U4cBGuxXTKZ0" 
     }
 }
 
-# --- LÓGICA DE LOGIN ---
+# ==========================================
+# MANEJO DE SESIÓN Y COOKIES (EVITA EL DESLOGUEO)
+# ==========================================
+cookie_manager = stx.CookieManager()
+
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
 
+# MAGIA DE LAS COOKIES: Verificamos si el usuario ya se había logueado antes
+usuario_guardado = cookie_manager.get(cookie="pcd_usuario_valido")
+
+# Si hay una cookie guardada en el navegador y el usuario no está logueado en la sesión actual, lo dejamos pasar
+if usuario_guardado in CONFIG_PAISES and not st.session_state["logged_in"]:
+    st.session_state["logged_in"] = True
+    st.session_state["user_data"] = CONFIG_PAISES[usuario_guardado]
+
 def login():
     try:
-        st.image("logo.png", width=200) #
+        st.image("logo.png", width=200) 
     except Exception:
         pass
         
@@ -95,7 +107,9 @@ def login():
         submit_button = st.form_submit_button("🚀 Ingresar", use_container_width=True)
         
         if submit_button:
-            if usuario in CONFIG_PAISES and CONFIG_PAISES[usuario]["clave"] == clave: #
+            if usuario in CONFIG_PAISES and CONFIG_PAISES[usuario]["clave"] == clave:
+                # Guardamos la cookie por 30 días (30 días * 24 horas * 60 min * 60 seg)
+                cookie_manager.set("pcd_usuario_valido", usuario, max_age=2592000)
                 st.session_state["logged_in"] = True
                 st.session_state["user_data"] = CONFIG_PAISES[usuario]
                 st.rerun()
@@ -108,7 +122,9 @@ if not st.session_state["logged_in"]:
 else:
     u_data = st.session_state["user_data"]
     st.sidebar.title(f"📍 {u_data['pais']}")
+    
     if st.sidebar.button("🚪 Cerrar Sesión"):
+        cookie_manager.delete("pcd_usuario_valido") # Borramos la cookie para que pida clave la próxima vez
         st.session_state["logged_in"] = False
         st.rerun()
 
@@ -121,7 +137,7 @@ else:
             st.Page("vzla/seguridad.py", title="Prevención y Control", icon="🛡️"),
             st.Page("vzla/app.py", title="Trafico y Salidas", icon="📊")
         ]
-    # Rutas para República Dominicana (Corregido: Ahora con todos los módulos)
+    # Rutas para República Dominicana
     elif u_data['pais'] == "DOMINICANA":
         paginas = [
             st.Page("rd/cierre_diario.py", title="Cierre Diario Master", icon="📋"),
