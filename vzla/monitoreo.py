@@ -9,7 +9,9 @@ import calendar
 from datetime import datetime, timedelta
 import streamlit.components.v1 as components
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+from google.oauth2.service_account import Credentials
+import textwrap
+import traceback
 from pathlib import Path
 import plotly.graph_objects as go
 
@@ -30,26 +32,29 @@ def obtener_logo_base64():
 # ==========================================
 # CREDENCIALES Y CONEXIÓN DINÁMICA A GOOGLE SHEETS
 # ==========================================
+
 # 1. Cargamos el diccionario de la "Caja Fuerte"
 CREDENCIALES_GOOGLE = dict(st.secrets["gcp_service_account"])
 
-# 2. EL PARCHE MÁGICO: Cambiamos las letras "\n" por saltos de línea reales
-CREDENCIALES_GOOGLE["private_key"] = CREDENCIALES_GOOGLE["private_key"].replace('\\n', '\n')
+# 2. RECONSTRUCTOR BLINDADO DE LLAVE
+llave_sucia = CREDENCIALES_GOOGLE["private_key"]
+llave_limpia = llave_sucia.replace("-----BEGIN PRIVATE KEY-----", "").replace("-----END PRIVATE KEY-----", "").replace("\\n", "").replace("\n", "").replace(" ", "")
+llave_perfecta = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(textwrap.wrap(llave_limpia, 64)) + "\n-----END PRIVATE KEY-----\n"
 
-# 3. Función de conexión (Asegúrate de que use from_json_keyfile_dict)
+CREDENCIALES_GOOGLE["private_key"] = llave_perfecta
+
 def obtener_cliente_sheets():
-    alcance = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    credenciales = ServiceAccountCredentials.from_json_keyfile_dict(CREDENCIALES_GOOGLE, alcance)
+    alcance = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+    credenciales = Credentials.from_service_account_info(CREDENCIALES_GOOGLE, scopes=alcance)
     return gspread.authorize(credenciales)
 
 def extraer_datos_sheets(nombre_hoja):
     try:
-        alcance = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-        credenciales = ServiceAccountCredentials.from_json_keyfile_dict(CREDENCIALES_GOOGLE, alcance)
-        cliente = gspread.authorize(credenciales)
-        user_data = st.session_state.get("user_data", {})
-        nombre_bd = user_data.get("sheet_name", "PCD_BaseDatos")
-        doc = cliente.open(nombre_bd)
+        cliente = obtener_cliente_sheets()
+        
+        # Conexión directa a prueba de balas usando tu ID
+        doc = cliente.open_by_key("1wCM3tcfQJtIQ4gDB0gLe9gJ4_ON7Vl6U4cBGuxXTKZ0")
+        
         hoja = doc.worksheet(nombre_hoja)
         data = hoja.get_all_records()
         return pd.DataFrame(data)
@@ -58,29 +63,35 @@ def extraer_datos_sheets(nombre_hoja):
 
 def guardar_en_google_sheets(df_para_guardar, nombre_hoja):
     try:
-        alcance = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-        credenciales = ServiceAccountCredentials.from_json_keyfile_dict(CREDENCIALES_GOOGLE, alcance)
-        cliente = gspread.authorize(credenciales)
+        cliente = obtener_cliente_sheets()
         
-        # --- MEJORA LOGIN MULTITENANT ---
-        user_data = st.session_state.get("user_data", {})
-        nombre_bd = user_data.get("sheet_name", "PCD_BaseDatos")
-        doc = cliente.open(nombre_bd)
-        # --------------------------------
+        # Conexión directa a prueba de balas usando tu ID
+        doc = cliente.open_by_key("1wCM3tcfQJtIQ4gDB0gLe9gJ4_ON7Vl6U4cBGuxXTKZ0")
         
         try:
             hoja = doc.worksheet(nombre_hoja)
-        except:
-            hoja = doc.add_worksheet(title=nombre_hoja, rows="1000", cols="20")
+        except Exception:
+            hoja = doc.add_worksheet(title=nombre_hoja, rows=1000, cols=20)
             hoja.append_row(list(df_para_guardar.columns))
             
-        df_clean = df_para_guardar.fillna('')
+        df_clean = df_para_guardar.fillna('').astype(str)
         valores = df_clean.values.tolist()
-        hoja.append_rows(valores, value_input_option='USER_ENTERED')
+        
+        try:
+            hoja.append_rows(valores, value_input_option='USER_ENTERED')
+        except Exception as error_interno:
+            if "200" in str(error_interno):
+                pass # Silenciador del falso error 200
+            else:
+                raise error_interno
+                
+        # Limpiamos la caché de Streamlit para que los gráficos carguen la data nueva al instante
         st.cache_data.clear() 
         return True
+        
     except Exception as e:
-        st.error(f"Error de conexión a Sheets: {e}")
+        st.error(f"🛑 Falla en la conexión: {e}")
+        st.code(traceback.format_exc(), language="python")
         return False
 
 # ==========================================
