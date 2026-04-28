@@ -28,8 +28,9 @@ def obtener_cliente_sheets():
 def guardar_en_google_sheets_directo(nombre_hoja, df):
     try:
         cliente = obtener_cliente_sheets()
-        # Conexión directa a prueba de balas usando tu ID único
-        doc = cliente.open_by_key("1wCM3tcfQJtIQ4gDB0gLe9gJ4_ON7Vl6U4cBGuxXTKZ0")
+        u_data = st.session_state.get("user_data", {})
+        # USA EL ID DINÁMICO SEGÚN EL USUARIO
+        doc = cliente.open_by_key(u_data.get("sheet_id"))
         
         try:
             hoja = doc.worksheet(nombre_hoja)
@@ -56,12 +57,24 @@ def guardar_en_google_sheets_directo(nombre_hoja, df):
         return False, f"Error: {e}"
 
 # ==========================================
-# CONFIGURACIÓN REAL DE ACCESOS
+# CONFIGURACIÓN REAL DE ACCESOS CON IDs DE SHEETS
 # ==========================================
 CONFIG_PAISES = {
-    "admin_vzla": {"clave": "Vzla2026*", "pais": "VENEZUELA", "sheet_name": "PCD_BaseDatos_VZLA"},
-    "admin_rd": {"clave": "Dom2026*", "pais": "DOMINICANA", "sheet_name": "PCD_BaseDatos_DOM"},
-    "david_master": {"clave": "Master123", "pais": "MASTER_VZLA", "sheet_name": "PCD_BaseDatos_VZLA"}
+    "admin_vzla": {
+        "clave": "Vzla2026*", 
+        "pais": "VENEZUELA", 
+        "sheet_id": "1wCM3tcfQJtIQ4gDB0gLe9gJ4_ON7Vl6U4cBGuxXTKZ0" #
+    },
+    "admin_rd": {
+        "clave": "Dom2026*", 
+        "pais": "DOMINICANA", 
+        "sheet_id": "1ourNW6VifjXiJFsyVKamjeBL7iACKEpH0ozdWo8rCMc" #
+    },
+    "david_master": {
+        "clave": "Master123", 
+        "pais": "MASTER_VZLA", 
+        "sheet_id": "1wCM3tcfQJtIQ4gDB0gLe9gJ4_ON7Vl6U4cBGuxXTKZ0" #
+    }
 }
 
 # --- LÓGICA DE LOGIN ---
@@ -69,22 +82,20 @@ if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
 
 def login():
-    # --- CORRECCIÓN DEL LOGO: Vuelve a usar el archivo local ---
     try:
-        st.image("logo.png", width=200)
+        st.image("logo.png", width=200) #
     except Exception:
         pass
         
     st.title("🔐 Acceso PCD Internacional")
     
-    # El uso de 'st.form' captura los datos de Google Autocomplete al instante con un solo click
     with st.form("login_form"):
         usuario = st.text_input("Usuario", placeholder="Ingresa tu usuario")
         clave = st.text_input("Contraseña", type="password")
         submit_button = st.form_submit_button("🚀 Ingresar", use_container_width=True)
         
         if submit_button:
-            if usuario in CONFIG_PAISES and CONFIG_PAISES[usuario]["clave"] == clave:
+            if usuario in CONFIG_PAISES and CONFIG_PAISES[usuario]["clave"] == clave: #
                 st.session_state["logged_in"] = True
                 st.session_state["user_data"] = CONFIG_PAISES[usuario]
                 st.rerun()
@@ -101,7 +112,7 @@ else:
         st.session_state["logged_in"] = False
         st.rerun()
 
-    # Rutas correctas de los módulos
+    # Rutas para Venezuela y Master
     if u_data['pais'] == "VENEZUELA" or u_data['pais'] == "MASTER_VZLA":
         paginas = [
             st.Page("vzla/cierre_diario.py", title="Cierre Diario Master", icon="📋"),
@@ -110,9 +121,13 @@ else:
             st.Page("vzla/seguridad.py", title="Prevención y Control", icon="🛡️"),
             st.Page("vzla/app.py", title="Trafico y Salidas", icon="📊")
         ]
+    # Rutas para República Dominicana (Corregido: Ahora con todos los módulos)
     elif u_data['pais'] == "DOMINICANA":
         paginas = [
-            st.Page("rd/logistica_rd.py", title="Operaciones RD", icon="🇩🇴")
+            st.Page("rd/cierre_diario.py", title="Cierre Diario Master", icon="📋"),
+            st.Page("rd/flota.py", title="Flota y Mantenimiento", icon="🚛"),
+            st.Page("rd/monitoreo.py", title="Monitoreo de Despachos", icon="🖥️"),
+            st.Page("rd/seguridad.py", title="Prevención y Control", icon="🛡️")
         ]
     
     pg = st.navigation(paginas)
