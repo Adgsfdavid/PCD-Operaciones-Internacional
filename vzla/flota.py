@@ -9,7 +9,9 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import streamlit.components.v1 as components
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+import textwrap
+import traceback
+from google.oauth2.service_account import Credentials
 
 # ==========================================
 # DICCIONARIOS Y DATA MAESTRA DE FLOTA
@@ -139,7 +141,6 @@ def generar_ws_estatus_dinamico(tipo_reporte, fecha, total, t_activas, t_inactiv
         return msg
         
     else:
-        # Ambas
         msg = f"*Estatus Diario Operativo y Satelital (GPS)* 🚚🛰️\n📅 Fecha: {fecha} ({dia})\n\n"
         msg += f"*RESUMEN MECÁNICO (FLOTA)* 🔧\n• Flota Total: {total} unidades\n• Operativas: {t_activas}\n• En Taller: {t_inactivas}\n\n"
         if not inactivas_df.empty:
@@ -173,39 +174,52 @@ def obtener_logo_base64():
         return None
 
 # ==========================================
-# PUENTE A GOOGLE SHEETS
+# PUENTE A GOOGLE SHEETS (MODERNIZADO)
 # ==========================================
 CREDENCIALES_GOOGLE = dict(st.secrets["gcp_service_account"])
-CREDENCIALES_GOOGLE["private_key"] = CREDENCIALES_GOOGLE["private_key"].replace('\\n', '\n')
+
+# RECONSTRUCTOR BLINDADO DE LLAVE
+llave_sucia = CREDENCIALES_GOOGLE["private_key"]
+llave_limpia = llave_sucia.replace("-----BEGIN PRIVATE KEY-----", "").replace("-----END PRIVATE KEY-----", "").replace("\\n", "").replace("\n", "").replace(" ", "")
+llave_perfecta = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(textwrap.wrap(llave_limpia, 64)) + "\n-----END PRIVATE KEY-----\n"
+
+CREDENCIALES_GOOGLE["private_key"] = llave_perfecta
 
 def obtener_cliente_sheets():
-    alcance = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    credenciales = ServiceAccountCredentials.from_json_keyfile_dict(CREDENCIALES_GOOGLE, alcance)
+    alcance = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+    credenciales = Credentials.from_service_account_info(CREDENCIALES_GOOGLE, scopes=alcance)
     return gspread.authorize(credenciales)
 
 def guardar_en_google_sheets(df_para_guardar, nombre_hoja):
     try:
         cliente = obtener_cliente_sheets()
         
-        # --- MEJORA LOGIN MULTITENANT ---
-        user_data = st.session_state.get("user_data", {})
-        nombre_bd = user_data.get("sheet_name", "PCD_BaseDatos")
-        doc = cliente.open(nombre_bd)
-        # --------------------------------
+        # Conexión directa a prueba de balas usando tu ID
+        doc = cliente.open_by_key("1wCM3tcfQJtIQ4gDB0gLe9gJ4_ON7Vl6U4cBGuxXTKZ0")
         
         try:
             hoja = doc.worksheet(nombre_hoja)
-        except:
-            hoja = doc.add_worksheet(title=nombre_hoja, rows="1000", cols="20")
+        except Exception:
+            hoja = doc.add_worksheet(title=nombre_hoja, rows=1000, cols=20)
             hoja.append_row(list(df_para_guardar.columns))
             
-        df_clean = df_para_guardar.fillna('')
+        df_clean = df_para_guardar.fillna('').astype(str)
         valores = df_clean.values.tolist()
-        hoja.append_rows(valores, value_input_option='USER_ENTERED')
+        
+        try:
+            hoja.append_rows(valores, value_input_option='USER_ENTERED')
+        except Exception as error_interno:
+            if "200" in str(error_interno):
+                pass
+            else:
+                raise error_interno
+                
         st.cache_data.clear() 
         return True
+        
     except Exception as e:
-        st.error(f"Error de conexión a Sheets: {e}")
+        st.error(f"🛑 Falla en la conexión: {e}")
+        st.code(traceback.format_exc(), language="python")
         return False
 
 @st.cache_data(ttl=60)
@@ -213,17 +227,15 @@ def extraer_datos_sheets(nombre_hoja):
     try:
         cliente = obtener_cliente_sheets()
         
-        # --- MEJORA LOGIN MULTITENANT ---
-        user_data = st.session_state.get("user_data", {})
-        nombre_bd = user_data.get("sheet_name", "PCD_BaseDatos")
-        doc = cliente.open(nombre_bd)
-        # --------------------------------
+        # Conexión directa a prueba de balas usando tu ID
+        doc = cliente.open_by_key("1wCM3tcfQJtIQ4gDB0gLe9gJ4_ON7Vl6U4cBGuxXTKZ0")
         
         hoja = doc.worksheet(nombre_hoja)
         data = hoja.get_all_records()
         return pd.DataFrame(data)
     except Exception:
         return pd.DataFrame()
+
 
 # ==========================================
 # EXTRACTORES DE TEXTO INTELIGENTES (NUEVOS)
@@ -237,7 +249,6 @@ def procesar_texto_planificadas(texto):
         linea = linea.strip()
         if not linea or "UNIDAD" in linea.upper() or "ACTIVIDAD" in linea.upper(): continue
         
-        # Unificar múltiples espacios en uno solo para facilitar lectura
         linea = re.sub(r'\s+', ' ', linea)
         
         if '|' in linea:
@@ -254,7 +265,6 @@ def procesar_texto_planificadas(texto):
             mec = partes[-1] if len(partes)>1 else "Sin asignar"
             datos.append({"Fecha": f_val, "Unidad": unidad, "Actividad": act, "Mecánico": mec})
         else:
-            # Lógica Inteligente si pegan texto crudo sin separadores "|"
             f_val = fecha_def
             m_fecha = re.search(r'^(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\s+', linea)
             if m_fecha:
@@ -271,7 +281,6 @@ def procesar_texto_planificadas(texto):
             
             linea_resto = linea.replace(partes[0], "", 1).replace(partes[1], "", 1).strip()
             
-            # Asumimos que el mecánico son las últimas 2 palabras
             p_resto = linea_resto.split()
             if len(p_resto) >= 3:
                 mec = f"{p_resto[-2]} {p_resto[-1]}"
@@ -310,7 +319,6 @@ def procesar_texto_realizadas(texto):
             cond = partes[-1] if len(partes)>1 else "OPERATIVO"
             datos.append({"Fecha": f_val, "Unidad": unidad, "Resumen Actividad": act, "Condición": cond.upper()})
         else:
-            # Lógica Inteligente si pegan texto crudo sin separadores "|"
             f_val = fecha_def
             m_fecha = re.search(r'^(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\s+', linea)
             if m_fecha:
@@ -1098,7 +1106,6 @@ with tab5:
             excluidos = ["USO MECANICO", "STOCK", "NO DEFINIDO", "CIUDAD DROTACA"]
             mask_flota_t5 = db_g_filt_pre['UNIDAD'].str.upper().apply(lambda x: not any(exc in x for exc in excluidos))
             
-            # Dinámica de Título Gerencial
             if filtro_categoria_t5 == "🚛 Solo Flota (Vehículos)":
                 db_g_filt = db_g_filt_pre[mask_flota_t5]
                 titulo_evaluacion = "Flota Drotaca"
@@ -1994,7 +2001,7 @@ with tab9:
                         const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
                         doc.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, pdfWidth, pdfHeight);
                         doc.save('Reporte_Integrado_Flota_GPS.pdf');
-                    }});\
+                    }});
                 }}
                 </script>
                 """
