@@ -1,7 +1,7 @@
 streamlit
 pandas
-gspread
-oauth2client
+gspread>=6.0.0
+google-auth
 plotly
 Pillow
 numpy
