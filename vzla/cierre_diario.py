@@ -7,8 +7,12 @@ import base64
 from datetime import datetime, timedelta
 from pathlib import Path
 import streamlit.components.v1 as components
+
+# LIBRERÍAS MODERNIZADAS
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+import textwrap
+import traceback
+from google.oauth2.service_account import Credentials
 
 # ==========================================
 # FUNCIONES GLOBALES Y DE GOOGLE SHEETS
@@ -31,42 +35,60 @@ def procesar_imagen_subida(uploaded_file):
     return None
 
 # ==========================================
-# CREDENCIALES DIRECTAS DE GOOGLE
+# CREDENCIALES Y CONEXIÓN DINÁMICA A GOOGLE SHEETS
 # ==========================================
+# 1. Cargamos el diccionario de la "Caja Fuerte"
 CREDENCIALES_GOOGLE = dict(st.secrets["gcp_service_account"])
-CREDENCIALES_GOOGLE["private_key"] = CREDENCIALES_GOOGLE["private_key"].replace('\\n', '\n')
+
+# 2. RECONSTRUCTOR BLINDADO DE LLAVE
+llave_sucia = CREDENCIALES_GOOGLE["private_key"]
+llave_limpia = llave_sucia.replace("-----BEGIN PRIVATE KEY-----", "").replace("-----END PRIVATE KEY-----", "").replace("\\n", "").replace("\n", "").replace(" ", "")
+llave_perfecta = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(textwrap.wrap(llave_limpia, 64)) + "\n-----END PRIVATE KEY-----\n"
+
+CREDENCIALES_GOOGLE["private_key"] = llave_perfecta
+
+# 3. Función de conexión moderna
+def obtener_cliente_sheets():
+    alcance = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+    credenciales = Credentials.from_service_account_info(CREDENCIALES_GOOGLE, scopes=alcance)
+    return gspread.authorize(credenciales)
 
 def guardar_en_sheets(nombre_hoja, df):
     try:
-        alcance = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-        credenciales = ServiceAccountCredentials.from_json_keyfile_dict(CREDENCIALES_GOOGLE, alcance)
-        cliente = gspread.authorize(credenciales)
+        cliente = obtener_cliente_sheets()
         
-        # --- AQUÍ ESTÁ LA CORRECCIÓN CLAVE ---
-        credenciales = ServiceAccountCredentials.from_json_keyfile_dict(CREDENCIALES_GOOGLE, alcance)
-        cliente = gspread.authorize(credenciales)
-        
-        # --- LÓGICA DE BASE DE DATOS ---
-        user_data = st.session_state.get("user_data", {})
-        nombre_bd = user_data.get("sheet_name", "PCD_BaseDatos")
-        doc = cliente.open(nombre_bd)
+        # Conexión directa a prueba de balas usando tu ID
+        doc = cliente.open_by_key("1wCM3tcfQJtIQ4gDB0gLe9gJ4_ON7Vl6U4cBGuxXTKZ0")
         
         try:
             hoja = doc.worksheet(nombre_hoja)
-        except gspread.exceptions.WorksheetNotFound:
-            return False, f"La hoja '{nombre_hoja}' no existe en tu archivo {nombre_bd}. ¡Créala primero!"
+        except Exception:
+            # MEJORA: Si la hoja no existe, la crea automáticamente en vez de dar error
+            hoja = doc.add_worksheet(title=nombre_hoja, rows=1000, cols=20)
+            hoja.append_row(list(df.columns))
             
         df_guardar = df.copy().astype(str)
         
-        # Opcional: Agregar marca de tiempo si no existe en el DataFrame original
+        # Agregar marca de tiempo si no existe
         if "Fecha Sistema" not in df_guardar.columns:
-            from datetime import datetime
             df_guardar.insert(0, "Fecha Sistema", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
         
-        hoja.append_rows(df_guardar.values.tolist())
-        return True, "Datos guardados en la nube exitosamente."
+        valores = df_guardar.values.tolist()
+        
+        try:
+            hoja.append_rows(valores, value_input_option='USER_ENTERED')
+        except Exception as error_interno:
+            if "200" in str(error_interno):
+                pass # Silenciador del falso error 200
+            else:
+                raise error_interno
+                
+        return True, "✅ Datos guardados en la nube exitosamente."
+        
     except Exception as e:
-        return False, str(e)
+        st.error(f"🛑 Falla en la conexión: {e}")
+        st.code(traceback.format_exc(), language="python")
+        return False, f"❌ Error al conectar con Google Sheets: {e}"
 
 # ==========================================
 # INTERFAZ DE USUARIO: PESTAÑAS PRINCIPALES
