@@ -9,6 +9,9 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import streamlit.components.v1 as components
 import gspread
+from google.oauth2.service_account import Credentials
+import textwrap
+import traceback
 
 # CONFIGURACIÓN INICIAL
 
@@ -29,8 +32,6 @@ def obtener_logo_base64():
 # ==========================================
 # CREDENCIALES Y CONEXIÓN DINÁMICA A GOOGLE SHEETS
 # ==========================================
-import textwrap
-from google.oauth2.service_account import Credentials
 
 # 1. Cargamos el diccionario de la "Caja Fuerte"
 CREDENCIALES_GOOGLE = dict(st.secrets["gcp_service_account"])
@@ -42,11 +43,7 @@ llave_perfecta = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(textwrap.wrap(llave
 
 CREDENCIALES_GOOGLE["private_key"] = llave_perfecta
 
-from google.oauth2.service_account import Credentials
-import traceback
-
 def obtener_cliente_sheets():
-    # ¡AQUÍ ESTÁ LA MAGIA! Librería moderna que NO lanza el falso error 200
     alcance = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
     credenciales = Credentials.from_service_account_info(CREDENCIALES_GOOGLE, scopes=alcance)
     return gspread.authorize(credenciales)
@@ -54,9 +51,10 @@ def obtener_cliente_sheets():
 def extraer_datos_sheets(nombre_hoja):
     try:
         cliente = obtener_cliente_sheets()
-        user_data = st.session_state.get("user_data", {})
-        nombre_bd = user_data.get("sheet_name", "PCD_BaseDatos")
-        doc = cliente.open(nombre_bd)
+        
+        # Conexión directa a prueba de balas usando tu ID
+        doc = cliente.open_by_key("1wCM3tcfQJtIQ4gDB0gLe9gJ4_ON7Vl6U4cBGuxXTKZ0")
+        
         hoja = doc.worksheet(nombre_hoja)
         data = hoja.get_all_records()
         return pd.DataFrame(data)
@@ -67,9 +65,8 @@ def guardar_en_google_sheets(df_para_guardar, nombre_hoja):
     try:
         cliente = obtener_cliente_sheets()
         
-        user_data = st.session_state.get("user_data", {})
-        nombre_bd = user_data.get("sheet_name", "PCD_BaseDatos")
-        doc = cliente.open(nombre_bd)
+        # Conexión directa a prueba de balas usando tu ID
+        doc = cliente.open_by_key("1wCM3tcfQJtIQ4gDB0gLe9gJ4_ON7Vl6U4cBGuxXTKZ0")
         
         try:
             hoja = doc.worksheet(nombre_hoja)
@@ -80,15 +77,21 @@ def guardar_en_google_sheets(df_para_guardar, nombre_hoja):
         df_clean = df_para_guardar.fillna('').astype(str)
         valores = df_clean.values.tolist()
         
-        hoja.append_rows(valores, value_input_option='USER_ENTERED')
+        try:
+            hoja.append_rows(valores, value_input_option='USER_ENTERED')
+        except Exception as error_interno:
+            if "200" in str(error_interno):
+                pass # Silenciador del falso error 200
+            else:
+                raise error_interno
+                
         return True
         
     except Exception as e:
-        # Si de milagro ocurre un error, ahora sí nos dirá la verdad
-        st.error(f"🛑 Falla en la conexión:")
+        st.error(f"🛑 Falla en la conexión: {e}")
         st.code(traceback.format_exc(), language="python")
         return False
-    
+
 # ==========================================
 # MOTOR MATEMÁTICO DE REPORTES (CON PARCHE DE MADRUGADA)
 # ==========================================
@@ -110,8 +113,6 @@ def parsear_hora_para_orden(hora_str):
             if ampm == 'AM' and h == 12: h = 0
             
             # --- PARCHE GERENCIAL DE MADRUGADA ---
-            # Si la hora es menor a las 6:00 AM, le sumamos 24 horas 
-            # para que el sistema lo ponga al final del día anterior
             if h < 6:
                 h += 24
             # ---------------------------------------
@@ -134,7 +135,6 @@ def minutos_a_hora(mins):
     h = mins // 60
     m = mins % 60
     
-    # Revertimos el parche de madrugada para que se muestre bien en el reporte
     if h >= 24:
         h -= 24
         
@@ -149,7 +149,6 @@ def minutos_a_hora(mins):
 # MOTOR DE EXPANSIÓN DE FECHAS
 # ==========================================
 def expandir_df_rol(df):
-    """Detecta rangos 'AL' en la columna Fecha y multiplica la fila para cada día de la semana."""
     if df is None or df.empty: return df
     filas_exp = []
     dias_es = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
@@ -158,7 +157,6 @@ def expandir_df_rol(df):
         fecha_str = str(r.get('Fecha', ''))
         fechas = re.findall(r'\d{2}/\d{2}/\d{4}', fecha_str)
         
-        # Si encuentra un rango con "AL" (Hasta 60 días para cubrir todo Caracas)
         if len(fechas) == 2 and "AL" in fecha_str.upper():
             try:
                 f_ini = datetime.strptime(fechas[0], "%d/%m/%Y")
@@ -467,11 +465,7 @@ def generar_texto_semanal(resumen, semana_str):
 # GENERADORES VISUALES (HTML/CANVAS/PDF)
 # ==========================================
 
-# ---------------------------------------------------------
-# FUNCION MAESTRA PARA AGRUPAR DIAS (SÁBADO, DOMINGO, LUNES A VIERNES)
-# ---------------------------------------------------------
 def agrupar_por_dias(df_rol):
-    """Toma el DF de roles expandido y lo agrupa para ahorrar hojas en el PDF y en la imagen."""
     def extraer_dt(texto):
         m = re.search(r'\d{2}/\d{2}/\d{4}', str(texto))
         if m: return datetime.strptime(m.group(), "%d/%m/%Y")
@@ -482,19 +476,16 @@ def agrupar_por_dias(df_rol):
     
     pages_data = []
     
-    # Sábado
     df_sat = df_rol[df_rol['dt'].dt.weekday == 5]
     if not df_sat.empty:
         fecha_str = f"SÁBADO {df_sat['dt'].iloc[0].strftime('%d/%m/%Y')}"
         pages_data.append((fecha_str, df_sat.drop_duplicates(subset=['Área', 'Diurno', 'Nocturno'])))
         
-    # Domingo
     df_sun = df_rol[df_rol['dt'].dt.weekday == 6]
     if not df_sun.empty:
         fecha_str = f"DOMINGO {df_sun['dt'].iloc[0].strftime('%d/%m/%Y')}"
         pages_data.append((fecha_str, df_sun.drop_duplicates(subset=['Área', 'Diurno', 'Nocturno'])))
         
-    # Lunes a Viernes
     df_lv = df_rol[df_rol['dt'].dt.weekday.isin([0, 1, 2, 3, 4])]
     if not df_lv.empty:
         min_dt = df_lv['dt'].min()
@@ -533,7 +524,6 @@ def html_reporte_semanal_pizarra(resumen, titulo):
     return f"""<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script><div style="text-align:right; margin-bottom:15px;"><button onclick="descargarSemanal()" style="background:#1a237e;color:#fff;border:none;padding:10px 20px;border-radius:5px;cursor:pointer;font-weight:bold;">⬇️ Descargar Reporte Semanal</button></div><div id="pizarra-semanal" style="font-family: Arial, sans-serif; width: 800px; margin: auto; background-color: #fff; border: 2px solid #1a237e; border-radius: 10px; overflow: hidden;"><div style="background-color: #1a237e; color: white; padding: 20px; display: flex; align-items: center; justify-content: space-between;">{area_logo}<div style="text-align: right;"><h2 style="margin: 0; font-size: 20px;">REPORTE SEMANAL DE GESTIÓN</h2><p style="margin: 5px 0 0; font-size: 14px; opacity: 0.9;">{titulo}</p></div></div><div style="padding: 20px;"><table style="width: 100%; border-collapse: collapse;"><thead><tr style="background-color: #e8eaf6; color: #1a237e; font-size: 13px;"><th style="padding: 10px; border-bottom: 2px solid #1a237e;">DÍA</th><th style="padding: 10px; border-bottom: 2px solid #1a237e;">APERTURA</th><th style="padding: 10px; border-bottom: 2px solid #1a237e;">CIERRE JUANITA</th><th style="padding: 10px; border-bottom: 2px solid #1a237e;">CIERRE DROTACA</th></tr></thead><tbody>{filas}</tbody></table><div style="margin-top: 20px; padding: 15px; background-color: #f1f8e9; border-radius: 5px; display: flex; justify-content: space-around; border: 1px solid #c5e1a5;"><div style="text-align: center; color: #2e7d32; font-weight: bold;">📊 {kpi_dro}</div><div style="text-align: center; color: #e65100; font-weight: bold;">📊 {kpi_jua}</div></div></div></div><script>function descargarSemanal() {{ html2canvas(document.getElementById('pizarra-semanal'), {{scale: 2}}).then(canvas => {{ var link = document.createElement('a'); link.download = 'Reporte_Semanal_Cierres.png'; link.href = canvas.toDataURL(); link.click(); }}); }}</script>"""
 
 def html_reporte_rol_pdf(df_rol, titulo, vacaciones="N/A"):
-    # FORZAR EXPANSIÓN
     df_rol = expandir_df_rol(df_rol)
     
     logo = obtener_logo_base64()
@@ -541,12 +531,8 @@ def html_reporte_rol_pdf(df_rol, titulo, vacaciones="N/A"):
     
     content_html = ""
     
-    # -------------------------------------------------------------
-    # RECOLECCIÓN DE PERSONAL PARA ESTADÍSTICAS
-    # -------------------------------------------------------------
     oficiales_unicos = set()
     for _, r in df_rol.iterrows():
-        # Ignorar al supervisor en el conteo de oficiales
         if 'SUPERVISOR' in str(r.get('Área', '')).upper():
             continue
             
@@ -569,9 +555,7 @@ def html_reporte_rol_pdf(df_rol, titulo, vacaciones="N/A"):
     
     total_plantilla = total_activos + total_vacaciones
     porcentaje_activo = round((total_activos / total_plantilla) * 100, 1) if total_plantilla > 0 else 0
-    # -------------------------------------------------------------
 
-    # Agrupar los días para el PDF: Sábado (1 hoja), Domingo (1 hoja), Lunes a Viernes (1 hoja)
     grupos_paginas = agrupar_por_dias(df_rol)
             
     for idx, (fecha_titulo, df_f) in enumerate(grupos_paginas):
@@ -590,7 +574,6 @@ def html_reporte_rol_pdf(df_rol, titulo, vacaciones="N/A"):
         for i, r in df_f.iterrows():
             bg = "#ffffff" if i % 2 == 0 else "#f8f9fa"
             
-            # EL LIMPIADOR ANTI-AMONTONAMIENTOS: Agrega espacios vitales
             def fix_text(t):
                 t = str(t).replace(':', ': ').replace('(', ' (')
                 return re.sub(r'\s+', 't').strip()
@@ -598,7 +581,6 @@ def html_reporte_rol_pdf(df_rol, titulo, vacaciones="N/A"):
             diurno_list = [fix_text(l) for l in str(r.get('Diurno', '')).split('\n') if l.strip()]
             nocturno_list = [fix_text(l) for l in str(r.get('Nocturno', '')).split('\n') if l.strip()]
             
-            # El uso de display:block básico soluciona los traslapes raros
             diurno_html = "".join([f"<div style='margin-bottom:6px; display:block;'>✓ {'<b>'+l+'</b>' if 'ingresa' in l.lower() else l}</div>" for l in diurno_list])
             nocturno_html = "".join([f"<div style='margin-bottom:6px; display:block;'>✓ {'<b>'+l+'</b>' if 'ingresa' in l.lower() else l}</div>" for l in nocturno_list])
             
@@ -608,7 +590,6 @@ def html_reporte_rol_pdf(df_rol, titulo, vacaciones="N/A"):
             
             filas += f"<tr style='background-color: {bg}; page-break-inside: avoid;'><td style='padding: 12px; border: 1px solid #ddd; font-weight: bold; color: #1a237e; vertical-align: top;'>{r['Área']}</td><td style='padding: 12px; border: 1px solid #ddd; font-weight: bold; color: #333; vertical-align: top; text-align: center;'>{cantidad}</td><td style='padding: 12px; border: 1px solid #ddd; color: #333; vertical-align: top;'>{diurno_html}</td><td style='padding: 12px; border: 1px solid #ddd; color: #333; vertical-align: top;'>{nocturno_html}</td></tr>"
         
-        # PÁGINAS INDIVIDUALES CLARAS:
         page_break = '<div style="page-break-before: always; clear: both;"></div>' if idx > 0 else ''
         
         content_html += f"""
@@ -644,9 +625,6 @@ def html_reporte_rol_pdf(df_rol, titulo, vacaciones="N/A"):
         </div>
         """
 
-    # -------------------------------------------------------------
-    # HOJA FINAL: ESTADÍSTICAS (CON CHECK EN LUGAR DE EMOJI POLICÍA)
-    # -------------------------------------------------------------
     nombres_html = "".join([f"<div style='width: 33%; padding: 6px 0; color: #333;'>✓ {nombre}</div>" for nombre in sorted(oficiales_unicos)])
     vac_html = "".join([f"<div style='width: 33%; padding: 6px 0; color: #b71c1c;'>✓ {nombre}</div>" for nombre in sorted(vac_list)]) if vac_list else "<div style='color: #666; font-style: italic; width: 100%;'>No hay personal registrado en vacaciones.</div>"
 
@@ -976,7 +954,6 @@ with tab2:
             if df_rol.empty:
                 st.warning("No hay datos de guardias en la base de datos.")
             else:
-                # EXPANSIÓN Y RE-CÁLCULO DINÁMICO PARA FILTROS PERFECTOS (CARACAS Y SÁBADO/DOMINGO)
                 df_rol_exp = expandir_df_rol(df_rol.copy())
                 
                 dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
