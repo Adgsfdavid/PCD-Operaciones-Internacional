@@ -25,8 +25,38 @@ def obtener_cliente_sheets():
     credenciales = Credentials.from_service_account_info(CREDENCIALES_GOOGLE, scopes=alcance)
     return gspread.authorize(credenciales)
 
+def guardar_en_google_sheets_directo(nombre_hoja, df):
+    try:
+        cliente = obtener_cliente_sheets()
+        # Conexión directa a prueba de balas usando tu ID único
+        doc = cliente.open_by_key("1wCM3tcfQJtIQ4gDB0gLe9gJ4_ON7Vl6U4cBGuxXTKZ0")
+        
+        try:
+            hoja = doc.worksheet(nombre_hoja)
+        except Exception:
+            hoja = doc.add_worksheet(title=nombre_hoja, rows=1000, cols=20)
+            hoja.append_row(list(df.columns))
+            
+        df_guardar = df.copy().astype(str)
+        if "Fecha Sistema" not in df_guardar.columns:
+            df_guardar.insert(0, "Fecha Sistema", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
+            
+        valores = df_guardar.values.tolist()
+        
+        try:
+            hoja.append_rows(valores, value_input_option='USER_ENTERED')
+        except Exception as error_interno:
+            if "200" in str(error_interno):
+                pass
+            else:
+                raise error_interno
+                
+        return True, "Datos sincronizados correctamente."
+    except Exception as e:
+        return False, f"Error: {e}"
+
 # ==========================================
-# CONFIGURACIÓN REAL DE ACCESOS (ACTUALIZADA)
+# CONFIGURACIÓN REAL DE ACCESOS
 # ==========================================
 CONFIG_PAISES = {
     "admin_vzla": {"clave": "Vzla2026*", "pais": "VENEZUELA", "sheet_name": "PCD_BaseDatos_VZLA"},
@@ -42,7 +72,7 @@ def login():
     st.image("https://pcdinternacional.com/wp-content/uploads/2022/05/logo-pcd.png", width=200)
     st.title("🔐 Acceso PCD Internacional")
     
-    # El uso de 'st.form' soluciona el problema de los "5 clicks" con el autocompletado de Google
+    # El uso de 'st.form' captura los datos de Google Autocomplete al instante con un solo click
     with st.form("login_form"):
         usuario = st.text_input("Usuario", placeholder="Ingresa tu usuario")
         clave = st.text_input("Contraseña", type="password")
@@ -66,14 +96,14 @@ else:
         st.session_state["logged_in"] = False
         st.rerun()
 
-    # Definición de páginas según el país del usuario
+    # Rutas corregidas con el prefijo 'vzla/' para evitar errores de archivo no encontrado
     if u_data['pais'] == "VENEZUELA" or u_data['pais'] == "MASTER_VZLA":
         paginas = [
             st.Page("vzla/cierre_diario.py", title="Cierre Diario Master", icon="📋"),
             st.Page("vzla/flota.py", title="Flota y Mantenimiento", icon="🚛"),
             st.Page("vzla/monitoreo.py", title="Monitoreo de Despachos", icon="🖥️"),
             st.Page("vzla/seguridad.py", title="Prevención y Control", icon="🛡️"),
-            st.Page("app.py", title="Trafico y Salidas", icon="📊")
+            st.Page("vzla/app.py", title="Trafico y Salidas", icon="📊")
         ]
     elif u_data['pais'] == "DOMINICANA":
         paginas = [
