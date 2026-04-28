@@ -25,41 +25,16 @@ def obtener_cliente_sheets():
     credenciales = Credentials.from_service_account_info(CREDENCIALES_GOOGLE, scopes=alcance)
     return gspread.authorize(credenciales)
 
-def guardar_en_google_sheets_directo(nombre_hoja, df):
-    try:
-        cliente = obtener_cliente_sheets()
-        u_data = st.session_state.get("user_data", {})
-        # Mantenemos la lógica multitenant por nombre de base de datos
-        nombre_bd = u_data.get("sheet_name", "PCD_BaseDatos_VZLA")
-        doc = cliente.open(nombre_bd)
-        hoja = doc.worksheet(nombre_hoja)
-        
-        df_guardar = df.copy().astype(str)
-        if "Fecha Sistema" not in df_guardar.columns:
-            df_guardar.insert(0, "Fecha Sistema", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
-            
-        valores = df_guardar.values.tolist()
-        
-        try:
-            hoja.append_rows(valores, value_input_option='USER_ENTERED')
-        except Exception as error_interno:
-            if "200" in str(error_interno):
-                pass
-            else:
-                raise error_interno
-                
-        return True, "Datos sincronizados correctamente."
-    except Exception as e:
-        return False, f"Error: {e}"
-
-# --- CONFIGURACIÓN DE PAÍSES Y ACCESOS ---
+# ==========================================
+# CONFIGURACIÓN REAL DE ACCESOS (ACTUALIZADA)
+# ==========================================
 CONFIG_PAISES = {
-    "admin_vzla": {"pais": "VENEZUELA", "clave": "pcd2026", "sheet_name": "PCD_BaseDatos_VZLA"},
-    "admin_rd": {"pais": "REPUBLICA DOMINICANA", "clave": "pcd_rd_2026", "sheet_name": "PCD_BaseDatos_RD"},
-    "master_vzla": {"pais": "MASTER_VZLA", "clave": "pcd_master_2026", "sheet_name": "PCD_BaseDatos_VZLA"}
+    "admin_vzla": {"clave": "Vzla2026*", "pais": "VENEZUELA", "sheet_name": "PCD_BaseDatos_VZLA"},
+    "admin_rd": {"clave": "Dom2026*", "pais": "DOMINICANA", "sheet_name": "PCD_BaseDatos_DOM"},
+    "david_master": {"clave": "Master123", "pais": "MASTER_VZLA", "sheet_name": "PCD_BaseDatos_VZLA"}
 }
 
-# --- LÓGICA DE LOGIN (CORREGIDA CON FORMULARIO) ---
+# --- LÓGICA DE LOGIN ---
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
 
@@ -67,9 +42,9 @@ def login():
     st.image("https://pcdinternacional.com/wp-content/uploads/2022/05/logo-pcd.png", width=200)
     st.title("🔐 Acceso PCD Internacional")
     
-    # USAMOS UN FORMULARIO PARA CAPTURAR EL AUTOCOMPLETADO AL INSTANTE
+    # El uso de 'st.form' soluciona el problema de los "5 clicks" con el autocompletado de Google
     with st.form("login_form"):
-        usuario = st.text_input("Usuario", placeholder="Ej: admin_vzla")
+        usuario = st.text_input("Usuario", placeholder="Ingresa tu usuario")
         clave = st.text_input("Contraseña", type="password")
         submit_button = st.form_submit_button("🚀 Ingresar", use_container_width=True)
         
@@ -91,7 +66,7 @@ else:
         st.session_state["logged_in"] = False
         st.rerun()
 
-    # IMPORTANTE: Rutas en minúsculas como detecta tu servidor
+    # Definición de páginas según el país del usuario
     if u_data['pais'] == "VENEZUELA" or u_data['pais'] == "MASTER_VZLA":
         paginas = [
             st.Page("vzla/cierre_diario.py", title="Cierre Diario Master", icon="📋"),
@@ -100,7 +75,7 @@ else:
             st.Page("vzla/seguridad.py", title="Prevención y Control", icon="🛡️"),
             st.Page("app.py", title="Trafico y Salidas", icon="📊")
         ]
-    elif u_data['pais'] == "REPUBLICA DOMINICANA":
+    elif u_data['pais'] == "DOMINICANA":
         paginas = [
             st.Page("rd/logistica_rd.py", title="Operaciones RD", icon="🇩🇴")
         ]
