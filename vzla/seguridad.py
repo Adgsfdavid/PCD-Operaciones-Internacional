@@ -42,8 +42,11 @@ llave_perfecta = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(textwrap.wrap(llave
 
 CREDENCIALES_GOOGLE["private_key"] = llave_perfecta
 
+from google.oauth2.service_account import Credentials
+import traceback
+
 def obtener_cliente_sheets():
-    # USAMOS EL ESTÁNDAR MODERNO (Reemplaza al viejo oauth2client)
+    # ¡AQUÍ ESTÁ LA MAGIA! Librería moderna que NO lanza el falso error 200
     alcance = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
     credenciales = Credentials.from_service_account_info(CREDENCIALES_GOOGLE, scopes=alcance)
     return gspread.authorize(credenciales)
@@ -51,17 +54,13 @@ def obtener_cliente_sheets():
 def extraer_datos_sheets(nombre_hoja):
     try:
         cliente = obtener_cliente_sheets()
-        
-        # --- MEJORA LOGIN MULTITENANT ---
         user_data = st.session_state.get("user_data", {})
         nombre_bd = user_data.get("sheet_name", "PCD_BaseDatos")
         doc = cliente.open(nombre_bd)
-        # --------------------------------
-        
         hoja = doc.worksheet(nombre_hoja)
         data = hoja.get_all_records()
         return pd.DataFrame(data)
-    except Exception as e:
+    except Exception:
         return pd.DataFrame()
 
 def guardar_en_google_sheets(df_para_guardar, nombre_hoja):
@@ -81,18 +80,13 @@ def guardar_en_google_sheets(df_para_guardar, nombre_hoja):
         df_clean = df_para_guardar.fillna('').astype(str)
         valores = df_clean.values.tolist()
         
-        try:
-            hoja.append_rows(valores, value_input_option='USER_ENTERED')
-        except Exception as error_interno:
-            if "200" in str(error_interno):
-                pass
-            else:
-                raise error_interno
-                
+        hoja.append_rows(valores, value_input_option='USER_ENTERED')
         return True
         
     except Exception as e:
-        st.error(f"🛑 CÓDIGO NUEVO CARGADO - Error real: {e}")
+        # Si de milagro ocurre un error, ahora sí nos dirá la verdad
+        st.error(f"🛑 Falla en la conexión:")
+        st.code(traceback.format_exc(), language="python")
         return False
     
 # ==========================================
