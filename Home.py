@@ -69,7 +69,12 @@ if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
 
 def login():
-    st.image("https://pcdinternacional.com/wp-content/uploads/2022/05/logo-pcd.png", width=200)
+    # --- CORRECCIÓN DEL LOGO: Vuelve a usar el archivo local ---
+    try:
+        st.image("logo.png", width=200)
+    except Exception:
+        pass
+        
     st.title("🔐 Acceso PCD Internacional")
     
     # El uso de 'st.form' captura los datos de Google Autocomplete al instante con un solo click
@@ -96,7 +101,7 @@ else:
         st.session_state["logged_in"] = False
         st.rerun()
 
-    # Rutas corregidas con el prefijo 'vzla/' para evitar errores de archivo no encontrado
+    # Rutas correctas de los módulos
     if u_data['pais'] == "VENEZUELA" or u_data['pais'] == "MASTER_VZLA":
         paginas = [
             st.Page("vzla/cierre_diario.py", title="Cierre Diario Master", icon="📋"),
