@@ -9,7 +9,6 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import streamlit.components.v1 as components
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 
 # CONFIGURACIÓN INICIAL
 
@@ -31,6 +30,7 @@ def obtener_logo_base64():
 # CREDENCIALES Y CONEXIÓN DINÁMICA A GOOGLE SHEETS
 # ==========================================
 import textwrap
+from google.oauth2.service_account import Credentials
 
 # 1. Cargamos el diccionario de la "Caja Fuerte"
 CREDENCIALES_GOOGLE = dict(st.secrets["gcp_service_account"])
@@ -43,8 +43,9 @@ llave_perfecta = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(textwrap.wrap(llave
 CREDENCIALES_GOOGLE["private_key"] = llave_perfecta
 
 def obtener_cliente_sheets():
-    alcance = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    credenciales = ServiceAccountCredentials.from_json_keyfile_dict(CREDENCIALES_GOOGLE, alcance)
+    # USAMOS EL ESTÁNDAR MODERNO (Reemplaza al viejo oauth2client)
+    alcance = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+    credenciales = Credentials.from_service_account_info(CREDENCIALES_GOOGLE, scopes=alcance)
     return gspread.authorize(credenciales)
 
 def extraer_datos_sheets(nombre_hoja):
@@ -60,7 +61,7 @@ def extraer_datos_sheets(nombre_hoja):
         hoja = doc.worksheet(nombre_hoja)
         data = hoja.get_all_records()
         return pd.DataFrame(data)
-    except Exception:
+    except Exception as e:
         return pd.DataFrame()
 
 def guardar_en_google_sheets(df_para_guardar, nombre_hoja):
@@ -75,18 +76,20 @@ def guardar_en_google_sheets(df_para_guardar, nombre_hoja):
         
         try:
             hoja = doc.worksheet(nombre_hoja)
-        except:
-            hoja = doc.add_worksheet(title=nombre_hoja, rows="1000", cols="20")
+        except Exception:
+            # CORRECCIÓN VITAL 1: rows y cols DEBEN ser números enteros, NO strings ("")
+            hoja = doc.add_worksheet(title=nombre_hoja, rows=1000, cols=20)
             hoja.append_row(list(df_para_guardar.columns))
             
-        df_clean = df_para_guardar.fillna('')
+        # CORRECCIÓN VITAL 2: astype(str) fuerza la limpieza de datos incompatibles con Sheets
+        df_clean = df_para_guardar.fillna('').astype(str)
         valores = df_clean.values.tolist()
+        
         hoja.append_rows(valores, value_input_option='USER_ENTERED')
         return True
     except Exception as e:
         st.error(f"Error de conexión a Sheets: {e}")
         return False
-
 # ==========================================
 # MOTOR MATEMÁTICO DE REPORTES (CON PARCHE DE MADRUGADA)
 # ==========================================
