@@ -5,7 +5,7 @@ import textwrap
 import traceback
 from datetime import datetime
 import os
-import extra_streamlit_components as stx # <--- LA NUEVA HERRAMIENTA DE COOKIES
+import extra_streamlit_components as stx 
 
 # Configuración de página principal
 st.set_page_config(page_title="PCD Internacional - Login", layout="centered")
@@ -108,7 +108,7 @@ def login():
         
         if submit_button:
             if usuario in CONFIG_PAISES and CONFIG_PAISES[usuario]["clave"] == clave:
-                # Guardamos la cookie por 30 días (30 días * 24 horas * 60 min * 60 seg)
+                # Guardamos la cookie por 30 días
                 cookie_manager.set("pcd_usuario_valido", usuario, max_age=2592000)
                 st.session_state["logged_in"] = True
                 st.session_state["user_data"] = CONFIG_PAISES[usuario]
@@ -124,7 +124,12 @@ else:
     st.sidebar.title(f"📍 {u_data['pais']}")
     
     if st.sidebar.button("🚪 Cerrar Sesión"):
-        cookie_manager.delete("pcd_usuario_valido") # Borramos la cookie para que pida clave la próxima vez
+        # SOLUCIÓN AL ERROR DE KEYERROR
+        try:
+            cookie_manager.delete("pcd_usuario_valido")
+        except Exception:
+            pass # Si la cookie no existe o no la encuentra, lo ignoramos sin dar error rojo
+        
         st.session_state["logged_in"] = False
         st.rerun()
 
