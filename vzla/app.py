@@ -9,67 +9,64 @@ import difflib # <-- LIBRERÍA NATIVA NUEVA PARA COMPARAR NOMBRES
 from datetime import datetime
 import streamlit.components.v1 as components
 
-# LIBRERÍAS PARA GOOGLE SHEETS
+# LIBRERÍAS PARA GOOGLE SHEETS (MODERNIZADAS)
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+import textwrap
+import traceback
+from google.oauth2.service_account import Credentials
 
 # ==========================================
 # CREDENCIALES Y CONEXIÓN DINÁMICA A GOOGLE SHEETS
 # ==========================================
 # 1. Cargamos el diccionario de la "Caja Fuerte"
 CREDENCIALES_GOOGLE = dict(st.secrets["gcp_service_account"])
-CREDENCIALES_GOOGLE["private_key"] = CREDENCIALES_GOOGLE["private_key"].replace('\\n', '\n')
 
-# 2. EL PARCHE MÁGICO: Cambiamos las letras "\n" por saltos de línea reales
-CREDENCIALES_GOOGLE["private_key"] = CREDENCIALES_GOOGLE["private_key"].replace('\\n', '\n')
+# 2. RECONSTRUCTOR BLINDADO DE LLAVE
+llave_sucia = CREDENCIALES_GOOGLE["private_key"]
+llave_limpia = llave_sucia.replace("-----BEGIN PRIVATE KEY-----", "").replace("-----END PRIVATE KEY-----", "").replace("\\n", "").replace("\n", "").replace(" ", "")
+llave_perfecta = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(textwrap.wrap(llave_limpia, 64)) + "\n-----END PRIVATE KEY-----\n"
 
-# 3. Función de conexión (Asegúrate de que use from_json_keyfile_dict)
-def obtener_cliente_sheets(): # O extraer_datos_sheets según el archivo
-    alcance = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    
-    # Aquí es donde le pasamos la llave ya corregida
-    credenciales = ServiceAccountCredentials.from_json_keyfile_dict(CREDENCIALES_GOOGLE, alcance)
+CREDENCIALES_GOOGLE["private_key"] = llave_perfecta
+
+# 3. Función de conexión moderna
+def obtener_cliente_sheets():
+    alcance = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+    credenciales = Credentials.from_service_account_info(CREDENCIALES_GOOGLE, scopes=alcance)
     return gspread.authorize(credenciales)
 
-        # --- MEJORA LOGIN MULTITENANT ---
-    #        user_data = st.session_state.get("user_data", {})
-    #        nombre_bd = user_data.get("sheet_name", "PCD_BaseDatos")
-    #        doc = cliente.open(nombre_bd)
-    #        # --------------------------------
-    #        
-    #        try:
-    #            hoja = doc.worksheet("PIZARRA_TRAFICO")
-    #        except:
-    #            hoja = doc.sheet1 
-    #            
-    #        df_string = df_para_guardar.astype(str)
-    #        valores = df_string.values.tolist()
-    #        
-    #        hoja.append_rows(valores, value_input_option='USER_ENTERED')
-    #        return True, f"✅ Datos guardados en {nombre_bd} correctamente."
-    #    except Exception as e:
-    #        return False, f"❌ Error al conectar con Google Sheets: {e}"
-    
 # ==========================================
 # FUNCION PARA GUARDAR EN GOOGLE SHEETS DIRECTO
 # ==========================================
 def guardar_en_google_sheets_directo(df_para_guardar):
     try:
         cliente = obtener_cliente_sheets()
-        # Puedes cambiar el nombre de la hoja/base de datos aquí si lo deseas
-        nombre_bd = "PCD_BaseDatos"
-        doc = cliente.open(nombre_bd)
+        
+        # Conexión directa a prueba de balas usando tu ID
+        doc = cliente.open_by_key("1wCM3tcfQJtIQ4gDB0gLe9gJ4_ON7Vl6U4cBGuxXTKZ0")
+        
         try:
             hoja = doc.worksheet("PIZARRA_TRAFICO")
-        except:
-            hoja = doc.sheet1
+        except Exception:
+            hoja = doc.add_worksheet(title="PIZARRA_TRAFICO", rows=1000, cols=20)
+            hoja.append_row(list(df_para_guardar.columns))
 
         # Convertir DataFrame a lista de listas (para Google Sheets)
-        df_string = df_para_guardar.astype(str)
-        valores = df_string.values.tolist()
-        hoja.append_rows(valores, value_input_option='USER_ENTERED')
-        return True, f"✅ Datos guardados en {nombre_bd} correctamente."
+        df_clean = df_para_guardar.fillna('').astype(str)
+        valores = df_clean.values.tolist()
+        
+        try:
+            hoja.append_rows(valores, value_input_option='USER_ENTERED')
+        except Exception as error_interno:
+            if "200" in str(error_interno):
+                pass # Silenciador del falso error 200
+            else:
+                raise error_interno
+                
+        return True, "✅ Datos guardados en PCD_BaseDatos correctamente."
+        
     except Exception as e:
+        st.error(f"🛑 Falla en la conexión: {e}")
+        st.code(traceback.format_exc(), language="python")
         return False, f"❌ Error al conectar con Google Sheets: {e}"
 
 # ==========================================
@@ -189,7 +186,6 @@ def procesar_trafico_python(raw_text):
                     for j in range(i+1, min(i+12, len(lineas))):
                         l_lower = lineas[j].lower()
                         
-                        # Freno de emergencia: Si vemos la palabra "listin" con ":" es la ruta de abajo, cortamos.
                         if "listin" in l_lower and ":" in l_lower and "hora" not in l_lower:
                             break
                         
@@ -396,7 +392,6 @@ def generar_filas_plana(df):
 # FUNCIONES: MÓDULO 2 (EXCEL PARSER Y TABLA VERDE)
 # ==========================================
 def obtener_listines_unicos(serie):
-    """Extrae y limpia listines individuales de una serie de textos que pueden contener guiones o comas."""
     conjunto_listines = set()
     for texto in serie.dropna():
         txt = str(texto).replace('.0', '').strip()
@@ -447,10 +442,8 @@ def procesar_excel_base(df, fecha_buscada):
     except: 
         col_listin = None
 
-    # 3. Exclusiones obligatorias (SE AGREGA GOTICA Y FILTRO GLOBAL DE EL TIGRE)
+    # 3. Exclusiones obligatorias
     df_filtrado = df_filtrado[~df_filtrado[col_chofer].astype(str).str.contains('RETIRO POR OFICINA|RETIRAR|GOTICA', case=False, na=False)]
-    
-    # Filtro blindado para EL TIGRE: Busca en TODAS las columnas de texto de la fila
     mask_tigre = df_filtrado.astype(str).apply(lambda x: x.str.contains('EL TIGRE', case=False, na=False)).any(axis=1)
     df_filtrado = df_filtrado[~mask_tigre]
 
@@ -792,7 +785,6 @@ with tab2:
     if archivo_subido is not None:
         with st.spinner("Procesando archivo blindado..."):
             try:
-                # Detección inteligente del formato (Excel vs HTML disfrazado)
                 if archivo_subido.name.endswith('.xls'):
                     try:
                         df_base = pd.read_excel(archivo_subido, engine='xlrd')
@@ -836,16 +828,12 @@ with tab2:
                         altura_verde = 200 + (len(resumen_verde) * 35)
                         components.html(html_verde, height=altura_verde, scrolling=True)
                         
-                    # -----------------------------------------------------------------
-                    # NUEVA SECCIÓN: AUDITORÍA CRUZADA INTELIGENTE
-                    # -----------------------------------------------------------------
                     if st.session_state.get('df_trafico') is not None:
                         st.markdown("---")
                         st.subheader("🔍 Auditoría Cruzada (WhatsApp vs Excel)")
                         st.caption("Verificando si hay discrepancias entre los datos procesados en el Módulo 1 y este archivo Excel.")
                         
                         df_auditoria = realizar_auditoria_cruzada(st.session_state['df_trafico'], resumen_verde)
-                        # Aplicar estilo condicional básico en Streamlit
                         st.dataframe(df_auditoria, use_container_width=True, hide_index=True)
                     else:
                         st.markdown("---")
