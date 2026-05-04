@@ -11,3 +11,4 @@ xlrd
 lxml
 html5lib
 extra-streamlit-components
+pdfplumber
