@@ -44,9 +44,10 @@ def extraer_datos(nombre_hoja):
     except: return pd.DataFrame()
 
 # ==========================================
-# FUNCIONES DE ANÁLISIS INTELIGENTE
+# FUNCIONES DE ANÁLISIS INTELIGENTE Y SEGURO
 # ==========================================
 def buscar_columna(df, palabras_clave):
+    if df.empty: return None
     for col in df.columns:
         if any(p.lower() in str(col).lower() for p in palabras_clave):
             return col
@@ -55,10 +56,15 @@ def buscar_columna(df, palabras_clave):
 def calcular_promedio_hora(df, palabras_clave):
     col = buscar_columna(df, palabras_clave)
     if col and not df.empty:
-        # Intentamos sacar la moda (hora más frecuente) para reflejar la realidad operativa
         moda = df[col].astype(str).mode()
         return moda[0] if not moda.empty else "N/A"
     return "N/A"
+
+def suma_segura(df, palabras_clave):
+    col = buscar_columna(df, palabras_clave)
+    if col and not df.empty:
+        return pd.to_numeric(df[col], errors='coerce').fillna(0).sum()
+    return 0
 
 # ==========================================
 # INTERFAZ Y PROCESAMIENTO
@@ -116,10 +122,10 @@ if st.button("⚡ GENERAR AUDITORÍA SEMANAL", type="primary", use_container_wid
         unidades_pendientes = list(unidades_plan - unidades_real)
         cumplimiento_mantenimiento = (len(unidades_real) / len(unidades_plan) * 100) if unidades_plan else 100
 
-        # Logística
-        bultos_sem = pd.to_numeric(f['Despachos'][buscar_columna(f['Despachos'], ['bultos'])], errors='coerce').sum() if f['Despachos'].columns.any() else 0
-        kms_sem = pd.to_numeric(f['Surtido'][buscar_columna(f['Surtido'], ['kms'])], errors='coerce').sum() if f['Surtido'].columns.any() else 0
-        litros_sem = pd.to_numeric(f['Surtido'][buscar_columna(f['Surtido'], ['litros'])], errors='coerce').sum() if f['Surtido'].columns.any() else 0
+        # Logística (Con extracción segura a prueba de errores)
+        bultos_sem = suma_segura(f['Despachos'], ['bultos'])
+        kms_sem = suma_segura(f['Surtido'], ['kms', 'kilometraje', 'recorrido'])
+        litros_sem = suma_segura(f['Surtido'], ['litros', 'gasoil', 'cantidad'])
 
         # ==========================================
         # CONSTRUCCIÓN DEL REPORTE MULTI-PÁGINA (PDF)
@@ -214,7 +220,7 @@ if st.button("⚡ GENERAR AUDITORÍA SEMANAL", type="primary", use_container_wid
 
                 <div class="section-box">
                     <div class="section-title">⛽ RESERVAS Y CONTROL DE COMBUSTIBLE</div>
-                    <p style="font-size: 13px;">Reserva promedio detectada en El Tigre: <b>{pd.to_numeric(f['Reserva']['Nivel'], errors='coerce').mean() if not f['Reserva'].empty else 0:.1f}%</b></p>
+                    <p style="font-size: 13px;">Reserva promedio detectada en El Tigre: <b>{pd.to_numeric(f['Reserva'][buscar_columna(f['Reserva'], ['nivel'])], errors='coerce').mean() if buscar_columna(f['Reserva'], ['nivel']) else 0:.1f}%</b></p>
                 </div>
 
                 <div class="footer">Gerencia de Operaciones y Logística - Reporte Generado Semanalmente</div>
