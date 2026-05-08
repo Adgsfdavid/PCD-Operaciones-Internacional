@@ -1,11 +1,11 @@
 # ==========================================
-# Archivo: cierre_semanal.py (Auditoría Logística - Consolidado por Ruta)
+# Archivo: cierre_semanal.py (Auditoría Logística - Con Rango de Fechas)
 # ==========================================
 import streamlit as st
 import pandas as pd
 import base64
 import textwrap
-from datetime import datetime
+from datetime import datetime, timedelta
 import streamlit.components.v1 as components
 from google.oauth2.service_account import Credentials
 import gspread
@@ -43,7 +43,7 @@ def extraer_datos(nombre_hoja):
     except: return pd.DataFrame()
 
 # ==========================================
-# FUNCIONES DE FORMATEO
+# FUNCIONES DE FORMATEO Y CÁLCULO
 # ==========================================
 def limpiar_hora(hora_str):
     if not hora_str: return ""
@@ -65,6 +65,13 @@ def buscar_columna(df, palabras_clave):
             return col
     return None
 
+def calcular_rango_semana(ano, semana):
+    """Calcula el lunes y domingo de una semana ISO"""
+    # ISO week 1 is the week with the first Thursday of the year
+    lunes = datetime.strptime(f'{int(ano)}-W{int(semana)}-1', "%G-W%V-%u")
+    domingo = lunes + timedelta(days=6)
+    return f"{lunes.strftime('%d/%m/%Y')} al {domingo.strftime('%d/%m/%Y')}"
+
 # ==========================================
 # INTERFAZ
 # ==========================================
@@ -79,12 +86,15 @@ with c2:
     num_sem = st.number_input("Número de Semana:", 1, 53, value=semana_actual)
 
 if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container_width=True):
-    with st.spinner("Consolidando datos por Ruta..."):
+    with st.spinner("Calculando periodos y consolidando rutas..."):
         
         df_raw = extraer_datos("PIZARRA_TRAFICO")
         if df_raw.empty:
             st.error("Error al conectar con la base de datos.")
             st.stop()
+
+        # Calculamos rango de fechas para el reporte
+        rango_fechas = calcular_rango_semana(ano_sel, num_sem)
 
         df_raw['Num_Semana'] = df_raw['Semana'].astype(str).str.extract(r'(\d+)').astype(float)
         df_sem = df_raw[df_raw['Num_Semana'] == num_sem].copy()
@@ -103,21 +113,16 @@ if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container
 
         df_t = df_sem.drop_duplicates(subset=[c_fecha]).copy()
         
-        # --- CONSOLIDADO DE RUTAS (MEJORADO) ---
-        c_ruta = buscar_columna(df_sem, ['ruta'])
-        c_zona = buscar_columna(df_sem, ['zona'])
-        c_unidad = buscar_columna(df_sem, ['unidad'])
-        c_farma = buscar_columna(df_sem, ['farmacias'])
-        c_bultos = buscar_columna(df_sem, ['bultos'])
-        
+        # --- CONSOLIDADO DE RUTAS ---
+        c_ruta, c_zona, c_unidad, c_farma, c_bultos = buscar_columna(df_sem, ['ruta']), buscar_columna(df_sem, ['zona']), buscar_columna(df_sem, ['unidad']), buscar_columna(df_sem, ['farmacias']), buscar_columna(df_sem, ['bultos'])
         df_sem[c_farma] = pd.to_numeric(df_sem[c_farma], errors='coerce').fillna(0)
         df_sem[c_bultos] = pd.to_numeric(df_sem[c_bultos], errors='coerce').fillna(0)
 
-        # AGRUPAMOS SOLO POR RUTA Y ZONA PARA EVITAR DUPLICADOS POR PLACA
+        # Agrupamos por Ruta para que aparezcan una sola vez con la última placa
         df_rutas = df_sem.groupby([c_ruta, c_zona], as_index=False).agg({
-            c_unidad: 'last',       # Mantenemos la última placa reportada
-            c_farma: 'sum',         # Sumamos todas las farmacias de la semana
-            c_bultos: 'sum'         # Sumamos todos los bultos de la semana
+            c_unidad: 'last',
+            c_farma: 'sum',
+            c_bultos: 'sum'
         }).sort_values(by=[c_zona, c_ruta])
         
         total_f, total_b = df_rutas[c_farma].sum(), df_rutas[c_bultos].sum()
@@ -146,7 +151,8 @@ if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container
             
             .header-master {{ background: {color_azul}; color: white; padding: 25px 40px; display: flex; justify-content: space-between; align-items: center; border-bottom: 6px solid {color_dorado}; }}
             .header-info {{ text-align: right; }}
-            .header-info h2 {{ margin: 0; font-weight: 900; font-size: 20px; }}
+            .header-info h2 {{ margin: 0; font-weight: 900; font-size: 20px; text-transform: uppercase; }}
+            .header-info p {{ margin: 0; font-size: 14px; font-weight: bold; color: {color_dorado}; }}
             
             .content-padding {{ padding: 12mm; }}
             .section-title {{ border-left: 6px solid {color_dorado}; background: #eee; color: #000; padding: 8px 15px; font-weight: 900; font-size: 13px; margin-top: 20px; border: 1px solid #000; }}
@@ -167,7 +173,7 @@ if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container
                     <img src="{logo}" style="height: 55px;">
                     <div class="header-info">
                         <h2>AUDITORÍA SEMANAL DE TRÁFICO</h2>
-                        <p>Semana {num_sem} | Año {ano_sel}</p>
+                        <p>Semana {int(num_sem)} ({rango_fechas})</p>
                     </div>
                 </div>
                 
