@@ -1,5 +1,5 @@
 # ==========================================
-# Archivo: cierre_semanal.py (Auditoría Logística - Diseño Final con Bordes)
+# Archivo: cierre_semanal.py (Auditoría Logística - Consolidado por Ruta)
 # ==========================================
 import streamlit as st
 import pandas as pd
@@ -79,7 +79,7 @@ with c2:
     num_sem = st.number_input("Número de Semana:", 1, 53, value=semana_actual)
 
 if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container_width=True):
-    with st.spinner("Sincronizando datos de Tráfico..."):
+    with st.spinner("Consolidando datos por Ruta..."):
         
         df_raw = extraer_datos("PIZARRA_TRAFICO")
         if df_raw.empty:
@@ -103,12 +103,23 @@ if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container
 
         df_t = df_sem.drop_duplicates(subset=[c_fecha]).copy()
         
-        # --- CONSOLIDADO DE RUTAS ---
-        c_ruta, c_zona, c_unidad, c_farma, c_bultos = buscar_columna(df_sem, ['ruta']), buscar_columna(df_sem, ['zona']), buscar_columna(df_sem, ['unidad']), buscar_columna(df_sem, ['farmacias']), buscar_columna(df_sem, ['bultos'])
+        # --- CONSOLIDADO DE RUTAS (MEJORADO) ---
+        c_ruta = buscar_columna(df_sem, ['ruta'])
+        c_zona = buscar_columna(df_sem, ['zona'])
+        c_unidad = buscar_columna(df_sem, ['unidad'])
+        c_farma = buscar_columna(df_sem, ['farmacias'])
+        c_bultos = buscar_columna(df_sem, ['bultos'])
+        
         df_sem[c_farma] = pd.to_numeric(df_sem[c_farma], errors='coerce').fillna(0)
         df_sem[c_bultos] = pd.to_numeric(df_sem[c_bultos], errors='coerce').fillna(0)
 
-        df_rutas = df_sem.groupby([c_ruta, c_zona, c_unidad], as_index=False).agg({c_farma: 'sum', c_bultos: 'sum'}).sort_values(by=[c_zona, c_ruta])
+        # AGRUPAMOS SOLO POR RUTA Y ZONA PARA EVITAR DUPLICADOS POR PLACA
+        df_rutas = df_sem.groupby([c_ruta, c_zona], as_index=False).agg({
+            c_unidad: 'last',       # Mantenemos la última placa reportada
+            c_farma: 'sum',         # Sumamos todas las farmacias de la semana
+            c_bultos: 'sum'         # Sumamos todos los bultos de la semana
+        }).sort_values(by=[c_zona, c_ruta])
+        
         total_f, total_b = df_rutas[c_farma].sum(), df_rutas[c_bultos].sum()
 
         # --- DISTRIBUCIÓN POR ZONAS ---
@@ -117,7 +128,7 @@ if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container
         df_zonas['%_Bul'] = (df_zonas[c_bultos] / total_b * 100).round(1).fillna(0)
 
         # ==========================================
-        # CONSTRUCCIÓN DEL PDF CON BORDES NEGROS
+        # CONSTRUCCIÓN DEL PDF
         # ==========================================
         logo = obtener_logo_base64()
         color_azul = "#0d47a1"
@@ -138,7 +149,7 @@ if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container
             .header-info h2 {{ margin: 0; font-weight: 900; font-size: 20px; }}
             
             .content-padding {{ padding: 12mm; }}
-            .section-title {{ border-left: 6px solid {color_dorado}; background: #eee; color: #000; padding: 8px 15px; font-weight: 900; font-size: 13px; margin-top: 20px; border-bottom: 1px solid #000; border-top: 1px solid #000; border-right: 1px solid #000; }}
+            .section-title {{ border-left: 6px solid {color_dorado}; background: #eee; color: #000; padding: 8px 15px; font-weight: 900; font-size: 13px; margin-top: 20px; border: 1px solid #000; }}
             
             table {{ width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 10px; border: 1px solid #000; }}
             th {{ background: {color_azul}; color: white; border: 1px solid #000; padding: 8px; text-transform: uppercase; }}
@@ -166,7 +177,7 @@ if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container
                     <tbody>{filas_t}</tbody></table>
 
                     <div class="section-title">🚛 2. CONSOLIDADO DE RUTAS (GESTIÓN SEMANAL)</div>
-                    <table><thead><tr><th style='text-align:left;'>RUTA</th><th>ZONA</th><th>UNIDAD</th><th>FARMACIAS</th><th>BULTOS</th></tr></thead>
+                    <table><thead><tr><th style='text-align:left;'>RUTA</th><th>ZONA</th><th>UNIDAD (ÚLT.)</th><th>FARMACIAS TOT.</th><th>BULTOS TOT.</th></tr></thead>
                     <tbody>{filas_r}</tbody></table>
                     <div class="total-bar"><span>TOTAL FARMACIAS: {int(total_f)}</span><span>TOTAL BULTOS: {int(total_b)}</span></div>
                     
