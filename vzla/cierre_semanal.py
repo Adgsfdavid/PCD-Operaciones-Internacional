@@ -85,25 +85,45 @@ if st.button("⚡ GENERAR DETALLADO SEMANAL", type="primary", use_container_widt
         f = {k: filtrar_sem(v) for k, v in data.items()}
 
         # ==========================================
-        # 2. PROCESAMIENTO POR ÁREA (DETALLADO)
+        # 2. PROCESAMIENTO POR ÁREA (BLINDADO)
         # ==========================================
         
+        # --- FUNCIONES INTELIGENTES DE EXTRACCIÓN ---
+        def obtener_hora_frecuente(df):
+            if df.empty: return "N/A"
+            for col in df.columns:
+                if "hora" in str(col).lower():
+                    modas = df[col].mode()
+                    return str(modas[0]) if not modas.empty else "N/A"
+            return "N/A"
+
+        def suma_segura(df, palabra_clave):
+            if df.empty: return 0
+            for col in df.columns:
+                if palabra_clave.lower() in str(col).lower():
+                    return pd.to_numeric(df[col], errors='coerce').fillna(0).sum()
+            return 0
+
         # SECCIÓN SEGURIDAD: Aperturas y Cierres
-        avg_apertura = f['Apertura']['Hora'].mode()[0] if not f['Apertura'].empty else "N/A"
-        avg_cierre_dro = f['Cierre_Dro']['Hora'].mode()[0] if not f['Cierre_Dro'].empty else "N/A"
-        avg_juanita = f['Juanita']['Hora'].mode()[0] if not f['Juanita'].empty else "N/A"
+        avg_apertura = obtener_hora_frecuente(f['Apertura'])
+        avg_cierre_dro = obtener_hora_frecuente(f['Cierre_Dro'])
+        avg_juanita = obtener_hora_frecuente(f['Juanita'])
 
         # SECCIÓN FLOTA: Cruce de Mantenimiento
-        m_plan_list = set(f['M_Plan']['Unidad']) if 'Unidad' in f['M_Plan'].columns else set()
-        m_real_list = set(f['M_Real']['Unidad']) if 'Unidad' in f['M_Real'].columns else set()
+        col_unidad_plan = next((c for c in f['M_Plan'].columns if "unidad" in str(c).lower()), None) if not f['M_Plan'].empty else None
+        col_unidad_real = next((c for c in f['M_Real'].columns if "unidad" in str(c).lower()), None) if not f['M_Real'].empty else None
+        
+        m_plan_list = set(f['M_Plan'][col_unidad_plan].dropna()) if col_unidad_plan else set()
+        m_real_list = set(f['M_Real'][col_unidad_real].dropna()) if col_unidad_real else set()
+        
         unidades_pendientes = list(m_plan_list - m_real_list)
         efectividad = (len(m_real_list) / len(m_plan_list) * 100) if m_plan_list else 100
 
-        # SECCIÓN OPERACIONES: Bultos y KMs
-        t_bultos = pd.to_numeric(f['Despachos']['Bultos'], errors='coerce').sum()
-        t_farmacias = pd.to_numeric(f['Despachos']['Farmacias'], errors='coerce').sum()
-        t_kms = pd.to_numeric(f['Surtido']['Kms'], errors='coerce').sum()
-        t_litros = pd.to_numeric(f['Surtido']['Litros'], errors='coerce').sum()
+        # SECCIÓN OPERACIONES: Bultos, Farmacias, KMs y Gasoil
+        t_bultos = suma_segura(f['Despachos'], 'bultos')
+        t_farmacias = suma_segura(f['Despachos'], 'farmacias')
+        t_kms = suma_segura(f['Surtido'], 'kms')
+        t_litros = suma_segura(f['Surtido'], 'litros')
 
         # ==========================================
         # 3. GENERACIÓN VISUAL DEL REPORTE
@@ -115,7 +135,7 @@ if st.button("⚡ GENERAR DETALLADO SEMANAL", type="primary", use_container_widt
         k3.metric("🛣️ Kilometraje", f"{t_kms:,.0f} Km")
         k4.metric("🛠️ Efec. Mantenimiento", f"{efectividad:.1f}%")
 
-        # ACORDEONES CON DETALLES (Lo que pediste)
+        # ACORDEONES CON DETALLES
         with st.expander("🔍 Detalle de Seguridad (Aperturas y Cierres)"):
             st.write(f"**Hora más frecuente de Apertura:** {avg_apertura}")
             st.write(f"**Hora más frecuente Cierre Drotaca:** {avg_cierre_dro}")
