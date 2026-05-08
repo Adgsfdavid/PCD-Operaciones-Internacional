@@ -11,7 +11,7 @@ from google.oauth2.service_account import Credentials
 import gspread
 
 # ==========================================
-# CONFIGURACIÓN DE CONEXIÓN
+# CONFIGURACIÓN DE CONEXIÓN Y LOGO
 # ==========================================
 def obtener_logo_base64():
     try:
@@ -43,10 +43,20 @@ def extraer_datos(nombre_hoja):
     except: return pd.DataFrame()
 
 # ==========================================
+# FUNCIONES INTELIGENTES
+# ==========================================
+def buscar_columna(df, palabras_clave):
+    if df.empty: return None
+    for col in df.columns:
+        if any(p.lower() in str(col).lower() for p in palabras_clave):
+            return col
+    return None
+
+# ==========================================
 # INTERFAZ
 # ==========================================
 st.title("📊 Master Reporte Semanal: Desempeño de Tráfico")
-st.markdown("Análisis detallado de tiempos de despacho, rutas y distribución por zonas.")
+st.markdown("Análisis consolidado de tiempos de despacho, rutas y distribución por zonas.")
 
 c1, c2 = st.columns(2)
 with c1:
@@ -56,7 +66,7 @@ with c2:
     num_sem = st.number_input("Número de Semana:", 1, 53, value=semana_actual)
 
 if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container_width=True):
-    with st.spinner(f"Procesando Hoja PIZARRA_TRAFICO..."):
+    with st.spinner("Procesando Hoja PIZARRA_TRAFICO..."):
         
         # 1. EXTRACCIÓN Y FILTRADO POR SEMANA
         df_raw = extraer_datos("PIZARRA_TRAFICO")
@@ -65,39 +75,74 @@ if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container
             st.error("No se pudo conectar con la hoja PIZARRA_TRAFICO o está vacía.")
             st.stop()
 
-        # Normalizamos la columna Semana para filtrar (ej. de "Semana 13" a 13)
-        df_raw['Num_Semana'] = df_raw['Semana'].str.extract('(\\d+)').astype(float)
+        # Normalizamos la columna Semana
+        col_sem = buscar_columna(df_raw, ['semana'])
+        if not col_sem:
+            st.error("No se encontró la columna 'Semana' en la base de datos.")
+            st.stop()
+
+        df_raw['Num_Semana'] = df_raw[col_sem].astype(str).str.extract(r'(\d+)').astype(float)
         df_sem = df_raw[df_raw['Num_Semana'] == num_sem].copy()
 
         if df_sem.empty:
             st.warning(f"No hay datos registrados para la Semana {num_sem}.")
             st.stop()
 
+        # Extraemos nombres de columnas exactos para evitar errores
+        c_ruta = buscar_columna(df_sem, ['ruta'])
+        c_zona = buscar_columna(df_sem, ['zona'])
+        c_unidad = buscar_columna(df_sem, ['unidad', 'placa'])
+        c_farmacias = buscar_columna(df_sem, ['farmacias'])
+        c_bultos = buscar_columna(df_sem, ['bultos'])
+        c_fecha = buscar_columna(df_sem, ['fecha'])
+        c_dia = buscar_columna(df_sem, ['dia', 'día'])
+        c_h1 = buscar_columna(df_sem, ['1er'])
+        c_hu = buscar_columna(df_sem, ['ultimo', 'último'])
+        c_it = buscar_columna(df_sem, ['inicio'])
+        c_ct = buscar_columna(df_sem, ['culminacion', 'fin'])
+
         # ==========================================
         # 2. ANÁLISIS DE TIEMPOS (Por día distintivo)
         # ==========================================
-        # Tomamos el primer registro de cada día para ver las horas generales de la operación
-        df_tiempos = df_sem.drop_duplicates(subset=['Fecha'])[['Fecha', 'Dia', 'Hora_1er_Listin', 'Hora_Ultimo_Listin', 'Inicio_Trafico', 'Culminacion_Trafico']]
+        if all([c_fecha, c_dia, c_h1, c_hu, c_it, c_ct]):
+            df_tiempos = df_sem.drop_duplicates(subset=[c_fecha])[[c_fecha, c_dia, c_h1, c_hu, c_it, c_ct]]
+        else:
+            df_tiempos = pd.DataFrame()
 
         # ==========================================
-        # 3. DESGLOSE DE RUTAS (Sin chofer ni ayudante)
+        # 3. DESGLOSE AGRUPADO DE RUTAS (Sin fechas, sumado por semana)
         # ==========================================
-        df_rutas = df_sem[['Fecha', 'Dia', 'Ruta', 'Zona', 'Unidad', 'Listines', 'Farmacias_Total', 'Bultos_Total']].copy()
-        
-        # Totales generales de la semana
-        total_farma_sem = pd.to_numeric(df_rutas['Farmacias_Total'], errors='coerce').sum()
-        total_bultos_sem = pd.to_numeric(df_rutas['Bultos_Total'], errors='coerce').sum()
+        if all([c_ruta, c_zona, c_unidad, c_farmacias, c_bultos]):
+            # Aseguramos que farmacias y bultos sean números
+            df_sem[c_farmacias] = pd.to_numeric(df_sem[c_farmacias], errors='coerce').fillna(0)
+            df_sem[c_bultos] = pd.to_numeric(df_sem[c_bultos], errors='coerce').fillna(0)
+            
+            # AGRUPAMOS POR RUTA
+            df_rutas = df_sem.groupby([c_ruta, c_zona, c_unidad], as_index=False).agg({
+                c_farmacias: 'sum',
+                c_bultos: 'sum'
+            }).sort_values(by=[c_zona, c_ruta])
+            
+            total_farma_sem = df_rutas[c_farmacias].sum()
+            total_bultos_sem = df_rutas[c_bultos].sum()
+        else:
+            df_rutas = pd.DataFrame()
+            total_farma_sem = 0
+            total_bultos_sem = 0
 
         # ==========================================
         # 4. ANÁLISIS POR ZONA (Porcentajes)
         # ==========================================
-        df_zonas = df_rutas.groupby('Zona').agg({
-            'Farmacias_Total': 'sum',
-            'Bultos_Total': 'sum'
-        }).reset_index()
+        if not df_rutas.empty:
+            df_zonas = df_rutas.groupby(c_zona).agg({
+                c_farmacias: 'sum',
+                c_bultos: 'sum'
+            }).reset_index()
 
-        df_zonas['%_Farmacias'] = (df_zonas['Farmacias_Total'] / total_farma_sem * 100).round(1)
-        df_zonas['%_Bultos'] = (df_zonas['Bultos_Total'] / total_bultos_sem * 100).round(1)
+            df_zonas['%_Farmacias'] = (df_zonas[c_farmacias] / total_farma_sem * 100).round(1).fillna(0)
+            df_zonas['%_Bultos'] = (df_zonas[c_bultos] / total_bultos_sem * 100).round(1).fillna(0)
+        else:
+            df_zonas = pd.DataFrame()
 
         # ==========================================
         # 5. CONSTRUCCIÓN DEL PDF (PRIMERA PÁGINA)
@@ -105,27 +150,30 @@ if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container
         logo = obtener_logo_base64()
         color_dro = "#0d47a1"
 
-        # Generar filas HTML para Tiempos
+        # HTML Tiempos
         filas_tiempos = ""
-        for _, r in df_tiempos.iterrows():
-            filas_tiempos += f"<tr><td>{r['Fecha']}</td><td>{r['Dia']}</td><td>{r['Hora_1er_Listin']}</td><td>{r['Hora_Ultimo_Listin']}</td><td>{r['Inicio_Trafico']}</td><td>{r['Culminacion_Trafico']}</td></tr>"
+        if not df_tiempos.empty:
+            for _, r in df_tiempos.iterrows():
+                filas_tiempos += f"<tr><td>{r[c_fecha]}</td><td>{r[c_dia]}</td><td>{r[c_h1]}</td><td>{r[c_hu]}</td><td>{r[c_it]}</td><td>{r[c_ct]}</td></tr>"
 
-        # Generar filas HTML para Rutas
+        # HTML Rutas (AGRUPADAS)
         filas_rutas = ""
-        for _, r in df_rutas.iterrows():
-            filas_rutas += f"<tr><td>{r['Fecha']}</td><td>{r['Ruta']}</td><td>{r['Zona']}</td><td>{r['Unidad']}</td><td>{r['Listines']}</td><td style='font-weight:bold;'>{r['Farmacias_Total']}</td><td style='font-weight:bold;'>{r['Bultos_Total']}</td></tr>"
+        if not df_rutas.empty:
+            for _, r in df_rutas.iterrows():
+                filas_rutas += f"<tr><td style='text-align:left;'>{r[c_ruta]}</td><td>{r[c_zona]}</td><td>{r[c_unidad]}</td><td style='font-weight:bold;'>{int(r[c_farmacias])}</td><td style='font-weight:bold;'>{int(r[c_bultos])}</td></tr>"
 
-        # Generar filas HTML para Zonas
+        # HTML Zonas
         filas_zonas = ""
-        for _, r in df_zonas.iterrows():
-            filas_zonas += f"""
-            <tr style='background:#f1f8ff;'>
-                <td style='text-align:left; font-weight:bold;'>{r['Zona']}</td>
-                <td>{int(r['Farmacias_Total'])}</td>
-                <td style='color:{color_dro}; font-weight:bold;'>{r['%_Farmacias']}%</td>
-                <td>{int(r['Bultos_Total'])}</td>
-                <td style='color:#e65100; font-weight:bold;'>{r['%_Bultos']}%</td>
-            </tr>"""
+        if not df_zonas.empty:
+            for _, r in df_zonas.iterrows():
+                filas_zonas += f"""
+                <tr style='background:#f1f8ff;'>
+                    <td style='text-align:left; font-weight:bold;'>{r[c_zona]}</td>
+                    <td>{int(r[c_farmacias])}</td>
+                    <td style='color:{color_dro}; font-weight:bold;'>{r['%_Farmacias']}%</td>
+                    <td>{int(r[c_bultos])}</td>
+                    <td style='color:#e65100; font-weight:bold;'>{r['%_Bultos']}%</td>
+                </tr>"""
 
         html_pdf = f"""
         <!DOCTYPE html>
@@ -166,16 +214,16 @@ if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container
                     <tbody>{filas_tiempos}</tbody>
                 </table>
 
-                <div class="section-title">🚛 2. DESGLOSE OPERATIVO POR RUTA</div>
+                <div class="section-title">🚛 2. CONSOLIDADO OPERATIVO POR RUTA (SEMANAL)</div>
                 <table>
                     <thead>
-                        <tr><th>Fecha</th><th>Ruta</th><th>Zona</th><th>Unidad</th><th>Listines</th><th>Farmacias</th><th>Bultos</th></tr>
+                        <tr><th style='text-align:left;'>Ruta</th><th>Zona</th><th>Unidad</th><th>Farmacias Totales</th><th>Bultos Totales</th></tr>
                     </thead>
                     <tbody>{filas_rutas}</tbody>
                 </table>
                 <div class="total-bar">
-                    <span>TOTAL FARMACIAS SEMANAL: {int(total_farma_sem)}</span>
-                    <span>TOTAL BULTOS SEMANAL: {int(total_bultos_sem)}</span>
+                    <span>TOTAL FARMACIAS: {int(total_farma_sem)}</span>
+                    <span>TOTAL BULTOS: {int(total_bultos_sem)}</span>
                 </div>
 
                 <div class="section-title">🌍 3. EFECTIVIDAD Y DISTRIBUCIÓN POR ZONAS</div>
@@ -187,7 +235,7 @@ if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container
                 </table>
 
                 <div style="margin-top:30px; border-top:1px solid #eee; padding-top:10px; font-size:10px; color:#aaa; text-align:center;">
-                    Página 1: Auditoría de Tráfico - Coordinación de Flota y Logística Drotaca
+                    Auditoría Logística - Coordinación de Flota Drotaca
                 </div>
             </div>
         </body>
