@@ -1,18 +1,17 @@
 # ==========================================
-# Archivo: cierre_semanal.py (Master Semanal de Auditoría Logística)
+# Archivo: cierre_semanal.py (Auditoría de Tráfico y Despacho)
 # ==========================================
 import streamlit as st
 import pandas as pd
 import base64
 import textwrap
-import json
 from datetime import datetime
 import streamlit.components.v1 as components
 from google.oauth2.service_account import Credentials
 import gspread
 
 # ==========================================
-# CONFIGURACIÓN DE CONEXIÓN Y LOGO
+# CONFIGURACIÓN DE CONEXIÓN
 # ==========================================
 def obtener_logo_base64():
     try:
@@ -44,189 +43,155 @@ def extraer_datos(nombre_hoja):
     except: return pd.DataFrame()
 
 # ==========================================
-# FUNCIONES DE ANÁLISIS INTELIGENTE Y SEGURO
+# INTERFAZ
 # ==========================================
-def buscar_columna(df, palabras_clave):
-    if df.empty: return None
-    for col in df.columns:
-        if any(p.lower() in str(col).lower() for p in palabras_clave):
-            return col
-    return None
-
-def calcular_promedio_hora(df, palabras_clave):
-    col = buscar_columna(df, palabras_clave)
-    if col and not df.empty:
-        moda = df[col].astype(str).mode()
-        return moda[0] if not moda.empty else "N/A"
-    return "N/A"
-
-def suma_segura(df, palabras_clave):
-    col = buscar_columna(df, palabras_clave)
-    if col and not df.empty:
-        return pd.to_numeric(df[col], errors='coerce').fillna(0).sum()
-    return 0
-
-# ==========================================
-# INTERFAZ Y PROCESAMIENTO
-# ==========================================
-st.title("📊 Master Reporte Semanal de Gestión Operativa")
-st.markdown("Auditoría integral basada en los 10 pilares de información de la sede El Tigre.")
+st.title("📊 Master Reporte Semanal: Desempeño de Tráfico")
+st.markdown("Análisis detallado de tiempos de despacho, rutas y distribución por zonas.")
 
 c1, c2 = st.columns(2)
 with c1:
-    ano_sel = st.selectbox("Año Fiscal:", [2025, 2026], index=1)
+    ano_sel = st.selectbox("Año:", [2025, 2026], index=1)
 with c2:
     semana_actual = datetime.now().isocalendar()[1]
     num_sem = st.number_input("Número de Semana:", 1, 53, value=semana_actual)
 
-if st.button("⚡ GENERAR AUDITORÍA SEMANAL", type="primary", use_container_width=True):
-    with st.spinner(f"Sincronizando con base de datos VZLA..."):
+if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container_width=True):
+    with st.spinner(f"Procesando Hoja PIZARRA_TRAFICO..."):
         
-        # 1. MAPEO DE DATOS SEGÚN ESTRUCTURA SOLICITADA
-        hojas = {
-            "Apertura": "SEG_APERTURA",
-            "M_Plan": "FLOTA_PLANIFICADO",
-            "M_Real": "FLOTA_REALIZADO",
-            "Despachos": "MONITOREO_DESPACHOS",
-            "Trafico": "PIZARRA_TRAFICO",
-            "Guardia": "SEG_ROL_GUARDIA",
-            "Juanita": "SEG_CIERRE_JUANITA",
-            "Cierre_Dro": "SEG_CIERRE_DROTACA",
-            "Surtido": "SURTIDO_COMBUSTIBLE",
-            "Reserva": "FLOTA_COMBUSTIBLE"
-        }
+        # 1. EXTRACCIÓN Y FILTRADO POR SEMANA
+        df_raw = extraer_datos("PIZARRA_TRAFICO")
         
-        data = {k: extraer_datos(v) for k, v in hojas.items()}
-        
-        def filtrar_sem(df):
-            if df.empty: return df
-            col = buscar_columna(df, ['fecha', 'sistema'])
-            if not col: return df
-            df[col] = pd.to_datetime(df[col], dayfirst=True, errors='coerce')
-            return df[df[col].dt.isocalendar().week == num_sem]
+        if df_raw.empty:
+            st.error("No se pudo conectar con la hoja PIZARRA_TRAFICO o está vacía.")
+            st.stop()
 
-        f = {k: filtrar_sem(v) for k, v in data.items()}
+        # Normalizamos la columna Semana para filtrar (ej. de "Semana 13" a 13)
+        df_raw['Num_Semana'] = df_raw['Semana'].str.extract('(\\d+)').astype(float)
+        df_sem = df_raw[df_raw['Num_Semana'] == num_sem].copy()
 
-        # --- CÁLCULO DE MÉTRICAS EJECUTIVAS ---
-        
-        # Seguridad y Tiempos (Priorizando CIERRE DE DROGUERÍA)
-        hora_apertura = calcular_promedio_hora(f['Apertura'], ['hora'])
-        hora_cierre_dro = calcular_promedio_hora(f['Cierre_Dro'], ['CIERRE DE DROGUERÍA', 'hora'])
-        hora_juanita = calcular_promedio_hora(f['Juanita'], ['hora'])
-
-        # Mantenimiento (El Cruce Solicitado)
-        col_u_p = buscar_columna(f['M_Plan'], ['unidad', 'placa'])
-        col_u_r = buscar_columna(f['M_Real'], ['unidad', 'placa'])
-        unidades_plan = set(f['M_Plan'][col_u_p].dropna()) if col_u_p else set()
-        unidades_real = set(f['M_Real'][col_u_r].dropna()) if col_u_r else set()
-        unidades_pendientes = list(unidades_plan - unidades_real)
-        cumplimiento_mantenimiento = (len(unidades_real) / len(unidades_plan) * 100) if unidades_plan else 100
-
-        # Logística (Con extracción segura a prueba de errores)
-        bultos_sem = suma_segura(f['Despachos'], ['bultos'])
-        kms_sem = suma_segura(f['Surtido'], ['kms', 'kilometraje', 'recorrido'])
-        litros_sem = suma_segura(f['Surtido'], ['litros', 'gasoil', 'cantidad'])
+        if df_sem.empty:
+            st.warning(f"No hay datos registrados para la Semana {num_sem}.")
+            st.stop()
 
         # ==========================================
-        # CONSTRUCCIÓN DEL REPORTE MULTI-PÁGINA (PDF)
+        # 2. ANÁLISIS DE TIEMPOS (Por día distintivo)
+        # ==========================================
+        # Tomamos el primer registro de cada día para ver las horas generales de la operación
+        df_tiempos = df_sem.drop_duplicates(subset=['Fecha'])[['Fecha', 'Dia', 'Hora_1er_Listin', 'Hora_Ultimo_Listin', 'Inicio_Trafico', 'Culminacion_Trafico']]
+
+        # ==========================================
+        # 3. DESGLOSE DE RUTAS (Sin chofer ni ayudante)
+        # ==========================================
+        df_rutas = df_sem[['Fecha', 'Dia', 'Ruta', 'Zona', 'Unidad', 'Listines', 'Farmacias_Total', 'Bultos_Total']].copy()
+        
+        # Totales generales de la semana
+        total_farma_sem = pd.to_numeric(df_rutas['Farmacias_Total'], errors='coerce').sum()
+        total_bultos_sem = pd.to_numeric(df_rutas['Bultos_Total'], errors='coerce').sum()
+
+        # ==========================================
+        # 4. ANÁLISIS POR ZONA (Porcentajes)
+        # ==========================================
+        df_zonas = df_rutas.groupby('Zona').agg({
+            'Farmacias_Total': 'sum',
+            'Bultos_Total': 'sum'
+        }).reset_index()
+
+        df_zonas['%_Farmacias'] = (df_zonas['Farmacias_Total'] / total_farma_sem * 100).round(1)
+        df_zonas['%_Bultos'] = (df_zonas['Bultos_Total'] / total_bultos_sem * 100).round(1)
+
+        # ==========================================
+        # 5. CONSTRUCCIÓN DEL PDF (PRIMERA PÁGINA)
         # ==========================================
         logo = obtener_logo_base64()
-        color_p = "#0d47a1"
+        color_dro = "#0d47a1"
 
-        html_final = f"""
+        # Generar filas HTML para Tiempos
+        filas_tiempos = ""
+        for _, r in df_tiempos.iterrows():
+            filas_tiempos += f"<tr><td>{r['Fecha']}</td><td>{r['Dia']}</td><td>{r['Hora_1er_Listin']}</td><td>{r['Hora_Ultimo_Listin']}</td><td>{r['Inicio_Trafico']}</td><td>{r['Culminacion_Trafico']}</td></tr>"
+
+        # Generar filas HTML para Rutas
+        filas_rutas = ""
+        for _, r in df_rutas.iterrows():
+            filas_rutas += f"<tr><td>{r['Fecha']}</td><td>{r['Ruta']}</td><td>{r['Zona']}</td><td>{r['Unidad']}</td><td>{r['Listines']}</td><td style='font-weight:bold;'>{r['Farmacias_Total']}</td><td style='font-weight:bold;'>{r['Bultos_Total']}</td></tr>"
+
+        # Generar filas HTML para Zonas
+        filas_zonas = ""
+        for _, r in df_zonas.iterrows():
+            filas_zonas += f"""
+            <tr style='background:#f1f8ff;'>
+                <td style='text-align:left; font-weight:bold;'>{r['Zona']}</td>
+                <td>{int(r['Farmacias_Total'])}</td>
+                <td style='color:{color_dro}; font-weight:bold;'>{r['%_Farmacias']}%</td>
+                <td>{int(r['Bultos_Total'])}</td>
+                <td style='color:#e65100; font-weight:bold;'>{r['%_Bultos']}%</td>
+            </tr>"""
+
+        html_pdf = f"""
         <!DOCTYPE html>
         <html>
         <head>
             <style>
-                @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700;900&display=swap');
-                body {{ font-family: 'Roboto', sans-serif; margin: 0; padding: 0; background-color: #525659; }}
-                .page {{ width: 210mm; height: 296mm; background: white; margin: 10mm auto; padding: 20mm; box-sizing: border-box; position: relative; box-shadow: 0 0 15px rgba(0,0,0,0.5); page-break-after: always; }}
-                .header {{ display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid {color_p}; padding-bottom: 10px; margin-bottom: 20px; }}
-                .title-main {{ color: {color_p}; font-size: 28px; font-weight: 900; margin: 0; text-transform: uppercase; }}
-                .section-box {{ background: #f4f6f9; border-left: 5px solid {color_p}; padding: 15px; margin-bottom: 20px; }}
-                .section-title {{ color: {color_p}; font-weight: 700; font-size: 18px; margin-bottom: 10px; border-bottom: 1px solid #ddd; padding-bottom: 5px; }}
-                .kpi-grid {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 10px; }}
-                .kpi-card {{ background: white; border: 1px solid #ddd; padding: 10px; text-align: center; border-radius: 5px; }}
-                .kpi-val {{ font-size: 20px; font-weight: 900; color: #e65100; }}
-                table {{ width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 10px; }}
-                th {{ background: {color_p}; color: white; padding: 8px; border: 1px solid #ddd; }}
-                td {{ padding: 6px; border: 1px solid #ddd; text-align: center; }}
-                .footer {{ position: absolute; bottom: 20mm; left: 20mm; right: 20mm; border-top: 1px solid #eee; padding-top: 10px; font-size: 10px; color: #777; text-align: center; }}
-                @media print {{ body {{ background: white; }} .page {{ margin: 0; box-shadow: none; }} .no-print {{ display: none; }} }}
+                @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&display=swap');
+                body {{ font-family: 'Montserrat', sans-serif; padding: 0; margin: 0; background:#525659; }}
+                .page {{ width: 210mm; background: white; margin: 10mm auto; padding: 15mm; box-shadow: 0 0 10px rgba(0,0,0,0.5); }}
+                .header {{ display: flex; justify-content: space-between; align-items: center; border-bottom: 4px solid {color_dro}; padding-bottom: 10px; }}
+                .section-title {{ background: {color_dro}; color: white; padding: 8px 15px; font-weight: 900; font-size: 14px; margin-top: 25px; text-transform: uppercase; }}
+                table {{ width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 11px; }}
+                th {{ background: #eee; border: 1px solid #ccc; padding: 6px; text-align: center; }}
+                td {{ border: 1px solid #ccc; padding: 6px; text-align: center; }}
+                .total-bar {{ background: #263238; color: white; display: flex; justify-content: space-around; padding: 10px; margin-top: 10px; font-weight: 900; font-size: 14px; }}
+                @media print {{ .no-print {{ display: none; }} body {{ background: white; }} .page {{ margin: 0; box-shadow: none; }} }}
             </style>
         </head>
         <body>
-            <div class="no-print" style="text-align: center; padding: 20px;">
-                <button onclick="window.print()" style="background: #e65100; color: white; padding: 15px 40px; border: none; border-radius: 5px; font-weight: bold; cursor: pointer;">🖨️ DESCARGAR REPORTE GERENCIAL (PDF)</button>
+            <div class="no-print" style="text-align:center; padding:20px;">
+                <button onclick="window.print()" style="background:#e65100; color:white; border:none; padding:12px 30px; font-weight:bold; cursor:pointer; border-radius:5px;">📥 DESCARGAR REPORTE DE TRÁFICO</button>
             </div>
 
             <div class="page">
                 <div class="header">
-                    <img src="{logo}" style="height: 60px;">
-                    <div style="text-align: right;">
-                        <h1 class="title-main">Reporte Semanal Master</h1>
-                        <p style="margin:0; font-weight: 700;">Semana {num_sem} | Año {ano_sel}</p>
+                    <img src="{logo}" style="height: 50px;">
+                    <div style="text-align:right;">
+                        <h1 style="margin:0; color:{color_dro}; font-size:22px;">AUDITORÍA SEMANAL DE TRÁFICO</h1>
+                        <p style="margin:0; font-weight:bold;">Semana {num_sem} | Año {ano_sel}</p>
                     </div>
                 </div>
 
-                <div class="section-box">
-                    <div class="section-title">⏱️ AUDITORÍA DE TIEMPOS Y CIERRES (SEGURIDAD)</div>
-                    <div class="kpi-grid">
-                        <div class="kpi-card"><div>Apertura Promedio</div><div class="kpi-val">{hora_apertura}</div></div>
-                        <div class="kpi-card"><div>Cierre Droguería</div><div class="kpi-val">{hora_cierre_dro}</div></div>
-                        <div class="kpi-card"><div>Cierre Juanita</div><div class="kpi-val">{hora_juanita}</div></div>
-                    </div>
-                    <p style="font-size: 12px; margin-top: 15px; color: #444;"><i>* El cierre de droguería se calcula bajo el campo de auditoría estricta para medir promedios de salida reales de todos los departamentos.</i></p>
+                <div class="section-title">⏱️ 1. CRONOMETRÍA DE DESPACHO (HORAS DE SALIDA)</div>
+                <table>
+                    <thead>
+                        <tr><th>Fecha</th><th>Día</th><th>1er Listín</th><th>Último Listín</th><th>Inicio Tráfico</th><th>Fin Tráfico</th></tr>
+                    </thead>
+                    <tbody>{filas_tiempos}</tbody>
+                </table>
+
+                <div class="section-title">🚛 2. DESGLOSE OPERATIVO POR RUTA</div>
+                <table>
+                    <thead>
+                        <tr><th>Fecha</th><th>Ruta</th><th>Zona</th><th>Unidad</th><th>Listines</th><th>Farmacias</th><th>Bultos</th></tr>
+                    </thead>
+                    <tbody>{filas_rutas}</tbody>
+                </table>
+                <div class="total-bar">
+                    <span>TOTAL FARMACIAS SEMANAL: {int(total_farma_sem)}</span>
+                    <span>TOTAL BULTOS SEMANAL: {int(total_bultos_sem)}</span>
                 </div>
 
-                <div class="section-box">
-                    <div class="section-title">🛠️ CRUCE DE MANTENIMIENTO PREVENTIVO</div>
-                    <div class="kpi-grid">
-                        <div class="kpi-card"><div>Unidades Planificadas</div><div class="kpi-val">{len(unidades_plan)}</div></div>
-                        <div class="kpi-card"><div>Unidades Realizadas</div><div class="kpi-val">{len(unidades_real)}</div></div>
-                        <div class="kpi-card"><div>% Cumplimiento</div><div class="kpi-val">{cumplimiento_mantenimiento:.1f}%</div></div>
-                    </div>
-                    <div style="margin-top:10px;">
-                        <strong>⚠️ Unidades Pendientes:</strong> 
-                        <span style="color: #d32f2f;">{', '.join(unidades_pendientes) if unidades_pendientes else 'Todas las unidades al día'}</span>
-                    </div>
+                <div class="section-title">🌍 3. EFECTIVIDAD Y DISTRIBUCIÓN POR ZONAS</div>
+                <table>
+                    <thead>
+                        <tr><th style='text-align:left;'>Zona Logística</th><th>Farmacias</th><th>% Far.</th><th>Bultos</th><th>% Bul.</th></tr>
+                    </thead>
+                    <tbody>{filas_zonas}</tbody>
+                </table>
+
+                <div style="margin-top:30px; border-top:1px solid #eee; padding-top:10px; font-size:10px; color:#aaa; text-align:center;">
+                    Página 1: Auditoría de Tráfico - Coordinación de Flota y Logística Drotaca
                 </div>
-
-                <div class="footer">Documento de Uso Interno - Droguería Drotaca - El Tigre, Venezuela</div>
-            </div>
-
-            <div class="page">
-                <div class="header">
-                    <div class="section-title" style="border:none;">📦 DESEMPEÑO LOGÍSTICO Y TRÁFICO</div>
-                </div>
-
-                <div class="kpi-grid">
-                    <div class="kpi-card"><div>Total Bultos</div><div class="kpi-val">{bultos_sem:,.0f}</div></div>
-                    <div class="kpi-card"><div>Recorrido (Kms)</div><div class="kpi-val">{kms_sem:,.0f}</div></div>
-                    <div class="kpi-card"><div>Surtido (Litros)</div><div class="kpi-val">{litros_sem:,.0f}</div></div>
-                </div>
-
-                <div class="section-box" style="margin-top:20px;">
-                    <div class="section-title">🚛 DETALLE DE TRÁFICO (Transbordo + Oriente)</div>
-                    <table>
-                        <thead>
-                            <tr><th>Fecha</th><th>Unidad</th><th>Ruta</th><th>Estatus</th></tr>
-                        </thead>
-                        <tbody>
-                            {"".join([f"<tr><td>{r.get('Fecha','')}</td><td>{r.get('Unidad','')}</td><td>{r.get('Ruta','')}</td><td>{r.get('Observaciones','')}</td></tr>" for _,r in f['Trafico'].head(15).iterrows()])}
-                        </tbody>
-                    </table>
-                </div>
-
-                <div class="section-box">
-                    <div class="section-title">⛽ RESERVAS Y CONTROL DE COMBUSTIBLE</div>
-                    <p style="font-size: 13px;">Reserva promedio detectada en El Tigre: <b>{pd.to_numeric(f['Reserva'][buscar_columna(f['Reserva'], ['nivel'])], errors='coerce').mean() if buscar_columna(f['Reserva'], ['nivel']) else 0:.1f}%</b></p>
-                </div>
-
-                <div class="footer">Gerencia de Operaciones y Logística - Reporte Generado Semanalmente</div>
             </div>
         </body>
         </html>
         """
-        components.html(html_final, height=1200, scrolling=True)
-        st.success("✅ Auditoría Generada. Desliza hacia abajo para ver el reporte multi-página.")
+        components.html(html_pdf, height=1200, scrolling=True)
+        st.success("✅ Auditoría de Tráfico ensamblada con éxito.")
