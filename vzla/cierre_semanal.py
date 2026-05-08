@@ -1,5 +1,5 @@
 # ==========================================
-# Archivo: cierre_semanal.py (Auditoría Logística con Gráficos)
+# Archivo: cierre_semanal.py (Auditoría Logística)
 # ==========================================
 import streamlit as st
 import pandas as pd
@@ -10,7 +10,6 @@ from datetime import datetime
 import streamlit.components.v1 as components
 from google.oauth2.service_account import Credentials
 import gspread
-import plotly.express as go
 
 # ==========================================
 # CONFIGURACIÓN DE CONEXIÓN Y LOGO
@@ -56,21 +55,11 @@ def a_12h(hora_24):
     """Convierte HH:MM a HH:MM AM/PM"""
     hora_limpia = limpiar_hora(hora_24)
     try:
-        # Intentamos detectar si ya viene en 12h o si es 24h
         if "am" in hora_limpia.lower() or "pm" in hora_limpia.lower():
             return hora_limpia.lower()
         return datetime.strptime(hora_limpia, "%H:%M").strftime("%I:%M %p").lower()
     except:
         return hora_limpia
-
-def hora_a_decimal(hora_str):
-    """Convierte hora a número (ej. 22:30 -> 22.5) para el gráfico"""
-    h_l = limpiar_hora(hora_str)
-    try:
-        t = datetime.strptime(h_l, "%H:%M")
-        return t.hour + t.minute/60
-    except:
-        return None
 
 def buscar_columna(df, palabras_clave):
     if df.empty: return None
@@ -120,31 +109,15 @@ if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container
         
         # Aplicamos el formato 12h para la tabla
         for col in [c_h1, c_hu, c_it, c_ct]:
-            df_t[col + "_12h"] = df_t[col].apply(a_12h)
+            if col:
+                df_t[col + "_12h"] = df_t[col].apply(a_12h)
 
-        # --- SECCIÓN 2: GRÁFICO DE CIERRE ---
-        st.subheader("📉 Visualización de Cierre de Jornada")
-        
-        # Preparamos datos para Plotly
-        df_chart = df_t.copy()
-        df_chart['Val_Ultimo'] = df_chart[c_hu].apply(hora_a_decimal)
-        df_chart['Val_Fin'] = df_chart[c_ct].apply(hora_a_decimal)
-        
-        # Melt para tener barras agrupadas
-        df_plot = df_chart.melt(id_vars=[c_dia], value_vars=['Val_Ultimo', 'Val_Fin'], 
-                                 var_name='Hito', value_name='Hora_Decimal')
-        df_plot['Hito'] = df_plot['Hito'].replace({'Val_Ultimo': 'Último Listín', 'Val_Fin': 'Fin Tráfico'})
-        
-        fig = go.bar(df_plot, x=c_dia, y='Hora_Decimal', color='Hito', barmode='group',
-                     color_discrete_map={'Último Listín': '#90caf9', 'Fin Tráfico': '#0d47a1'},
-                     height=300)
-        
-        fig.update_layout(yaxis=dict(title='Hora (24h)', tickvals=list(range(14, 26)), 
-                          range=[14, 25]), margin=dict(l=20, r=20, t=30, b=20))
-        st.plotly_chart(fig, use_container_width=True)
-
-        # --- SECCIÓN 3: CONSOLIDADO DE RUTAS ---
-        c_ruta, c_zona, c_unidad, c_farma, c_bultos = buscar_columna(df_sem, ['ruta']), buscar_columna(df_sem, ['zona']), buscar_columna(df_sem, ['unidad']), buscar_columna(df_sem, ['farmacias']), buscar_columna(df_sem, ['bultos'])
+        # --- SECCIÓN 2: CONSOLIDADO DE RUTAS ---
+        c_ruta = buscar_columna(df_sem, ['ruta'])
+        c_zona = buscar_columna(df_sem, ['zona'])
+        c_unidad = buscar_columna(df_sem, ['unidad'])
+        c_farma = buscar_columna(df_sem, ['farmacias'])
+        c_bultos = buscar_columna(df_sem, ['bultos'])
         
         df_sem[c_farma] = pd.to_numeric(df_sem[c_farma], errors='coerce').fillna(0)
         df_sem[c_bultos] = pd.to_numeric(df_sem[c_bultos], errors='coerce').fillna(0)
@@ -154,14 +127,34 @@ if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container
         total_f = df_rutas[c_farma].sum()
         total_b = df_rutas[c_bultos].sum()
 
+        # --- SECCIÓN 3: EFECTIVIDAD POR ZONAS ---
+        if not df_rutas.empty:
+            df_zonas = df_rutas.groupby(c_zona).agg({c_farma: 'sum', c_bultos: 'sum'}).reset_index()
+            df_zonas['%_Farmacias'] = (df_zonas[c_farma] / total_f * 100).round(1).fillna(0)
+            df_zonas['%_Bultos'] = (df_zonas[c_bultos] / total_b * 100).round(1).fillna(0)
+        else:
+            df_zonas = pd.DataFrame()
+
         # ==========================================
         # CONSTRUCCIÓN DEL PDF
         # ==========================================
         logo = obtener_logo_base64()
         color_p = "#0d47a1"
 
-        filas_t = "".join([f"<tr><td>{r[c_fecha]}</td><td>{r[c_dia]}</td><td>{r[c_h1+'_12h']}</td><td>{r[c_hu+'_12h']}</td><td>{r[c_it+'_12h']}</td><td>{r[c_ct+'_12h']}</td></tr>" for _,r in df_t.iterrows()])
-        filas_r = "".join([f"<tr><td style='text-align:left;'>{r[c_ruta]}</td><td>{r[c_zona]}</td><td>{r[c_unidad]}</td><td>{int(r[c_farma])}</td><td>{int(r[c_bultos])}</td></tr>" for _,r in df_rutas.iterrows()])
+        filas_t = ""
+        if not df_t.empty:
+            for _, r in df_t.iterrows():
+                filas_t += f"<tr><td>{r[c_fecha]}</td><td>{r[c_dia]}</td><td>{r.get(c_h1+'_12h', '')}</td><td>{r.get(c_hu+'_12h', '')}</td><td>{r.get(c_it+'_12h', '')}</td><td>{r.get(c_ct+'_12h', '')}</td></tr>"
+
+        filas_r = ""
+        if not df_rutas.empty:
+            for _, r in df_rutas.iterrows():
+                filas_r += f"<tr><td style='text-align:left;'>{r[c_ruta]}</td><td>{r[c_zona]}</td><td>{r[c_unidad]}</td><td>{int(r[c_farma])}</td><td>{int(r[c_bultos])}</td></tr>"
+
+        filas_z = ""
+        if not df_zonas.empty:
+            for _, r in df_zonas.iterrows():
+                filas_z += f"<tr style='background:#f1f8ff;'><td style='text-align:left; font-weight:bold;'>{r[c_zona]}</td><td>{int(r[c_farma])}</td><td style='color:{color_p}; font-weight:bold;'>{r['%_Farmacias']}%</td><td>{int(r[c_bultos])}</td><td style='color:#e65100; font-weight:bold;'>{r['%_Bultos']}%</td></tr>"
 
         html_pdf = f"""
         <!DOCTYPE html><html><head><style>
@@ -185,10 +178,14 @@ if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container
                 <tbody>{filas_t}</tbody></table>
 
                 <div class="section-title">🚛 2. CONSOLIDADO DE RUTAS ATENDIDAS</div>
-                <table><thead><tr><th style='text-align:left;'>Ruta</th><th>Zona</th><th>Unidad</th><th>Farmacias</th><th>Bultos</th></tr></thead>
+                <table><thead><tr><th style='text-align:left;'>Ruta</th><th>Zona</th><th>Unidad</th><th>Farmacias Totales</th><th>Bultos Totales</th></tr></thead>
                 <tbody>{filas_r}</tbody></table>
                 <div class="total-bar"><span>TOTAL FARMACIAS: {int(total_f)}</span><span>TOTAL BULTOS: {int(total_b)}</span></div>
                 
+                <div class="section-title">🌍 3. EFECTIVIDAD Y DISTRIBUCIÓN POR ZONAS</div>
+                <table><thead><tr><th style='text-align:left;'>Zona Logística</th><th>Farmacias</th><th>% Far.</th><th>Bultos</th><th>% Bul.</th></tr></thead>
+                <tbody>{filas_z}</tbody></table>
+
                 <div style="margin-top:30px; border-top:1px solid #eee; padding-top:10px; font-size:9px; color:#aaa; text-align:center;">Página 1: Tráfico Semanal - Drotaca</div>
             </div></body></html>
         """
