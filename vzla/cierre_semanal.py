@@ -1,5 +1,5 @@
 # ==========================================
-# Archivo: cierre_semanal.py (Auditoría Logística - Diseño Premium)
+# Archivo: cierre_semanal.py (Auditoría Logística - Diseño Final con Bordes)
 # ==========================================
 import streamlit as st
 import pandas as pd
@@ -117,11 +117,11 @@ if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container
         df_zonas['%_Bul'] = (df_zonas[c_bultos] / total_b * 100).round(1).fillna(0)
 
         # ==========================================
-        # CONSTRUCCIÓN DEL PDF CON DISEÑO AZUL Y DORADO
+        # CONSTRUCCIÓN DEL PDF CON BORDES NEGROS
         # ==========================================
         logo = obtener_logo_base64()
-        color_azul = "#0d47a1"  # Azul Drotaca
-        color_dorado = "#d4af37" # Dorado Premium
+        color_azul = "#0d47a1"
+        color_dorado = "#d4af37"
 
         filas_t = "".join([f"<tr><td>{r[c_fecha]}</td><td>{r[c_dia]}</td><td>{a_12h(r[c_h1])}</td><td>{a_12h(r[c_hu])}</td><td>{a_12h(r[c_it])}</td><td>{a_12h(r[c_ct])}</td></tr>" for _,r in df_t.iterrows()])
         filas_r = "".join([f"<tr><td style='text-align:left;'>{r[c_ruta]}</td><td>{r[c_zona]}</td><td>{r[c_unidad]}</td><td style='font-weight:bold;'>{int(r[c_farma])}</td><td style='font-weight:bold;'>{int(r[c_bultos])}</td></tr>" for _,r in df_rutas.iterrows()])
@@ -131,31 +131,29 @@ if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container
         <!DOCTYPE html><html><head><style>
             @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&display=swap');
             body {{ font-family: 'Montserrat', sans-serif; background:#525659; margin:0; }}
-            .page {{ width: 210mm; background: white; margin: 10mm auto; padding: 0; box-shadow: 0 0 10px rgba(0,0,0,0.5); overflow:hidden; }}
+            .page {{ width: 210mm; background: white; margin: 10mm auto; padding: 0; box-shadow: 0 0 10px rgba(0,0,0,0.5); overflow:hidden; border: 1px solid #000; }}
             
-            /* ENCABEZADO AZUL Y DORADO */
             .header-master {{ background: {color_azul}; color: white; padding: 25px 40px; display: flex; justify-content: space-between; align-items: center; border-bottom: 6px solid {color_dorado}; }}
             .header-info {{ text-align: right; }}
-            .header-info h2 {{ margin: 0; font-weight: 900; letter-spacing: 1px; font-size: 20px; }}
-            .header-info p {{ margin: 0; font-size: 14px; opacity: 0.9; }}
+            .header-info h2 {{ margin: 0; font-weight: 900; font-size: 20px; }}
             
-            .content-padding {{ padding: 15mm; }}
-            .section-title {{ border-left: 5px solid {color_dorado}; background: #f4f4f4; color: {color_azul}; padding: 8px 15px; font-weight: 900; font-size: 13px; margin-top: 20px; text-transform: uppercase; }}
+            .content-padding {{ padding: 12mm; }}
+            .section-title {{ border-left: 6px solid {color_dorado}; background: #eee; color: #000; padding: 8px 15px; font-weight: 900; font-size: 13px; margin-top: 20px; border-bottom: 1px solid #000; border-top: 1px solid #000; border-right: 1px solid #000; }}
             
-            table {{ width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 10px; }}
-            th {{ background: {color_azul}; color: white; border: 1px solid #ddd; padding: 6px; text-transform: uppercase; }}
-            td {{ border: 1px solid #ddd; padding: 6px; text-align: center; color: #333; }}
+            table {{ width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 10px; border: 1px solid #000; }}
+            th {{ background: {color_azul}; color: white; border: 1px solid #000; padding: 8px; text-transform: uppercase; }}
+            td {{ border: 1px solid #000; padding: 6px; text-align: center; color: #000; }}
             
-            .total-bar {{ background: #263238; color: white; display: flex; justify-content: space-around; padding: 10px; margin-top: 10px; font-weight: 900; font-size: 13px; border-bottom: 3px solid {color_dorado}; }}
+            .total-bar {{ background: #000; color: white; display: flex; justify-content: space-around; padding: 12px; margin-top: 10px; font-weight: 900; font-size: 13px; border: 1px solid {color_dorado}; }}
             @media print {{ .no-print {{ display: none; }} body {{ background: white; }} .page {{ margin: 0; box-shadow: none; }} }}
         </style></head><body>
             <div class="no-print" style="text-align:center; padding:20px;">
-                <button onclick="window.print()" style="background:#e65100; color:white; border:none; padding:12px 30px; font-weight:bold; cursor:pointer; border-radius:5px; box-shadow: 0 4px 6px rgba(0,0,0,0.2);">🖨️ IMPRIMIR REPORTE MASTER</button>
+                <button onclick="window.print()" style="background:#e65100; color:white; border:none; padding:12px 30px; font-weight:bold; cursor:pointer; border-radius:5px;">🖨️ IMPRIMIR REPORTE MASTER</button>
             </div>
             
             <div class="page">
                 <div class="header-master">
-                    <img src="{logo}" style="height: 55px; filter: drop-shadow(2px 2px 4px rgba(0,0,0,0.3));">
+                    <img src="{logo}" style="height: 55px;">
                     <div class="header-info">
                         <h2>AUDITORÍA SEMANAL DE TRÁFICO</h2>
                         <p>Semana {num_sem} | Año {ano_sel}</p>
@@ -176,7 +174,7 @@ if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container
                     <table><thead><tr><th style='text-align:left;'>ZONA</th><th>FARMACIAS</th><th>% FAR.</th><th>BULTOS</th><th>% BUL.</th></tr></thead>
                     <tbody>{filas_z}</tbody></table>
 
-                    <div style="margin-top:40px; border-top:1px solid #eee; padding-top:10px; font-size:9px; color:#aaa; text-align:center; font-weight:bold;">
+                    <div style="margin-top:40px; border-top:2px solid #000; padding-top:10px; font-size:9px; color:#000; text-align:center; font-weight:bold;">
                         REPORTING SYSTEM PCD - DROGUERÍA DROTACA VENEZUELA
                     </div>
                 </div>
