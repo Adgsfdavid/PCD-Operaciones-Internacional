@@ -182,11 +182,21 @@ with tab_comensales:
                 if t_gen > 0:
                     msg = f"📊 *PIZARRA DE COMENSALES*\n📅 *Fecha:* {fecha_pizarra}\n\n"
                     for _, r in df_editado_com.iterrows():
-                        if (pd.to_numeric(r['Desayuno'], errors='coerce').fillna(0) + pd.to_numeric(r['Almuerzo'], errors='coerce').fillna(0) + pd.to_numeric(r['Cena'], errors='coerce').fillna(0)) > 0:
+                        # Extracción segura de números celda por celda
+                        d_val = pd.to_numeric(r['Desayuno'], errors='coerce')
+                        a_val = pd.to_numeric(r['Almuerzo'], errors='coerce')
+                        c_val = pd.to_numeric(r['Cena'], errors='coerce')
+                        
+                        d = int(d_val) if pd.notna(d_val) else 0
+                        a = int(a_val) if pd.notna(a_val) else 0
+                        c = int(c_val) if pd.notna(c_val) else 0
+                        
+                        if (d + a + c) > 0:
                             msg += f"🏢 *{r['Departamento']}*\n"
-                            if r['Desayuno'] > 0: msg += f"   ☕ Desayuno: {int(r['Desayuno'])}\n"
-                            if r['Almuerzo'] > 0: msg += f"   🍲 Almuerzo: {int(r['Almuerzo'])}\n"
-                            if r['Cena'] > 0: msg += f"   🥪 Cena: {int(r['Cena'])}\n"
+                            if d > 0: msg += f"   ☕ Desayuno: {d}\n"
+                            if a > 0: msg += f"   🍲 Almuerzo: {a}\n"
+                            if c > 0: msg += f"   🥪 Cena: {c}\n"
+                            
                     msg += f"\n🔥 *TOTAL GENERAL:* {int(t_gen)} platos"
                     st.code(msg, language="markdown")
         with c_btn2:
@@ -207,10 +217,16 @@ with tab_comensales:
     st.markdown("---")
     filas_html_com = ""
     for _, row in df_editado_com.iterrows():
-        d = int(pd.to_numeric(row['Desayuno'], errors='coerce')) if pd.notna(row['Desayuno']) else 0
-        a = int(pd.to_numeric(row['Almuerzo'], errors='coerce')) if pd.notna(row['Almuerzo']) else 0
-        c = int(pd.to_numeric(row['Cena'], errors='coerce')) if pd.notna(row['Cena']) else 0
-        if (d+a+c) > 0:
+        # Extracción segura para la imagen
+        d_val = pd.to_numeric(row['Desayuno'], errors='coerce')
+        a_val = pd.to_numeric(row['Almuerzo'], errors='coerce')
+        c_val = pd.to_numeric(row['Cena'], errors='coerce')
+        
+        d = int(d_val) if pd.notna(d_val) else 0
+        a = int(a_val) if pd.notna(a_val) else 0
+        c = int(c_val) if pd.notna(c_val) else 0
+        
+        if (d + a + c) > 0:
             filas_html_com += f"<tr><td style='padding:10px; border:1px solid #000; font-weight:bold; font-size:15px;'>{str(row['Departamento']).upper()}</td><td style='padding:10px; border:1px solid #000; text-align:center; font-size:18px; font-weight:900;'>{str(d) if d>0 else ''}</td><td style='padding:10px; border:1px solid #000; text-align:center; font-size:18px; font-weight:900;'>{str(a) if a>0 else ''}</td><td style='padding:10px; border:1px solid #000; text-align:center; font-size:18px; font-weight:900;'>{str(c) if c>0 else ''}</td></tr>"
 
     logo_b64 = obtener_logo_base64()
@@ -673,9 +689,14 @@ with tab_cierre:
                         t_des, t_alm, t_cen = 0, 0, 0
                         
                         for _, row in df_com.iterrows():
-                            d = int(pd.to_numeric(row['Desayuno'], errors='coerce')) if pd.notna(row['Desayuno']) else 0
-                            a = int(pd.to_numeric(row['Almuerzo'], errors='coerce')) if pd.notna(row['Almuerzo']) else 0
-                            c = int(pd.to_numeric(row['Cena'], errors='coerce')) if pd.notna(row['Cena']) else 0
+                            d_val = pd.to_numeric(row['Desayuno'], errors='coerce')
+                            a_val = pd.to_numeric(row['Almuerzo'], errors='coerce')
+                            c_val = pd.to_numeric(row['Cena'], errors='coerce')
+                            
+                            d = int(d_val) if pd.notna(d_val) else 0
+                            a = int(a_val) if pd.notna(a_val) else 0
+                            c = int(c_val) if pd.notna(c_val) else 0
+                            
                             t_fila = d + a + c
                             if t_fila > 0:
                                 t_des += d; t_alm += a; t_cen += c
