@@ -140,6 +140,7 @@ else:
             st.Page("vzla/flota.py", title="Flota y Mantenimiento", icon="🚛"),
             st.Page("vzla/monitoreo.py", title="Monitoreo de Despachos", icon="🖥️"),
             st.Page("vzla/seguridad.py", title="Prevención y Control", icon="🛡️"),
+            st.Page("vzla/cierre_semanal.py", title="Reporte Semanal", icon="📊"),
             st.Page("vzla/app.py", title="Trafico y Salidas", icon="📊")
         ]
     # Rutas para República Dominicana
