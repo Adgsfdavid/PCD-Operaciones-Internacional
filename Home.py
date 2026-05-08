@@ -98,7 +98,7 @@ else:
             st.Page("vnzl/flota.py", title="Flota y Mantenimiento", icon="🚛"),
             st.Page("vnzl/monitoreo.py", title="Monitoreo de Despachos", icon="🖥️"),
             st.Page("vnzl/seguridad.py", title="Prevención y Control", icon="🛡️"),
-            st.Page("vzla/cierre_semanal.py", title="Reporte Semanal", icon="📊")
+            st.Page("vzla/cierre_semanal.py", title="Reporte Semanal", icon="📊"),
         ]
         
     elif u_data['pais'] == "DOMINICANA":
