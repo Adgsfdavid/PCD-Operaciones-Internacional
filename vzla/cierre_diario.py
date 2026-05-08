@@ -249,7 +249,6 @@ with tab_comensales:
         </body></html>
         """, height=900, scrolling=True)
 
-
 # ==========================================
 # MÓDULO 3: GUARDIA DE FLOTA (Lógica Inteligente)
 # ==========================================
@@ -348,7 +347,6 @@ with tab_flota:
         </body></html>
         """, height=700, scrolling=True)
 
-
 # ==========================================
 # MÓDULO 4: GUARDIA DE MONITOREO 
 # ==========================================
@@ -383,7 +381,7 @@ with tab_monitoreo:
             if st.button("☁️ Guardar en Sheets", use_container_width=True, key="gs_mon"):
                 if not df_edit_mon.empty:
                     df_guardar = df_edit_mon.copy()
-                    df_guardar['Unidades Sr Ramon'] = unidades_ramon # Agregamos el responsable extra a la hoja
+                    df_guardar['Unidades Sr Ramon'] = unidades_ramon
                     with st.spinner("Guardando..."):
                         exito, msj = guardar_en_sheets("GUARDIA_MONITOREO", df_guardar)
                         if exito: st.success(msj)
@@ -434,6 +432,36 @@ with tab_monitoreo:
 # ==========================================
 with tab_cierre:
     
+    # --- LA NUEVA CARGA MASIVA INTELIGENTE ---
+    st.markdown("### 📥 Carga Masiva Inteligente")
+    st.info("Arrastra aquí todas tus pizarras a la vez. El sistema leerá el nombre de cada foto y las acomodará solas en su respectiva sección abajo.")
+    archivos_masivos = st.file_uploader("Subir múltiples imágenes", accept_multiple_files=True, type=['png', 'jpg', 'jpeg'], key="bulk_uploader")
+
+    fotos_auto = {}
+    if archivos_masivos:
+        for arch in archivos_masivos:
+            nom = arch.name.lower()
+            
+            # Mapeo según nombres comunes
+            if "apertura" in nom: fotos_auto["2. Apertura Drotaca 2.0"] = arch
+            elif "juanita" in nom: fotos_auto["9. Cierre Juanita"] = arch
+            elif "combustible" in nom or "reserva" in nom: fotos_auto["12. Pizarra de Control de Reserva de Combustible (El Tigre)"] = arch
+            elif "personal" in nom and "cierre" in nom: fotos_auto["8. Reporte de Personal de Guardia Drotaca 2.0"] = arch
+            elif "cierre" in nom and "drotaca" in nom and "personal" not in nom: fotos_auto["10. Cierre Drotaca 2.0"] = arch
+            elif "estatus" in nom: fotos_auto["4. Pizarra Estatus (Dinámica)"] = arch
+            elif "anterior" in nom or "ayer" in nom or "rutas del dia" in nom: fotos_auto["5. Pizarra de Despachos de Rutas del Día Anterior"] = arch
+            elif "salida" in nom: fotos_auto["6. Pizarra Salida de Rutas"] = arch
+            elif "trafico" in nom or "tráfico" in nom or "transbordo" in nom: fotos_auto["7. Pizarra Tráfico (Transbordo + Oriente)"] = arch
+            elif "surtido" in nom or "extraccion" in nom or "extracción" in nom: fotos_auto["13. Pizarra de Resultado de Surtido / Extracción / Ruta Larga y Corta"] = arch
+            elif "realizado" in nom or ("mantenimiento" in nom and "resultado" in nom): fotos_auto["11. Resultado de Mantenimiento Preventivo Realizado"] = arch
+            elif "planificado" in nom or "mantenimiento" in nom: fotos_auto["3. Mantenimiento Preventivo Vehicular a Realizar"] = arch
+            
+            # Semanales
+            elif "seguridad" in nom: fotos_auto["L1. Guardia De Seguridad"] = arch
+            elif "flota" in nom: fotos_auto["L2. Guardia De Flota"] = arch
+            elif "monitoreo" in nom: fotos_auto["L3. Guardia De Monitoreo"] = arch
+            elif "menu" in nom or "menú" in nom: fotos_auto["L4. Pizarra De Menú Semanal"] = arch
+
     # --- LISTAS DINÁMICAS (FUSIÓN FLOTA/GPS) ---
     procesos_lunes = []
     if es_lunes:
@@ -444,7 +472,6 @@ with tab_cierre:
             "L4. Pizarra De Menú Semanal"
         ]
 
-    # NOTA: Ahora usamos el nombre Dinámico
     procesos_manana = [
         "2. Apertura Drotaca 2.0",
         "3. Mantenimiento Preventivo Vehicular a Realizar",
@@ -471,15 +498,17 @@ with tab_cierre:
     if es_lunes:
         st.markdown("<div style='background-color:#fff3e0; padding:15px; border-left:5px solid #e65100; border-radius:5px;'>", unsafe_allow_html=True)
         st.subheader("📅 GUARDIAS SEMANALES (Solo Lunes)")
-        st.write("Sube las imágenes de las guardias generadas en las pestañas contiguas y el menú semanal.")
         cols_l = st.columns(2)
         for i, proceso in enumerate(procesos_lunes):
             with cols_l[i % 2]:
-                archivo = st.file_uploader(f"📎 {proceso}", type=['png', 'jpg', 'jpeg'], key=f"l_{i}")
-                if archivo:
-                    imagenes_b64[proceso] = procesar_imagen_subida(archivo)
+                archivo_manual = st.file_uploader(f"📎 {proceso}", type=['png', 'jpg', 'jpeg'], key=f"l_{i}")
+                archivo_final = archivo_manual if archivo_manual else fotos_auto.get(proceso)
+                
+                if archivo_final:
+                    imagenes_b64[proceso] = procesar_imagen_subida(archivo_final)
                     procesos_cargados += 1
-                    st.success("✅ Cargado")
+                    if archivo_manual: st.success("✅ Cargada (Manual)")
+                    else: st.success("🤖 Auto-Cargada")
         st.markdown("</div>", unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -487,21 +516,26 @@ with tab_cierre:
     cols_m = st.columns(2)
     for i, proceso in enumerate(procesos_manana):
         with cols_m[i % 2]:
-            # AQUI: Lógica Dinámica para la Pizarra #4
             if proceso == "4. Pizarra Estatus (Dinámica)":
                 tipo_piz_4 = st.radio("Selecciona qué contiene la Pizarra #4:", ["Ambas", "Solo Flota", "Solo GPS"], horizontal=True, key="rad_piz_4")
                 nombre_label = f"📎 4. Estatus ({tipo_piz_4})"
-                archivo = st.file_uploader(nombre_label, type=['png', 'jpg', 'jpeg'], key=f"m_{i}")
-                if archivo:
-                    imagenes_b64[proceso] = procesar_imagen_subida(archivo)
+                archivo_manual = st.file_uploader(nombre_label, type=['png', 'jpg', 'jpeg'], key=f"m_{i}")
+                archivo_final = archivo_manual if archivo_manual else fotos_auto.get(proceso)
+                
+                if archivo_final:
+                    imagenes_b64[proceso] = procesar_imagen_subida(archivo_final)
                     procesos_cargados += 1
-                    st.success("✅ Cargado")
+                    if archivo_manual: st.success("✅ Cargada (Manual)")
+                    else: st.success("🤖 Auto-Cargada")
             else:
-                archivo = st.file_uploader(f"📎 {proceso}", type=['png', 'jpg', 'jpeg'], key=f"m_{i}")
-                if archivo:
-                    imagenes_b64[proceso] = procesar_imagen_subida(archivo)
+                archivo_manual = st.file_uploader(f"📎 {proceso}", type=['png', 'jpg', 'jpeg'], key=f"m_{i}")
+                archivo_final = archivo_manual if archivo_manual else fotos_auto.get(proceso)
+                
+                if archivo_final:
+                    imagenes_b64[proceso] = procesar_imagen_subida(archivo_final)
                     procesos_cargados += 1
-                    st.success("✅ Cargado")
+                    if archivo_manual: st.success("✅ Cargada (Manual)")
+                    else: st.success("🤖 Auto-Cargada")
 
     st.markdown("---")
 
@@ -509,17 +543,22 @@ with tab_cierre:
     cols_t = st.columns(2)
     for i, proceso in enumerate(procesos_tarde):
         with cols_t[i % 2]:
-            archivo = st.file_uploader(f"📎 {proceso}", type=['png', 'jpg', 'jpeg'], key=f"t_{i}")
-            if archivo:
-                imagenes_b64[proceso] = procesar_imagen_subida(archivo)
+            archivo_manual = st.file_uploader(f"📎 {proceso}", type=['png', 'jpg', 'jpeg'], key=f"t_{i}")
+            archivo_final = archivo_manual if archivo_manual else fotos_auto.get(proceso)
+            
+            if archivo_final:
+                imagenes_b64[proceso] = procesar_imagen_subida(archivo_final)
                 procesos_cargados += 1
-                st.success("✅ Cargado")
+                if archivo_manual: st.success("✅ Cargada (Manual)")
+                else: st.success("🤖 Auto-Cargada")
 
-    # --- SECCIÓN: SMART FORM - RESUMEN EJECUTIVO FINAL ---
+    # --- SECCIÓN: SMART FORM - RESUMEN EJECUTIVO (OPCIONAL) ---
     st.markdown("---")
     st.subheader("📝 Datos para el Resumen Ejecutivo Final")
+    
+    incluir_resumen = st.checkbox("✅ Incluir resumen escrito y métricas en el PDF", value=False, help="Si dejas esto apagado, el PDF se generará solo con el índice y las pizarras logísticas. Ideal para ahorrar tiempo de transcripción.")
 
-    with st.expander("Desplegar Formulario de Resumen", expanded=True):
+    with st.expander("Desplegar Formulario (Solo si activaste la casilla arriba)", expanded=incluir_resumen):
         c_h1, c_h2, c_h3 = st.columns(3)
         hora_apertura = c_h1.text_input("Apertura Drotaca", "07:00 AM")
         hora_cierre_dro = c_h2.text_input("Cierre Drotaca", "11:00 PM")
@@ -668,7 +707,6 @@ with tab_cierre:
                         titulo_indice = proc
                         titulo_pdf = proc
                         
-                        # --- LÓGICA PARA EL TÍTULO DINÁMICO EN EL PDF ---
                         if proc == "4. Pizarra Estatus (Dinámica)":
                             tipo_selec = st.session_state.get("rad_piz_4", "Ambas")
                             if tipo_selec == "Ambas":
@@ -709,6 +747,33 @@ with tab_cierre:
                         current_page += 1
 
                 total_comensales_str = f"{st.session_state.get('total_comensales', 0):,.0f}"
+
+                # LÓGICA DEL RESUMEN EN EL PDF
+                html_metricas = ""
+                estilo_indice = "flex: 1.2;"
+
+                if incluir_resumen:
+                    html_metricas = f"""
+                    <div style="flex: 1;">
+                        <h2 class="section-title">Métricas Finales del Día</h2>
+                        <div class="metric-box"><span class="metric-label">🕘 Apertura Drotaca:</span><span class="metric-value">{hora_apertura}</span></div>
+                        <div class="metric-box"><span class="metric-label">🕙 Cierre Drotaca:</span><span class="metric-value">{hora_cierre_dro}</span></div>
+                        <div class="metric-box"><span class="metric-label">🕗 Cierre Juanita:</span><span class="metric-value">{hora_cierre_jua}</span></div>
+                        <div class="metric-box" style="margin-top: 15px;"><span class="metric-label">Mantenimientos Planificados:</span><span class="metric-value" style="color: #ff9800;">{mant_plan}</span></div>
+                        <div class="metric-box"><span class="metric-label">Mantenimientos Realizados:</span><span class="metric-value" style="color: #2e7d32;">{mant_real}</span></div>
+                        <div class="metric-box" style="margin-top: 15px;"><span class="metric-label">Total Farmacias Entregadas:</span><span class="metric-value">{farmacias:,.0f}</span></div>
+                        <div class="metric-box"><span class="metric-label">Total Bultos Entregados:</span><span class="metric-value">{bultos:,.0f}</span></div>
+                        <div class="metric-box"><span class="metric-label">Total KMs Recorridos:</span><span class="metric-value">{kms:,.0f} Kms</span></div>
+                        <div class="metric-box" style="margin-top: 15px;"><span class="metric-label">Total Comensales del Día:</span><span class="metric-value">{total_comensales_str} Personas</span></div>
+                        <div style="background-color: #e3f2fd; border-left: 5px solid {color_primario}; padding: 10px; margin-top: 15px;">
+                            <span class="metric-label" style="display: block; margin-bottom: 2px;">Gasoil Disp. (Ciudad Drotaca):</span>
+                            <span class="metric-value" style="display: block; font-size: 18px;">{gasoil_lts:,.0f} Lts</span>
+                            <span style="font-size: 11px; color: #555; font-weight: bold;">Autonomía para {gasoil_dias} días operativos.</span>
+                        </div>
+                    </div>
+                    """
+                else:
+                    estilo_indice = "flex: 1; max-width: 65%; margin: 0 auto;"
 
                 html_master = f"""
                 <!DOCTYPE html>
@@ -774,30 +839,14 @@ with tab_cierre:
                         </div>
                         <div class="inner-padding">
                             <div style="display: flex; gap: 20px; height: 100%;">
-                                <div style="flex: 1;">
-                                    <h2 class="section-title">Métricas Finales del Día</h2>
-                                    <div class="metric-box"><span class="metric-label">🕘 Apertura Drotaca:</span><span class="metric-value">{hora_apertura}</span></div>
-                                    <div class="metric-box"><span class="metric-label">🕙 Cierre Drotaca:</span><span class="metric-value">{hora_cierre_dro}</span></div>
-                                    <div class="metric-box"><span class="metric-label">🕗 Cierre Juanita:</span><span class="metric-value">{hora_cierre_jua}</span></div>
-                                    <div class="metric-box" style="margin-top: 15px;"><span class="metric-label">Mantenimientos Planificados:</span><span class="metric-value" style="color: #ff9800;">{mant_plan}</span></div>
-                                    <div class="metric-box"><span class="metric-label">Mantenimientos Realizados:</span><span class="metric-value" style="color: #2e7d32;">{mant_real}</span></div>
-                                    <div class="metric-box" style="margin-top: 15px;"><span class="metric-label">Total Farmacias Entregadas:</span><span class="metric-value">{farmacias:,.0f}</span></div>
-                                    <div class="metric-box"><span class="metric-label">Total Bultos Entregados:</span><span class="metric-value">{bultos:,.0f}</span></div>
-                                    <div class="metric-box"><span class="metric-label">Total KMs Recorridos:</span><span class="metric-value">{kms:,.0f} Kms</span></div>
-                                    <div class="metric-box" style="margin-top: 15px;"><span class="metric-label">Total Comensales del Día:</span><span class="metric-value">{total_comensales_str} Personas</span></div>
-                                    <div style="background-color: #e3f2fd; border-left: 5px solid {color_primario}; padding: 10px; margin-top: 15px;">
-                                        <span class="metric-label" style="display: block; margin-bottom: 2px;">Gasoil Disp. (Ciudad Drotaca):</span>
-                                        <span class="metric-value" style="display: block; font-size: 18px;">{gasoil_lts:,.0f} Lts</span>
-                                        <span style="font-size: 11px; color: #555; font-weight: bold;">Autonomía para {gasoil_dias} días operativos.</span>
-                                    </div>
-                                </div>
-                                <div style="flex: 1.2;">
-                                    <h2 class="section-title">Índice Operativo</h2>
+                                {html_metricas}
+                                <div style="{estilo_indice}">
+                                    <h2 class="section-title" style="{'text-align:center;' if not incluir_resumen else ''}">Índice Operativo</h2>
                                     <table style="width: 100%; border-collapse: collapse; margin-top: 5px;">
                                         <thead>
                                             <tr style="background-color: {color_primario}; color: white;">
-                                                <th style="padding: 8px; text-align: left; font-size: 12px;">Proceso Operativo</th>
-                                                <th style="padding: 8px; text-align: right; font-size: 12px;">Página</th>
+                                                <th style="padding: 12px; text-align: left; font-size: 14px;">Proceso Operativo</th>
+                                                <th style="padding: 12px; text-align: right; font-size: 14px;">Página</th>
                                             </tr>
                                         </thead>
                                         <tbody>{html_indice_items}</tbody>
