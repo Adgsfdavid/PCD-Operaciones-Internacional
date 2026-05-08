@@ -5,13 +5,13 @@ import streamlit as st
 import pandas as pd
 import base64
 import textwrap
-from datetime import datetime, timedelta
+from datetime import datetime
 import streamlit.components.v1 as components
 from google.oauth2.service_account import Credentials
 import gspread
 
 # ==========================================
-# CONFIGURACIÓN DE CONEXIÓN Y LOGO
+# CONFIGURACIÓN DE CONEXIÓN
 # ==========================================
 def obtener_logo_base64():
     try:
@@ -23,6 +23,7 @@ def obtener_logo_base64():
         return None
     except: return None
 
+# Parche de seguridad para la llave de Google
 CREDENCIALES_GOOGLE = dict(st.secrets["gcp_service_account"])
 llave_sucia = CREDENCIALES_GOOGLE["private_key"]
 llave_limpia = llave_sucia.replace("-----BEGIN PRIVATE KEY-----", "").replace("-----END PRIVATE KEY-----", "").replace("\\n", "").replace("\n", "").replace(" ", "")
@@ -37,29 +38,28 @@ def obtener_cliente_sheets():
 def extraer_datos(nombre_hoja):
     try:
         cliente = obtener_cliente_sheets()
-        # ID de tu base de datos Master
         doc = cliente.open_by_key("1wCM3tcfQJtIQ4gDB0gLe9gJ4_ON7Vl6U4cBGuxXTKZ0")
         hoja = doc.worksheet(nombre_hoja)
         return pd.DataFrame(hoja.get_all_records())
     except: return pd.DataFrame()
 
 # ==========================================
-# LÓGICA DE PROCESAMIENTO SEMANAL
+# INTERFAZ Y FILTRADO
 # ==========================================
 st.title("📊 Master Reporte Semanal de Gestión")
-st.markdown("Consolidado inteligente de las 10 áreas operativas de Drotaca.")
+st.markdown("Consolidado detallado de las 10 áreas operativas de Drotaca.")
 
 c1, c2 = st.columns(2)
 with c1:
     ano_sel = st.selectbox("Año:", [2025, 2026], index=1)
 with c2:
     semana_actual = datetime.now().isocalendar()[1]
-    num_sem = st.number_input("Número de Semana a Analizar:", 1, 53, value=semana_actual)
+    num_sem = st.number_input("Número de Semana:", 1, 53, value=semana_actual)
 
-if st.button("⚡ GENERAR CONSOLIDADO SEMANAL", type="primary", use_container_width=True):
-    with st.spinner(f"Cruzando datos de la Semana {num_sem}..."):
+if st.button("⚡ GENERAR DETALLADO SEMANAL", type="primary", use_container_width=True):
+    with st.spinner(f"Analizando las 10 áreas para la Semana {num_sem}..."):
         
-        # Mapeo de extracción (Tus 10 hojas)
+        # 1. MAPEO DE HOJAS
         hojas = {
             "Apertura": "SEG_APERTURA",
             "M_Plan": "FLOTA_PLANIFICADO",
@@ -75,102 +75,85 @@ if st.button("⚡ GENERAR CONSOLIDADO SEMANAL", type="primary", use_container_wi
         
         data = {k: extraer_datos(v) for k, v in hojas.items()}
         
-        # Función para filtrar por semana
         def filtrar_sem(df):
             if df.empty: return df
-            col_fecha = 'Fecha' if 'Fecha' in df.columns else 'Fecha Sistema'
-            if col_fecha not in df.columns: return df
-            df[col_fecha] = pd.to_datetime(df[col_fecha], dayfirst=True, errors='coerce')
-            return df[df[col_fecha].dt.isocalendar().week == num_sem]
+            col = 'Fecha' if 'Fecha' in df.columns else ('Fecha Sistema' if 'Fecha Sistema' in df.columns else None)
+            if not col: return df
+            df[col] = pd.to_datetime(df[col], dayfirst=True, errors='coerce')
+            return df[df[col].dt.isocalendar().week == num_sem]
 
-        filtered = {k: filtrar_sem(v) for k, v in data.items()}
+        f = {k: filtrar_sem(v) for k, v in data.items()}
+
+        # ==========================================
+        # 2. PROCESAMIENTO POR ÁREA (DETALLADO)
+        # ==========================================
         
-        # --- CÁLCULOS CLAVE (KPIs) ---
-        # 1. Mantenimiento (El Cruce)
-        plan = len(filtered['M_Plan'])
-        real = len(filtered['M_Real'])
-        efectividad_mant = (real/plan*100) if plan > 0 else 0
-        
-        # 2. Operaciones
-        total_bultos = pd.to_numeric(filtered['Despachos']['Bultos'], errors='coerce').sum() if 'Bultos' in filtered['Despachos'].columns else 0
-        total_kms = pd.to_numeric(filtered['Surtido']['Kms'], errors='coerce').sum() if 'Kms' in filtered['Surtido'].columns else 0
-        total_litros = pd.to_numeric(filtered['Surtido']['Litros'], errors='coerce').sum() if 'Litros' in filtered['Surtido'].columns else 0
-        
-        # --- INTERFAZ DE RESULTADOS ---
-        st.success(f"✅ Análisis completado para la Semana {num_sem}")
-        
+        # SECCIÓN SEGURIDAD: Aperturas y Cierres
+        avg_apertura = f['Apertura']['Hora'].mode()[0] if not f['Apertura'].empty else "N/A"
+        avg_cierre_dro = f['Cierre_Dro']['Hora'].mode()[0] if not f['Cierre_Dro'].empty else "N/A"
+        avg_juanita = f['Juanita']['Hora'].mode()[0] if not f['Juanita'].empty else "N/A"
+
+        # SECCIÓN FLOTA: Cruce de Mantenimiento
+        m_plan_list = set(f['M_Plan']['Unidad']) if 'Unidad' in f['M_Plan'].columns else set()
+        m_real_list = set(f['M_Real']['Unidad']) if 'Unidad' in f['M_Real'].columns else set()
+        unidades_pendientes = list(m_plan_list - m_real_list)
+        efectividad = (len(m_real_list) / len(m_plan_list) * 100) if m_plan_list else 100
+
+        # SECCIÓN OPERACIONES: Bultos y KMs
+        t_bultos = pd.to_numeric(f['Despachos']['Bultos'], errors='coerce').sum()
+        t_farmacias = pd.to_numeric(f['Despachos']['Farmacias'], errors='coerce').sum()
+        t_kms = pd.to_numeric(f['Surtido']['Kms'], errors='coerce').sum()
+        t_litros = pd.to_numeric(f['Surtido']['Litros'], errors='coerce').sum()
+
+        # ==========================================
+        # 3. GENERACIÓN VISUAL DEL REPORTE
+        # ==========================================
+        st.subheader("📋 Resumen Ejecutivo de KPIs")
         k1, k2, k3, k4 = st.columns(4)
-        k1.metric("📦 Bultos Semanal", f"{total_bultos:,.0f}")
-        k2.metric("🛣️ Kms Totales", f"{total_kms:,.0f}")
-        k3.metric("🛠️ Efec. Mantenimiento", f"{efectividad_mant:.1f}%")
-        k4.metric("⛽ Consumo Gasoil", f"{total_litros:,.0f} Lts")
-        
-        # ==========================================
-        # GENERADOR DEL PDF SEMANAL (DISEÑO EJECUTIVO)
-        # ==========================================
-        logo_b64 = obtener_logo_base64()
-        color_dro = "#0d47a1"
-        
-        html_semanal = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <style>
-                @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&display=swap');
-                body {{ font-family: 'Montserrat', sans-serif; margin: 0; padding: 0; background-color: #f4f4f4; }}
-                .page {{ width: 210mm; background: white; margin: 20px auto; padding: 40px; box-shadow: 0 0 20px rgba(0,0,0,0.1); border-top: 10px solid {color_dro}; }}
-                .header {{ display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #eee; padding-bottom: 20px; }}
-                .title-box {{ text-align: right; }}
-                .kpi-container {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin: 30px 0; }}
-                .kpi-card {{ background: #f8f9fa; border: 1px solid #ddd; padding: 15px; text-align: center; border-radius: 8px; }}
-                .kpi-value {{ font-size: 22px; font-weight: 900; color: {color_dro}; }}
-                .section-title {{ background: {color_dro}; color: white; padding: 10px; font-size: 16px; margin-top: 30px; border-radius: 4px; }}
-                table {{ width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }}
-                th {{ background: #eee; padding: 8px; border: 1px solid #ddd; text-align: left; }}
-                td {{ padding: 8px; border: 1px solid #ddd; }}
-                @media print {{ .no-print {{ display: none; }} body {{ background: white; }} .page {{ margin: 0; box-shadow: none; }} }}
-            </style>
-        </head>
-        <body>
-            <div class="no-print" style="text-align:center; padding:20px;">
-                <button onclick="window.print()" style="background:#e65100; color:white; border:none; padding:15px 30px; font-size:18px; font-weight:bold; cursor:pointer; border-radius:5px;">📥 DESCARGAR REPORTE SEMANAL</button>
+        k1.metric("📦 Bultos Totales", f"{t_bultos:,.0f}")
+        k2.metric("🏥 Farmacias", f"{t_farmacias:,.0f}")
+        k3.metric("🛣️ Kilometraje", f"{t_kms:,.0f} Km")
+        k4.metric("🛠️ Efec. Mantenimiento", f"{efectividad:.1f}%")
+
+        # ACORDEONES CON DETALLES (Lo que pediste)
+        with st.expander("🔍 Detalle de Seguridad (Aperturas y Cierres)"):
+            st.write(f"**Hora más frecuente de Apertura:** {avg_apertura}")
+            st.write(f"**Hora más frecuente Cierre Drotaca:** {avg_cierre_dro}")
+            st.write(f"**Hora más frecuente Cierre Juanita:** {avg_juanita}")
+            st.dataframe(f['Guardia'], use_container_width=True, hide_index=True)
+
+        with st.expander("🔍 Detalle de Flota y Combustible"):
+            st.write(f"**Unidades Pendientes por Mantenimiento:** {', '.join(unidades_pendientes) if unidades_pendientes else 'Ninguna'}")
+            st.write(f"**Consumo Total de Gasoil:** {t_litros:,.2f} Lts")
+            st.dataframe(f['Reserva'], use_container_width=True, hide_index=True)
+
+        with st.expander("🔍 Detalle de Tráfico y Despachos"):
+            st.dataframe(f['Trafico'], use_container_width=True, hide_index=True)
+
+        # GENERADOR PDF COMPLETO
+        logo = obtener_logo_base64()
+        html_pdf = f"""
+        <div style="font-family: sans-serif; padding: 20px; border-top: 10px solid #0d47a1; background: white;">
+            <div style="display: flex; justify-content: space-between;">
+                <img src="{logo}" style="height: 60px;">
+                <div style="text-align: right;">
+                    <h2 style="margin:0; color:#0d47a1;">REPORTE SEMANAL MASTER</h2>
+                    <p style="margin:0;">Semana {num_sem} - Año {ano_sel}</p>
+                </div>
             </div>
+            <hr>
+            <h3 style="color:#0d47a1;">1. SEGURIDAD Y CIERRES</h3>
+            <p>Apertura Promedio: {avg_apertura} | Cierre Drotaca: {avg_cierre_dro} | Cierre Juanita: {avg_juanita}</p>
             
-            <div class="page">
-                <div class="header">
-                    <img src="{logo_b64}" style="height: 60px;">
-                    <div class="title-box">
-                        <h1 style="margin:0; color:{color_dro};">REPORTE DE GESTIÓN</h1>
-                        <h3 style="margin:0; color:#666;">Semana {num_sem} - Año {ano_sel}</h3>
-                    </div>
-                </div>
-
-                <div class="kpi-container">
-                    <div class="kpi-card"><div>BULTOS</div><div class="kpi-value">{total_bultos:,.0f}</div></div>
-                    <div class="kpi-card"><div>KILOMETRAJE</div><div class="kpi-value">{total_kms:,.0f}</div></div>
-                    <div class="kpi-card"><div>EFEC. MANT.</div><div class="kpi-value">{efectividad_mant:.1f}%</div></div>
-                    <div class="kpi-card"><div>GASOIL</div><div class="kpi-value">{total_litros:,.0f} Lts</div></div>
-                </div>
-
-                <div class="section-title">📊 RESUMEN DE MANTENIMIENTO VEHICULAR (EL CRUCE)</div>
-                <p style="font-size: 13px;">Se analizaron <b>{plan}</b> mantenimientos planificados contra <b>{real}</b> ejecuciones reales registradas.</p>
-                
-                <div class="section-title">🚛 DESPACHOS Y LOGÍSTICA (PIZARRA TRÁFICO)</div>
-                <table>
-                    <thead><tr><th>Día/Fecha</th><th>Rutas Atendidas</th><th>Transbordos</th><th>Novedades</th></tr></thead>
-                    <tbody>
-                        <tr><td>Consolidado Semana {num_sem}</td><td>{len(filtered['Trafico'])} registros</td><td>Verificando...</td><td>Sin novedades críticas</td></tr>
-                    </tbody>
-                </table>
-
-                <div class="section-title">⛽ CONTROL DE COMBUSTIBLE Y RESERVAS</div>
-                <p style="font-size: 13px;">Promedio de reserva en tanques (El Tigre): <b>{pd.to_numeric(filtered['Reserva']['Nivel'], errors='coerce').mean() if 'Nivel' in filtered['Reserva'].columns else 0:.1f}%</b></p>
-                
-                <div style="margin-top:50px; border-top: 1px solid #eee; padding-top: 20px; font-size: 10px; color: #aaa; text-align: center;">
-                    Documento generado automáticamente por el Sistema PCD - Drotaca Internacional
-                </div>
+            <h3 style="color:#0d47a1;">2. FLOTA Y MANTENIMIENTO</h3>
+            <p>Efectividad: {efectividad:.1f}% | Kms: {t_kms:,.0f} | Gasoil: {t_litros:,.0f} Lts</p>
+            <p><b>Pendientes de Mantenimiento:</b> {', '.join(unidades_pendientes) if unidades_pendientes else 'Ninguna'}</p>
+            
+            <h3 style="color:#0d47a1;">3. LOGÍSTICA Y DESPACHOS</h3>
+            <p>Total Bultos: {t_bultos:,.0f} | Total Farmacias: {t_farmacias:,.0f}</p>
+            <div style="text-align: center; margin-top: 50px;">
+                <button onclick="window.print()" style="padding: 10px 20px; background: #e65100; color: white; border: none; cursor: pointer;">Descargar PDF Completo</button>
             </div>
-        </body>
-        </html>
+        </div>
         """
-        components.html(html_semanal, height=1200, scrolling=True)
+        components.html(html_pdf, height=800)
