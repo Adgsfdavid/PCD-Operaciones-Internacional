@@ -23,19 +23,37 @@ def obtener_cliente_sheets():
 def conectar_bd_compras():
     return obtener_cliente_sheets().open_by_key("1M9VQOHU6LHniSBu3A_o2qDFlZITrDRm_f7qYGU5iOX8")
 
-# --- 2. CARGA INICIAL DE DATOS ---
+# --- 2. CARGA INTELIGENTE Y AUTO-REPARACIÓN DE DATOS ---
 try:
     doc = conectar_bd_compras()
     hoja_sol = doc.worksheet("SOLICITUDES")
+    headers = [str(h).strip() for h in hoja_sol.row_values(1)]
+    
+    # Auto-completar columnas faltantes en tu Google Sheet
+    columnas_requeridas = ["Fecha_Entrega", "Dias_Resolucion", "Nota"]
+    for col in columnas_requeridas:
+        if col not in headers:
+            headers.append(col)
+            hoja_sol.update_cell(1, headers.index(col) + 1, col)
+            
     data_raw = hoja_sol.get_all_records()
     df_global = pd.DataFrame(data_raw)
-    df_global.columns = [c.strip() for c in df_global.columns]
+    
+    if not df_global.empty:
+        df_global.columns = [str(c).strip() for c in df_global.columns]
+        # Normalizamos nombres por si tu sheet dice "Fecha" en lugar de "Fecha_Solicitud"
+        rename_map = {'Fecha': 'Fecha_Solicitud', 'Tipo_Solicitud': 'Categoria'}
+        df_global.rename(columns=rename_map, inplace=True)
+        
+        # Garantizar que las columnas existan en memoria para no dar KeyError
+        for col_req in ['Fecha_Entrega', 'Dias_Resolucion', 'Nota', 'Estatus', 'Fecha_Solicitud']:
+            if col_req not in df_global.columns:
+                df_global[col_req] = ""
 except Exception as e:
     df_global = pd.DataFrame()
+    headers = []
 
 st.title("🛒 Gestión y Cronometría de Compras")
-
-# AQUÍ ES DONDE SE DEFINEN LAS PESTAÑAS (Lo que causaba el error si se borraba)
 tab_nueva, tab_control, tab_metricas = st.tabs(["📝 Crear Solicitud", "✅ Check de Entrega", "📊 Historial y Auditoría"])
 
 # ---------------------------------------------------------
@@ -57,7 +75,6 @@ with tab_nueva:
                 "Solicitud para vehículos"
             ])
 
-    # Variables de estado
     if 'filas_compras' not in st.session_state:
         st.session_state['filas_compras'] = pd.DataFrame([{"Cantidad": 1, "Descripción": ""}] * 5)
     if 'archivo_excel_listo' not in st.session_state:
@@ -70,9 +87,7 @@ with tab_nueva:
     df_editado = st.data_editor(st.session_state['filas_compras'], num_rows="dynamic", use_container_width=True, hide_index=True)
     nota_p = st.text_area("Notas para el Excel (B22):")
 
-    # --- ZONA DE BOTONES ---
     col_btn1, col_btn2 = st.columns(2)
-    
     with col_btn1:
         if st.button("🔄 LIMPIAR / REGRESAR", use_container_width=True):
             st.session_state['filas_compras'] = pd.DataFrame([{"Cantidad": 1, "Descripción": ""}] * 5)
@@ -86,19 +101,33 @@ with tab_nueva:
             if df_valido.empty:
                 st.error("Debes llenar al menos un ítem con descripción.")
             else:
-                with st.spinner("Guardando en la base de datos y creando Excel..."):
+                with st.spinner("Alineando columnas y guardando..."):
                     registros = []
-                    for _, r in df_valido.iterrows():
-                        registros.append([
-                            proximo_id, fecha_sol.strftime("%d/%m/%Y"), categoria, 
-                            r['Cantidad'], r['Descripción'].upper(), "PENDIENTE", 
-                            "", "", st.session_state.get('usuario','admin_vzla'), nota_p
-                        ])
+                    for i, (_, r) in enumerate(df_valido.iterrows(), start=1):
+                        # Diccionario con todos los posibles nombres que tengas en tu Sheet
+                        fila_dict = {
+                            "ID_Planilla": proximo_id,
+                            "Fecha": fecha_sol.strftime("%d/%m/%Y"),
+                            "Fecha_Solicitud": fecha_sol.strftime("%d/%m/%Y"),
+                            "Tipo_Solicitud": categoria,
+                            "Categoria": categoria,
+                            "Item_No": i,
+                            "Cantidad": r['Cantidad'],
+                            "Descripcion": r['Descripción'].upper(),
+                            "Estatus": "PENDIENTE",
+                            "Fecha_Entrega": "",
+                            "Dias_Resolucion": "",
+                            "Usuario": st.session_state.get('usuario','admin_vzla'),
+                            "Nota": nota_p
+                        }
+                        # Acomodar exactamente en el orden de los headers
+                        fila_ordenada = [fila_dict.get(h, "") for h in headers]
+                        registros.append(fila_ordenada)
                     
                     hoja_sol.append_rows(registros)
                     doc.worksheet("CONTADOR").update_acell('A2', proximo_id + 1)
                     
-                    # Crear el Excel
+                    # Generar Excel
                     ruta_excel = os.path.join(os.path.dirname(__file__), "Planilla de Solicitud de compra.xlsx")
                     if os.path.exists(ruta_excel):
                         wb = openpyxl.load_workbook(ruta_excel)
@@ -115,24 +144,15 @@ with tab_nueva:
                         st.session_state['nombre_excel_listo'] = f"Solicitud_{proximo_id}.xlsx"
                         st.session_state['mensaje_exito'] = f"✅ ¡Planilla N° {proximo_id} guardada con éxito!"
                     else:
-                        st.session_state['mensaje_exito'] = f"✅ Guardado, pero falta el archivo molde 'Planilla de Solicitud de compra.xlsx'."
+                        st.session_state['mensaje_exito'] = f"✅ Guardado. Falta molde Excel."
 
                     st.session_state['filas_compras'] = pd.DataFrame([{"Cantidad": 1, "Descripción": ""}] * 5)
                     st.rerun()
 
-    # --- ZONA DE MENSAJE Y DESCARGA ---
     if st.session_state['mensaje_exito']:
         st.success(st.session_state['mensaje_exito'])
-    
     if st.session_state['archivo_excel_listo']:
-        st.download_button(
-            label="⬇️ DESCARGAR PLANILLA EXCEL OFICIAL",
-            data=st.session_state['archivo_excel_listo'],
-            file_name=st.session_state['nombre_excel_listo'],
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type="secondary",
-            use_container_width=True
-        )
+        st.download_button(label="⬇️ DESCARGAR PLANILLA EXCEL OFICIAL", data=st.session_state['archivo_excel_listo'], file_name=st.session_state['nombre_excel_listo'], mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="secondary", use_container_width=True)
 
 # ---------------------------------------------------------
 # PESTAÑA 2: CHECK DE ENTREGA
@@ -140,7 +160,7 @@ with tab_nueva:
 with tab_control:
     st.header("📋 Pendientes de Compra")
     if not df_global.empty and 'Estatus' in df_global.columns:
-        df_p = df_global[df_global['Estatus'].str.strip() == 'PENDIENTE'].copy()
+        df_p = df_global[df_global['Estatus'].astype(str).str.strip() == 'PENDIENTE'].copy()
         
         if df_p.empty:
             st.success("✅ No hay ítems pendientes.")
@@ -155,15 +175,24 @@ with tab_control:
                 id_sel = int(seleccion.split("|")[0].replace("P-", "").strip())
                 desc_sel = seleccion.split("|")[1].split("x ", 1)[1].strip()
                 
+                # Encontrar columnas dinámicamente
+                col_estatus = headers.index("Estatus") + 1
+                col_f_ent = headers.index("Fecha_Entrega") + 1
+                col_dias = headers.index("Dias_Resolucion") + 1
+
                 data_actual = hoja_sol.get_all_records()
                 for idx, row in enumerate(data_actual):
                     if int(row['ID_Planilla']) == id_sel and str(row['Descripcion']).strip() == desc_sel:
                         fila_sheet = idx + 2
-                        f_ini = datetime.strptime(str(row['Fecha_Solicitud']), "%d/%m/%Y")
+                        f_ini = datetime.strptime(str(row.get('Fecha', row.get('Fecha_Solicitud'))), "%d/%m/%Y")
                         f_fin = datetime.combine(fecha_rec, datetime.min.time())
                         dias = (f_fin - f_ini).days
                         
-                        hoja_sol.update(f"F{fila_sheet}:H{fila_sheet}", [["COMPRADO", fecha_rec.strftime("%d/%m/%Y"), dias]])
+                        # Actualizar en las columnas correctas sin importar el orden
+                        hoja_sol.update_cell(fila_sheet, col_estatus, "COMPRADO")
+                        hoja_sol.update_cell(fila_sheet, col_f_ent, fecha_rec.strftime("%d/%m/%Y"))
+                        hoja_sol.update_cell(fila_sheet, col_dias, dias)
+                        
                         st.success(f"Entregado en {dias} días.")
                         st.session_state['archivo_excel_listo'] = None
                         st.session_state['mensaje_exito'] = None
@@ -177,16 +206,13 @@ with tab_metricas:
     st.header("📊 Auditoría de Cumplimiento y Eficiencia")
     
     if not df_global.empty and 'Estatus' in df_global.columns:
-        # Limpieza de datos
         df_audit = df_global.copy()
         df_audit['Estatus'] = df_audit['Estatus'].astype(str).str.strip()
         df_audit['Fecha_Solicitud'] = pd.to_datetime(df_audit['Fecha_Solicitud'], format='%d/%m/%Y', errors='coerce')
         
-        # Filtros
         df_comp = df_audit[df_audit['Estatus'] == 'COMPRADO'].copy()
         df_pend = df_audit[df_audit['Estatus'] == 'PENDIENTE'].copy()
         
-        # KPIs
         m1, m2, m3, m4 = st.columns(4)
         
         total_sol = len(df_audit)
@@ -194,10 +220,7 @@ with tab_metricas:
         pendientes = len(df_pend)
         efectividad = (entregados / total_sol * 100) if total_sol > 0 else 0
         
-        if not df_comp.empty and 'Dias_Resolucion' in df_comp.columns:
-            promedio_dias = pd.to_numeric(df_comp['Dias_Resolucion'], errors='coerce').mean()
-        else:
-            promedio_dias = 0
+        promedio_dias = pd.to_numeric(df_comp['Dias_Resolucion'], errors='coerce').mean() if not df_comp.empty else 0
 
         m1.metric("Total Solicitudes", total_sol)
         m2.metric("Efectividad", f"{efectividad:.1f}%")
@@ -210,37 +233,24 @@ with tab_metricas:
         st.markdown("---")
         st.subheader("📋 Detalle General de Movimientos")
 
-        # Calcular días de espera actuales para los pendientes
-        df_audit['Días'] = 0
+        df_audit['DÍAS'] = 0
         hoy = datetime.now()
-        
         for idx, row in df_audit.iterrows():
             if row['Estatus'] == 'PENDIENTE' and pd.notnull(row['Fecha_Solicitud']):
-                dias_espera = (hoy - row['Fecha_Solicitud']).days
-                df_audit.at[idx, 'Días'] = dias_espera
+                df_audit.at[idx, 'DÍAS'] = (hoy - row['Fecha_Solicitud']).days
             else:
-                # Si ya está comprado, toma los días que tardó
-                df_audit.at[idx, 'Días'] = pd.to_numeric(row.get('Dias_Resolucion', 0), errors='coerce')
+                df_audit.at[idx, 'DÍAS'] = pd.to_numeric(row.get('Dias_Resolucion', 0), errors='coerce')
 
-        # Preparar visual
-        df_visual = df_audit[['Fecha_Solicitud', 'Descripcion', 'Cantidad', 'Usuario', 'Estatus', 'Días']].copy()
+        df_visual = df_audit[['Fecha_Solicitud', 'Descripcion', 'Cantidad', 'Usuario', 'Estatus', 'DÍAS']].copy()
         df_visual.columns = ['FECHA', 'ITEM / DESCRIPCIÓN', 'CANT', 'SOLICITADO POR', 'ESTADO', 'DÍAS']
         df_visual['FECHA'] = df_visual['FECHA'].dt.strftime('%d/%m/%Y')
 
         st.dataframe(
             df_visual.sort_values('FECHA', ascending=False),
-            use_container_width=True,
-            hide_index=True,
+            use_container_width=True, hide_index=True,
             column_config={
-                "ESTADO": st.column_config.SelectboxColumn(
-                    "ESTADO",
-                    options=["PENDIENTE", "COMPRADO"],
-                    required=True,
-                ),
-                "DÍAS": st.column_config.NumberColumn(
-                    "DÍAS",
-                    format="%d d"
-                ),
+                "ESTADO": st.column_config.SelectboxColumn("ESTADO", options=["PENDIENTE", "COMPRADO"]),
+                "DÍAS": st.column_config.NumberColumn("DÍAS", format="%d d")
             }
         )
     else:
