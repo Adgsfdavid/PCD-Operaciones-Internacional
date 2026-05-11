@@ -25,143 +25,162 @@ def obtener_cliente_sheets():
 def conectar_bd_compras():
     return obtener_cliente_sheets().open_by_key("1M9VQOHU6LHniSBu3A_o2qDFlZITrDRm_f7qYGU5iOX8")
 
-# --- 2. FUNCIONES DE APOYO ---
-def crear_pdf_auditoria(df_filtrado, rango_texto):
-    pdf = FPDF()
-    pdf.add_page()
-    
-    # Colores Drotaca
-    azul_drotaca = (13, 71, 161)
-    dorado_drotaca = (212, 175, 55)
-    
-    # Encabezado
-    pdf.set_fill_color(*azul_drotaca)
-    pdf.rect(0, 0, 210, 40, 'F')
-    
-    pdf.set_text_color(255, 255, 255)
-    pdf.set_font("Arial", 'B', 16)
-    pdf.cell(0, 10, "REPORTE DE AUDITORIA DE COMPRAS - FLOTA", ln=True, align='C')
-    pdf.set_font("Arial", '', 10)
-    pdf.cell(0, 5, f"Periodo: {rango_texto}", ln=True, align='C')
-    pdf.cell(0, 5, f"Generado el: {datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True, align='C')
-    
-    # Línea Dorada
-    pdf.set_draw_color(*dorado_drotaca)
-    pdf.set_line_width(1)
-    pdf.line(0, 40, 210, 40)
-    
-    pdf.ln(20)
-    pdf.set_text_color(0, 0, 0)
-    
-    # Tabla
-    pdf.set_font("Arial", 'B', 8)
-    pdf.set_fill_color(230, 230, 230)
-    
-    cols = [("ID", 15), ("FECHA", 25), ("DESCRIPCION", 70), ("CANT", 15), ("SOLICITADO", 35), ("ESTADO", 30)]
-    for col_name, width in cols:
-        pdf.cell(width, 10, col_name, border=1, align='C', fill=True)
-    pdf.ln()
-    
-    pdf.set_font("Arial", '', 7)
-    for _, row in df_filtrado.iterrows():
-        pdf.cell(15, 8, str(row['ID_Planilla']), border=1, align='C')
-        pdf.cell(25, 8, row['Fecha_Solicitud'].strftime('%d/%m/%Y'), border=1, align='C')
-        pdf.cell(70, 8, str(row['Descripcion'])[:45], border=1, align='L')
-        pdf.cell(15, 8, str(row['Cantidad']), border=1, align='C')
-        pdf.cell(35, 8, str(row['Usuario'])[:20], border=1, align='C')
-        pdf.cell(30, 8, str(row['Estatus']), border=1, align='C')
-        pdf.ln()
-        
-    return pdf.output(dest='S').encode('latin-1', 'replace')
-
-# --- 3. CARGA DE DATOS ---
+# --- 2. CARGA Y LIMPIEZA DE DATOS ---
 try:
     doc = conectar_bd_compras()
     hoja_sol = doc.worksheet("SOLICITUDES")
+    headers = [str(h).strip() for h in hoja_sol.row_values(1)]
     data_raw = hoja_sol.get_all_records()
     df_global = pd.DataFrame(data_raw)
-    df_global.columns = [str(c).strip() for c in df_global.columns]
-    if 'Fecha' in df_global.columns:
-        df_global.rename(columns={'Fecha': 'Fecha_Solicitud'}, inplace=True)
-    df_global['Fecha_Solicitud'] = pd.to_datetime(df_global['Fecha_Solicitud'], format='%d/%m/%Y', errors='coerce')
+    
+    if not df_global.empty:
+        df_global.columns = [str(c).strip() for c in df_global.columns]
+        # Normalización de nombres para evitar KeyErrors
+        rename_map = {'Fecha': 'Fecha_Solicitud', 'Tipo_Solicitud': 'Categoria'}
+        df_global.rename(columns=rename_map, inplace=True)
+        df_global['Fecha_Solicitud'] = pd.to_datetime(df_global['Fecha_Solicitud'], format='%d/%m/%Y', errors='coerce')
+        for col in ['Estatus', 'Dias_Resolucion', 'Descripcion', 'Cantidad', 'ID_Planilla']:
+            if col not in df_global.columns: df_global[col] = ""
 except:
     df_global = pd.DataFrame()
+    headers = []
 
 st.title("🛒 Gestión y Cronometría de Compras")
 tab_nueva, tab_control, tab_metricas = st.tabs(["📝 Crear Solicitud", "✅ Check de Entrega", "📊 Historial y Auditoría"])
 
-# [LAS PESTAÑAS 1 Y 2 SE MANTIENEN IGUAL QUE TU CÓDIGO ANTERIOR]
+# ---------------------------------------------------------
+# PESTAÑA 1: CREAR SOLICITUD
+# ---------------------------------------------------------
+with tab_nueva:
+    with st.container(border=True):
+        c1, c2 = st.columns(2)
+        with c1:
+            try:
+                hoja_cnt = doc.worksheet("CONTADOR")
+                proximo_id = int(hoja_cnt.acell('A2').value)
+            except: proximo_id = 1
+            st.subheader(f"Planilla N° {proximo_id}")
+            fecha_sol = st.date_input("Fecha Solicitud:", datetime.now())
+        with c2:
+            categoria = st.selectbox("Tipo de Solicitud:", ["Solicitud para stock (almacén de flota)", "Solicitud para vehículos"])
+
+    if 'filas_compras' not in st.session_state:
+        st.session_state['filas_compras'] = pd.DataFrame([{"Cantidad": 1, "Descripción": ""}] * 5)
+    
+    df_editado = st.data_editor(st.session_state['filas_compras'], num_rows="dynamic", use_container_width=True, hide_index=True)
+    nota_p = st.text_area("Notas (B22):")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🔄 LIMPIAR", use_container_width=True):
+            st.session_state['filas_compras'] = pd.DataFrame([{"Cantidad": 1, "Descripción": ""}] * 5)
+            st.rerun()
+    with col2:
+        if st.button("💾 GUARDAR SOLICITUD", type="primary", use_container_width=True):
+            df_v = df_editado[df_editado['Descripción'].str.strip() != ""].copy()
+            if not df_v.empty:
+                with st.spinner("Guardando..."):
+                    registros = []
+                    for i, (_, r) in enumerate(df_v.iterrows(), start=1):
+                        fila_dict = {"ID_Planilla": proximo_id, "Fecha": fecha_sol.strftime("%d/%m/%Y"), "Fecha_Solicitud": fecha_sol.strftime("%d/%m/%Y"), "Tipo_Solicitud": categoria, "Item_No": i, "Cantidad": r['Cantidad'], "Descripcion": r['Descripción'].upper(), "Estatus": "PENDIENTE", "Usuario": st.session_state.get('usuario','admin_vzla'), "Nota": nota_p}
+                        registros.append([fila_dict.get(h, "") for h in headers])
+                    
+                    hoja_sol.append_rows(registros)
+                    doc.worksheet("CONTADOR").update_acell('A2', proximo_id + 1)
+                    st.success("✅ Guardado con éxito.")
+                    st.session_state['filas_compras'] = pd.DataFrame([{"Cantidad": 1, "Descripción": ""}] * 5)
+                    st.rerun()
 
 # ---------------------------------------------------------
-# PESTAÑA 3: HISTORIAL Y AUDITORÍA (CON FILTROS Y PDF)
+# PESTAÑA 2: CHECK DE ENTREGA (CAMBIO DE ESTATUS)
 # ---------------------------------------------------------
-with tab_metricas:
-    st.subheader("🔍 Filtros de Auditoría")
+with tab_control:
+    st.header("🏁 Marcar Ítems como Recibidos")
+    st.info("Al marcar aquí, el sistema cambia el estatus a COMPRADO y calcula los días de demora.")
     
     if not df_global.empty:
-        col_f1, col_f2 = st.columns(2)
-        
-        with col_f1:
-            tipo_filtro = st.radio("Filtrar por:", ["Mes Actual", "Última Semana", "Rango Personalizado"], horizontal=True)
-        
-        with col_f2:
-            hoy = datetime.now()
-            if tipo_filtro == "Rango Personalizado":
-                fecha_inicio = st.date_input("Desde:", hoy - timedelta(days=30))
-                fecha_fin = st.date_input("Hasta:", hoy)
-                df_filtrado = df_global[(df_global['Fecha_Solicitud'].dt.date >= fecha_inicio) & (df_global['Fecha_Solicitud'].dt.date <= fecha_fin)].copy()
-                rango_txt = f"{fecha_inicio.strftime('%d/%m/%Y')} al {fecha_fin.strftime('%d/%m/%Y')}"
-            elif tipo_filtro == "Mes Actual":
-                df_filtrado = df_global[df_global['Fecha_Solicitud'].dt.month == hoy.month].copy()
-                rango_txt = hoy.strftime('%B %Y')
-            else:
-                lunes = hoy - timedelta(days=hoy.weekday())
-                df_filtrado = df_global[df_global['Fecha_Solicitud'].dt.date >= lunes.date()].copy()
-                rango_txt = "Esta Semana"
+        df_p = df_global[df_global['Estatus'].astype(str).str.strip() == 'PENDIENTE'].copy()
+        if df_p.empty:
+            st.success("🎉 No hay pendientes.")
+        else:
+            st.dataframe(df_p[['ID_Planilla', 'Fecha_Solicitud', 'Descripcion', 'Cantidad']], use_container_width=True, hide_index=True)
+            opciones = df_p.apply(lambda r: f"P-{r['ID_Planilla']} | {r['Descripcion']}", axis=1).tolist()
+            seleccion = st.selectbox("Seleccione el ítem que llegó:", opciones)
+            fecha_rec = st.date_input("Fecha de Recepción:", datetime.now())
+            
+            if st.button("🏁 CONFIRMAR ENTREGA", type="primary"):
+                id_sel = int(seleccion.split("|")[0].replace("P-", "").strip())
+                desc_sel = seleccion.split("|")[1].strip()
+                
+                # Actualización en Sheets
+                for idx, row in enumerate(hoja_sol.get_all_records()):
+                    if int(row['ID_Planilla']) == id_sel and str(row['Descripcion']).strip() == desc_sel:
+                        fila = idx + 2
+                        f_ini = datetime.strptime(str(row.get('Fecha', row.get('Fecha_Solicitud'))), "%d/%m/%Y")
+                        dias = (datetime.combine(fecha_rec, datetime.min.time()) - f_ini).days
+                        
+                        # Actualizamos columnas de Estatus, Fecha Entrega y Días
+                        hoja_sol.update_cell(fila, headers.index("Estatus")+1, "COMPRADO")
+                        hoja_sol.update_cell(fila, headers.index("Fecha_Entrega")+1, fecha_rec.strftime("%d/%m/%Y"))
+                        hoja_sol.update_cell(fila, headers.index("Dias_Resolucion")+1, dias)
+                        st.success(f"Entregado en {dias} días.")
+                        st.rerun()
+                        break
 
-        # --- KPIS ---
+# ---------------------------------------------------------
+# PESTAÑA 3: HISTORIAL Y AUDITORÍA (NUEVOS FILTROS)
+# ---------------------------------------------------------
+with tab_metricas:
+    st.header("📊 Auditoría de Eficiencia")
+    
+    if not df_global.empty:
+        # --- FILTROS DISCRETOS ---
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            periodo = st.selectbox("Periodo:", ["Mes Actual", "Semana Actual", "Día de Hoy", "Todo el Historial"])
+        with c2:
+            f_tipo = st.multiselect("Categoría:", ["Solicitud para stock (almacén de flota)", "Solicitud para vehículos"], default=["Solicitud para stock (almacén de flota)", "Solicitud para vehículos"])
+        with c3:
+            f_estatus = st.multiselect("Estatus:", ["PENDIENTE", "COMPRADO"], default=["PENDIENTE", "COMPRADO"])
+
+        # Aplicar Lógica de Filtros
+        df_f = df_global.copy()
+        hoy = datetime.now()
+        
+        if periodo == "Mes Actual":
+            df_f = df_f[df_f['Fecha_Solicitud'].dt.month == hoy.month]
+        elif periodo == "Semana Actual":
+            lunes = hoy - timedelta(days=hoy.weekday())
+            df_f = df_f[df_f['Fecha_Solicitud'].dt.date >= lunes.date()]
+        elif periodo == "Día de Hoy":
+            df_f = df_f[df_f['Fecha_Solicitud'].dt.date == hoy.date()]
+            
+        df_f = df_f[df_f['Categoria'].isin(f_tipo)]
+        df_f = df_f[df_f['Estatus'].str.strip().isin(f_estatus)]
+
+        # --- MÉTRICAS ---
         st.markdown("---")
-        m1, m2, m3, m4 = st.columns(4)
-        total_f = len(df_filtrado)
-        comp_f = len(df_filtrado[df_filtrado['Estatus'] == 'COMPRADO'])
-        pend_f = len(df_filtrado[df_filtrado['Estatus'] == 'PENDIENTE'])
-        prom_f = pd.to_numeric(df_filtrado[df_filtrado['Estatus'] == 'COMP_f']['Dias_Resolucion'], errors='coerce').mean() if comp_f > 0 else 0
+        k1, k2, k3 = st.columns(3)
+        k1.metric("Solicitudes", len(df_f))
+        k2.metric("Pendientes", len(df_f[df_f['Estatus']=='PENDIENTE']))
+        promedio = pd.to_numeric(df_f[df_f['Estatus']=='COMPRADO']['Dias_Resolucion'], errors='coerce').mean()
+        k3.metric("Promedio Entrega", f"{promedio:.1f} días" if not pd.isna(promedio) else "0 d")
 
-        m1.metric("Solicitudes en Periodo", total_f)
-        m2.metric("Pendientes", pend_f, delta=f"{pend_f}", delta_color="inverse")
-        m3.metric("Entregados", comp_f)
-        m4.metric("Promedio Entrega", f"{prom_f:.1f} d")
-
-        # --- TABLA HTML DATATABLES ---
+        # --- TABLA HTML ---
         filas_html = ""
-        for _, row in df_filtrado.sort_values('Fecha_Solicitud', ascending=False).iterrows():
-            badge = f"<span style='background: {'#198754' if row['Estatus']=='COMPRADO' else '#ffc107'}; color: {'white' if row['Estatus']=='COMPRADO' else 'black'}; padding: 4px 8px; border-radius: 4px;'>{row['Estatus']}</span>"
-            filas_html += f"<tr><td>{row['ID_Planilla']}</td><td>{row['Fecha_Solicitud'].strftime('%d/%m/%Y')}</td><td style='text-align:left;'>{row['Descripcion']}</td><td>{row['Cantidad']}</td><td>{row['Usuario']}</td><td>{badge}</td></tr>"
+        for _, r in df_f.sort_values('Fecha_Solicitud', ascending=False).iterrows():
+            badge = f"<span style='background:{'#198754' if r['Estatus']=='COMPRADO' else '#ffc107'}; color:{'white' if r['Estatus']=='COMPRADO' else 'black'}; padding:3px 8px; border-radius:4px;'>{r['Estatus']}</span>"
+            filas_html += f"<tr><td>{r['ID_Planilla']}</td><td>{r['Fecha_Solicitud'].strftime('%d/%m/%Y')}</td><td style='text-align:left;'>{r['Descripcion']}</td><td>{r['Cantidad']}</td><td>{badge}</td></tr>"
 
         html_table = f"""
         <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
-        <style>body {{ background: #0e1117; color: white; }} .dataTables_wrapper {{ color: white; }} table.dataTable tbody tr {{ background: #212529; }}</style>
+        <style>body{{background:#0e1117; color:white; font-size:12px;}} .dataTables_wrapper{{color:white;}} table.dataTable tbody tr{{background:#212529; color:white;}}</style>
         <table id="audit" class="display" style="width:100%">
-            <thead><tr><th>ID</th><th>FECHA</th><th>ITEM</th><th>CANT</th><th>USUARIO</th><th>ESTATUS</th></tr></thead>
+            <thead><tr><th>ID</th><th>FECHA</th><th>ÍTEM</th><th>CANT</th><th>ESTADO</th></tr></thead>
             <tbody>{filas_html}</tbody>
         </table>
         <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
         <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
-        <script>$(document).ready(function() {{ $('#audit').DataTable({{"order": [[0, "desc"]], "language": {{"search": "Buscar:", "lengthMenu": "Mostrar _MENU_ items"}} }}); }});</script>
+        <script>$(document).ready(function(){{$('#audit').DataTable({{"order": [[0, "desc"]], "language": {{"search": "Buscador Rápido:"}}}});}});</script>
         """
         components.html(html_table, height=500, scrolling=True)
-
-        # --- BOTÓN DE EXPORTACIÓN PDF ---
-        st.markdown("### 🖨️ Exportar Resultados")
-        if not df_filtrado.empty:
-            pdf_bytes = crear_pdf_auditoria(df_filtrado, rango_txt)
-            st.download_button(
-                label="📄 DESCARGAR AUDITORÍA EN PDF PROFESIONAL",
-                data=pdf_bytes,
-                file_name=f"Auditoria_Compras_{datetime.now().strftime('%d%m%y')}.pdf",
-                mime="application/pdf",
-                use_container_width=True,
-                type="primary"
-            )
-    else:
-        st.info("No hay datos para filtrar.")
