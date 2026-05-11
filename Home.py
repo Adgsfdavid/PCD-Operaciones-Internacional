@@ -4,7 +4,7 @@ from google.oauth2.service_account import Credentials
 import textwrap
 import traceback
 from datetime import datetime, timedelta
-import pandas as pd  # Se importa para evitar el error de "pd no definido"
+import pandas as pd
 import os
 import extra_streamlit_components as stx 
 
@@ -38,7 +38,7 @@ USUARIOS = {
     "compras_vzla": {"pass": "Compras2026*", "rol": "Compras", "pais": "COMPRAS_VZLA"}
 }
 
-@st.cache_resource(experimental_allow_widgets=True)
+@st.cache_resource
 def get_cookie_manager():
     return stx.CookieManager()
 
@@ -66,7 +66,7 @@ def check_login():
 # ==========================================
 if not check_login():
     st.markdown("<h1 style='text-align: center; color: #0d47a1;'>PCD Internacional</h1>", unsafe_allow_html=True)
-    st.markdown("<h3 style='text-align: center; color: #666;'>Control Tower 2026</h3>", unsafe_allow_True=True)
+    st.markdown("<h3 style='text-align: center; color: #666;'>Control Tower 2026</h3>", unsafe_allow_html=True)
     
     with st.form("login_form"):
         st.write("🔒 Ingrese sus credenciales")
