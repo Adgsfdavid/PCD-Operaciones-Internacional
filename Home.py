@@ -38,11 +38,8 @@ USUARIOS = {
     "compras_vzla": {"pass": "Compras2026*", "rol": "Compras", "pais": "COMPRAS_VZLA"}
 }
 
-@st.cache_resource
-def get_cookie_manager():
-    return stx.CookieManager()
-
-cookie_manager = get_cookie_manager()
+# SOLUCIÓN AL ERROR DE CACHÉ Y WIDGETS
+cookie_manager = stx.CookieManager(key="gestor_cookies_pcd")
 
 def check_login():
     if "logged_in" not in st.session_state:
