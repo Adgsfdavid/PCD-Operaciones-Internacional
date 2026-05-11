@@ -21,7 +21,6 @@ def obtener_cliente_sheets():
     return gspread.authorize(credenciales)
 
 def conectar_bd_compras():
-    # ID: 1M9VQOHU6LHniSBu3A_o2qDFlZITrDRm_f7qYGU5iOX8
     return obtener_cliente_sheets().open_by_key("1M9VQOHU6LHniSBu3A_o2qDFlZITrDRm_f7qYGU5iOX8")
 
 # --- 2. CARGA INICIAL DE DATOS ---
@@ -30,8 +29,6 @@ try:
     hoja_sol = doc.worksheet("SOLICITUDES")
     data_raw = hoja_sol.get_all_records()
     df_global = pd.DataFrame(data_raw)
-    
-    # Limpieza de nombres de columnas para evitar el desplazamiento
     df_global.columns = [c.strip() for c in df_global.columns]
 except Exception as e:
     df_global = pd.DataFrame()
@@ -58,36 +55,38 @@ with tab_nueva:
                 "Solicitud para vehículos"
             ])
 
+    # Variables de estado para limpiar la tabla y mostrar botones
     if 'filas_compras' not in st.session_state:
         st.session_state['filas_compras'] = pd.DataFrame([{"Cantidad": 1, "Descripción": ""}] * 5)
+    if 'archivo_excel_listo' not in st.session_state:
+        st.session_state['archivo_excel_listo'] = None
+    if 'nombre_excel_listo' not in st.session_state:
+        st.session_state['nombre_excel_listo'] = None
+    if 'mensaje_exito' not in st.session_state:
+        st.session_state['mensaje_exito'] = None
 
     df_editado = st.data_editor(st.session_state['filas_compras'], num_rows="dynamic", use_container_width=True, hide_index=True)
     nota_p = st.text_area("Notas para el Excel (B22):")
 
+    # Botón principal de guardado
     if st.button("💾 GUARDAR SOLICITUD", type="primary", use_container_width=True):
         df_valido = df_editado[df_editado['Descripción'].str.strip() != ""].copy()
-        if not df_valido.empty:
-            with st.spinner("Sincronizando con Google Sheets..."):
+        if df_valido.empty:
+            st.error("Debes llenar al menos un ítem con descripción.")
+        else:
+            with st.spinner("Guardando en la base de datos y creando Excel..."):
                 registros = []
                 for _, r in df_valido.iterrows():
-                    # ORDEN ESTRICTO DE 10 COLUMNAS PARA EVITAR DESPLAZAMIENTO
                     registros.append([
-                        proximo_id, 
-                        fecha_sol.strftime("%d/%m/%Y"), 
-                        categoria, 
-                        r['Cantidad'], 
-                        r['Descripción'].upper(), 
-                        "PENDIENTE", 
-                        "", # Fecha_Entrega
-                        "", # Dias_Resolucion
-                        st.session_state.get('usuario','admin_vzla'), 
-                        nota_p
+                        proximo_id, fecha_sol.strftime("%d/%m/%Y"), categoria, 
+                        r['Cantidad'], r['Descripción'].upper(), "PENDIENTE", 
+                        "", "", st.session_state.get('usuario','admin_vzla'), nota_p
                     ])
                 
                 hoja_sol.append_rows(registros)
                 doc.worksheet("CONTADOR").update_acell('A2', proximo_id + 1)
                 
-                # Manejo de Excel
+                # Crear el Excel
                 ruta_excel = os.path.join(os.path.dirname(__file__), "Planilla de Solicitud de compra.xlsx")
                 if os.path.exists(ruta_excel):
                     wb = openpyxl.load_workbook(ruta_excel)
@@ -99,11 +98,32 @@ with tab_nueva:
                             ws[f"C{i}"], ws[f"D{i}"] = row['Cantidad'], row['Descripción'].upper()
                     out = io.BytesIO()
                     wb.save(out)
-                    st.download_button("⬇️ Descargar Planilla Excel", out.getvalue(), f"Solicitud_{proximo_id}.xlsx")
-                
-                st.success("Solicitud registrada correctamente.")
+                    
+                    # Guardamos el Excel en memoria
+                    st.session_state['archivo_excel_listo'] = out.getvalue()
+                    st.session_state['nombre_excel_listo'] = f"Solicitud_{proximo_id}.xlsx"
+                    st.session_state['mensaje_exito'] = f"✅ ¡Planilla N° {proximo_id} guardada con éxito!"
+                else:
+                    st.session_state['mensaje_exito'] = f"✅ Guardado, pero falta el archivo molde 'Planilla de Solicitud de compra.xlsx'."
+
+                # LIMPIAR EL FORMULARIO
                 st.session_state['filas_compras'] = pd.DataFrame([{"Cantidad": 1, "Descripción": ""}] * 5)
+                # Recargar la página para limpiar visualmente
                 st.rerun()
+
+    # --- ZONA DE MENSAJE DE ÉXITO Y DESCARGA (Sobrevive a la recarga) ---
+    if st.session_state['mensaje_exito']:
+        st.success(st.session_state['mensaje_exito'])
+    
+    if st.session_state['archivo_excel_listo']:
+        st.download_button(
+            label="⬇️ DESCARGAR PLANILLA EXCEL OFICIAL",
+            data=st.session_state['archivo_excel_listo'],
+            file_name=st.session_state['nombre_excel_listo'],
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="secondary",
+            use_container_width=True
+        )
 
 # ---------------------------------------------------------
 # PESTAÑA 2: CHECK DE ENTREGA
@@ -117,13 +137,12 @@ with tab_control:
             st.success("✅ No hay ítems pendientes.")
         else:
             st.dataframe(df_p[['ID_Planilla', 'Fecha_Solicitud', 'Descripcion', 'Cantidad']], use_container_width=True, hide_index=True)
-            
             st.markdown("---")
             opciones = df_p.apply(lambda r: f"P-{r['ID_Planilla']} | {r['Cantidad']}x {r['Descripcion']}", axis=1).tolist()
             seleccion = st.selectbox("Seleccione el ítem recibido:", opciones)
             fecha_rec = st.date_input("Fecha de Recepción:", datetime.now())
             
-            if st.button("🏁 CONFIRMAR ENTREGA"):
+            if st.button("🏁 CONFIRMAR ENTREGA", type="primary"):
                 id_sel = int(seleccion.split("|")[0].replace("P-", "").strip())
                 desc_sel = seleccion.split("|")[1].split("x ", 1)[1].strip()
                 
@@ -135,9 +154,11 @@ with tab_control:
                         f_fin = datetime.combine(fecha_rec, datetime.min.time())
                         dias = (f_fin - f_ini).days
                         
-                        # Actualización de columnas F, G, H
                         hoja_sol.update(f"F{fila_sheet}:H{fila_sheet}", [["COMPRADO", fecha_rec.strftime("%d/%m/%Y"), dias]])
                         st.success(f"Entregado en {dias} días.")
+                        # Limpiar variables de la pestaña 1 por si acaso
+                        st.session_state['archivo_excel_listo'] = None
+                        st.session_state['mensaje_exito'] = None
                         st.rerun()
                         break
 
@@ -151,13 +172,12 @@ with tab_metricas:
         df_pend = df_global[df_global['Estatus'].str.strip() == 'PENDIENTE'].copy()
         
         if len(df_pend) >= 15:
-            st.error(f"🚨 ALERTA CRÍTICA: {len(df_pend)} ítems pendientes.")
+            st.error(f"🚨 ALERTA CRÍTICA: {len(df_pend)} ítems pendientes de compra.")
         
         m1, m2, m3 = st.columns(3)
         m1.metric("Total Solicitudes", len(df_global))
         m2.metric("Pendientes", len(df_pend))
         
-        # FIX PARA EL KEYERROR: Verificar si la columna existe y tiene datos
         if not df_comp.empty and 'Dias_Resolucion' in df_comp.columns:
             promedio = pd.to_numeric(df_comp['Dias_Resolucion'], errors='coerce').mean()
             m3.metric("Tiempo Promedio", f"{promedio:.1f} días")
