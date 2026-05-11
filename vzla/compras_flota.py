@@ -7,6 +7,7 @@ import textwrap
 import openpyxl
 import io
 import os
+import streamlit.components.v1 as components
 
 # --- 1. CONFIGURACIÓN DE CONEXIÓN ---
 CREDENCIALES_GOOGLE = dict(st.secrets["gcp_service_account"])
@@ -29,7 +30,6 @@ try:
     hoja_sol = doc.worksheet("SOLICITUDES")
     headers = [str(h).strip() for h in hoja_sol.row_values(1)]
     
-    # Auto-completar columnas faltantes en tu Google Sheet
     columnas_requeridas = ["Fecha_Entrega", "Dias_Resolucion", "Nota"]
     for col in columnas_requeridas:
         if col not in headers:
@@ -41,12 +41,10 @@ try:
     
     if not df_global.empty:
         df_global.columns = [str(c).strip() for c in df_global.columns]
-        # Normalizamos nombres por si tu sheet dice "Fecha" en lugar de "Fecha_Solicitud"
         rename_map = {'Fecha': 'Fecha_Solicitud', 'Tipo_Solicitud': 'Categoria'}
         df_global.rename(columns=rename_map, inplace=True)
         
-        # Garantizar que las columnas existan en memoria para no dar KeyError
-        for col_req in ['Fecha_Entrega', 'Dias_Resolucion', 'Nota', 'Estatus', 'Fecha_Solicitud']:
+        for col_req in ['Fecha_Entrega', 'Dias_Resolucion', 'Nota', 'Estatus', 'Fecha_Solicitud', 'ID_Planilla', 'Usuario']:
             if col_req not in df_global.columns:
                 df_global[col_req] = ""
 except Exception as e:
@@ -104,7 +102,6 @@ with tab_nueva:
                 with st.spinner("Alineando columnas y guardando..."):
                     registros = []
                     for i, (_, r) in enumerate(df_valido.iterrows(), start=1):
-                        # Diccionario con todos los posibles nombres que tengas en tu Sheet
                         fila_dict = {
                             "ID_Planilla": proximo_id,
                             "Fecha": fecha_sol.strftime("%d/%m/%Y"),
@@ -120,14 +117,12 @@ with tab_nueva:
                             "Usuario": st.session_state.get('usuario','admin_vzla'),
                             "Nota": nota_p
                         }
-                        # Acomodar exactamente en el orden de los headers
                         fila_ordenada = [fila_dict.get(h, "") for h in headers]
                         registros.append(fila_ordenada)
                     
                     hoja_sol.append_rows(registros)
                     doc.worksheet("CONTADOR").update_acell('A2', proximo_id + 1)
                     
-                    # Generar Excel
                     ruta_excel = os.path.join(os.path.dirname(__file__), "Planilla de Solicitud de compra.xlsx")
                     if os.path.exists(ruta_excel):
                         wb = openpyxl.load_workbook(ruta_excel)
@@ -175,20 +170,18 @@ with tab_control:
                 id_sel = int(seleccion.split("|")[0].replace("P-", "").strip())
                 desc_sel = seleccion.split("|")[1].split("x ", 1)[1].strip()
                 
-                # Encontrar columnas dinámicamente
                 col_estatus = headers.index("Estatus") + 1
                 col_f_ent = headers.index("Fecha_Entrega") + 1
                 col_dias = headers.index("Dias_Resolucion") + 1
 
                 data_actual = hoja_sol.get_all_records()
                 for idx, row in enumerate(data_actual):
-                    if int(row['ID_Planilla']) == id_sel and str(row['Descripcion']).strip() == desc_sel:
+                    if int(row.get('ID_Planilla', 0)) == id_sel and str(row.get('Descripcion', '')).strip() == desc_sel:
                         fila_sheet = idx + 2
                         f_ini = datetime.strptime(str(row.get('Fecha', row.get('Fecha_Solicitud'))), "%d/%m/%Y")
                         f_fin = datetime.combine(fecha_rec, datetime.min.time())
                         dias = (f_fin - f_ini).days
                         
-                        # Actualizar en las columnas correctas sin importar el orden
                         hoja_sol.update_cell(fila_sheet, col_estatus, "COMPRADO")
                         hoja_sol.update_cell(fila_sheet, col_f_ent, fecha_rec.strftime("%d/%m/%Y"))
                         hoja_sol.update_cell(fila_sheet, col_dias, dias)
@@ -200,7 +193,7 @@ with tab_control:
                         break
 
 # ---------------------------------------------------------
-# PESTAÑA 3: HISTORIAL Y AUDITORÍA
+# PESTAÑA 3: HISTORIAL Y AUDITORÍA (HTML DATATABLES JS)
 # ---------------------------------------------------------
 with tab_metricas:
     st.header("📊 Auditoría de Cumplimiento y Eficiencia")
@@ -213,13 +206,12 @@ with tab_metricas:
         df_comp = df_audit[df_audit['Estatus'] == 'COMPRADO'].copy()
         df_pend = df_audit[df_audit['Estatus'] == 'PENDIENTE'].copy()
         
+        # --- KPIS ---
         m1, m2, m3, m4 = st.columns(4)
-        
         total_sol = len(df_audit)
         entregados = len(df_comp)
         pendientes = len(df_pend)
         efectividad = (entregados / total_sol * 100) if total_sol > 0 else 0
-        
         promedio_dias = pd.to_numeric(df_comp['Dias_Resolucion'], errors='coerce').mean() if not df_comp.empty else 0
 
         m1.metric("Total Solicitudes", total_sol)
@@ -228,30 +220,102 @@ with tab_metricas:
         m4.metric("Promedio Entrega", f"{promedio_dias:.1f} días")
 
         if pendientes >= 15:
-            st.error(f"🚨 **ALERTA DE GESTIÓN:** Se han acumulado {pendientes} solicitudes sin atender. Es necesario revisar el flujo de compras.")
+            st.error(f"🚨 **ALERTA DE GESTIÓN:** Se han acumulado {pendientes} solicitudes sin atender.")
 
         st.markdown("---")
         st.subheader("📋 Detalle General de Movimientos")
 
-        df_audit['DÍAS'] = 0
+        # Preparar data para HTML
+        filas_html = ""
         hoy = datetime.now()
-        for idx, row in df_audit.iterrows():
-            if row['Estatus'] == 'PENDIENTE' and pd.notnull(row['Fecha_Solicitud']):
-                df_audit.at[idx, 'DÍAS'] = (hoy - row['Fecha_Solicitud']).days
+        
+        for idx, row in df_audit.sort_values('Fecha_Solicitud', ascending=False).iterrows():
+            fecha_str = row['Fecha_Solicitud'].strftime('%d/%m/%Y') if pd.notnull(row['Fecha_Solicitud']) else "N/A"
+            estatus = row['Estatus']
+            
+            # Badge de color
+            if estatus == 'COMPRADO':
+                badge = "<span style='background-color: #198754; color: white; padding: 4px 8px; border-radius: 4px; font-weight: bold;'>COMPRADO</span>"
+                dias = pd.to_numeric(row.get('Dias_Resolucion', 0), errors='coerce')
             else:
-                df_audit.at[idx, 'DÍAS'] = pd.to_numeric(row.get('Dias_Resolucion', 0), errors='coerce')
+                badge = "<span style='background-color: #ffc107; color: black; padding: 4px 8px; border-radius: 4px; font-weight: bold;'>PENDIENTE</span>"
+                dias = (hoy - row['Fecha_Solicitud']).days if pd.notnull(row['Fecha_Solicitud']) else 0
+                
+            filas_html += f"""
+                <tr>
+                    <td>{row.get('ID_Planilla', '-')}</td>
+                    <td>{fecha_str}</td>
+                    <td style="text-align: left;">{row.get('Descripcion', '-')}</td>
+                    <td>{row.get('Cantidad', '-')}</td>
+                    <td>{row.get('Usuario', '-')}</td>
+                    <td>{badge}</td>
+                    <td>{int(dias) if pd.notnull(dias) else 0} d</td>
+                </tr>
+            """
 
-        df_visual = df_audit[['Fecha_Solicitud', 'Descripcion', 'Cantidad', 'Usuario', 'Estatus', 'DÍAS']].copy()
-        df_visual.columns = ['FECHA', 'ITEM / DESCRIPCIÓN', 'CANT', 'SOLICITADO POR', 'ESTADO', 'DÍAS']
-        df_visual['FECHA'] = df_visual['FECHA'].dt.strftime('%d/%m/%Y')
+        # Inyectar DataTables.js y HTML
+        html_code = f"""
+        <!DOCTYPE html>
+        <html lang="es">
+        <head>
+            <meta charset="UTF-8">
+            <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
+            <style>
+                body {{ background-color: #0e1117; color: #fff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }}
+                .dataTables_wrapper .dataTables_length, .dataTables_wrapper .dataTables_filter, 
+                .dataTables_wrapper .dataTables_info, .dataTables_wrapper .dataTables_processing, 
+                .dataTables_wrapper .dataTables_paginate {{ color: #fff !important; margin-bottom: 10px; }}
+                .dataTables_wrapper .dataTables_paginate .paginate_button {{ color: #fff !important; }}
+                table.dataTable {{ background-color: #212529; color: #fff; border-collapse: collapse; border-radius: 5px; overflow: hidden; }}
+                table.dataTable thead th {{ background-color: #121416; border-bottom: 2px solid #454d55; padding: 12px; }}
+                table.dataTable tbody tr {{ background-color: #212529; border-bottom: 1px solid #32383e; }}
+                table.dataTable tbody tr:hover {{ background-color: #2c3034; }}
+                table.dataTable tbody td {{ padding: 12px; text-align: center; vertical-align: middle; }}
+                input[type="search"] {{ background-color: #333; color: white; border: 1px solid #555; padding: 4px 8px; border-radius: 4px; outline: none; }}
+                select {{ background-color: #333; color: white; border: 1px solid #555; padding: 4px; border-radius: 4px; outline: none; }}
+            </style>
+        </head>
+        <body>
+            <table id="auditoriaTabla" class="display" style="width:100%">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>FECHA</th>
+                        <th style="text-align: left;">ÍTEM / DESCRIPCIÓN</th>
+                        <th>CANT</th>
+                        <th>SOLICITADO POR</th>
+                        <th>ESTATUS</th>
+                        <th>DÍAS</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {filas_html}
+                </tbody>
+            </table>
+            
+            <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+            <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+            <script>
+                $(document).ready(function() {{
+                    $('#auditoriaTabla').DataTable({{
+                        "order": [[ 0, "desc" ]],
+                        "pageLength": 10,
+                        "language": {{
+                            "lengthMenu": "Mostrar _MENU_ registros",
+                            "zeroRecords": "No se encontraron resultados",
+                            "info": "Mostrando pág _PAGE_ de _PAGES_",
+                            "infoEmpty": "No hay registros disponibles",
+                            "infoFiltered": "(filtrado de _MAX_ totales)",
+                            "search": "Buscar:",
+                            "paginate": {{ "next": "Sig", "previous": "Ant" }}
+                        }}
+                    }});
+                }});
+            </script>
+        </body>
+        </html>
+        """
+        components.html(html_code, height=700, scrolling=True)
 
-        st.dataframe(
-            df_visual.sort_values('FECHA', ascending=False),
-            use_container_width=True, hide_index=True,
-            column_config={
-                "ESTADO": st.column_config.SelectboxColumn("ESTADO", options=["PENDIENTE", "COMPRADO"]),
-                "DÍAS": st.column_config.NumberColumn("DÍAS", format="%d d")
-            }
-        )
     else:
         st.info("Aún no hay registros en el historial para mostrar métricas.")
