@@ -36,7 +36,7 @@ USUARIOS = {
     "compras_vzla": {"pass": "Compras2026*", "rol": "Compras", "pais": "COMPRAS_VZLA"}
 }
 
-# Inicialización directa del gestor de cookies
+# Inicialización del gestor de cookies sin caché para evitar errores
 cookie_manager = stx.CookieManager(key="gestor_cookies_pcd")
 
 def check_login():
@@ -56,10 +56,9 @@ if not check_login():
     st.markdown("<h1 style='text-align: center; color: #0d47a1;'>PCD Internacional</h1>", unsafe_allow_html=True)
     st.markdown("<h3 style='text-align: center; color: #666;'>Control Tower 2026</h3>", unsafe_allow_html=True)
     with st.form("login_form"):
-        st.write("🔒 Ingrese sus credenciales")
         usuario_input = st.text_input("Usuario")
         password_input = st.text_input("Contraseña", type="password")
-        submit_button = st.form_submit_button("Ingresar al Sistema")
+        submit_button = st.form_submit_button("Ingresar")
         if submit_button:
             if usuario_input in USUARIOS and USUARIOS[usuario_input]["pass"] == password_input:
                 st.session_state["logged_in"] = True
@@ -70,10 +69,8 @@ if not check_login():
             else:
                 st.error("❌ Credenciales incorrectas")
 else:
-    usuario_actual = st.session_state["usuario"]
-    u_data = USUARIOS[usuario_actual]
-    st.sidebar.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=80)
-    st.sidebar.markdown(f"**Usuario:** {usuario_actual.upper()}")
+    u_data = USUARIOS[st.session_state["usuario"]]
+    st.sidebar.markdown(f"**Usuario:** {st.session_state['usuario'].upper()}")
     
     if st.sidebar.button("🚪 Cerrar Sesión"):
         try: cookie_manager.delete("pcd_usuario_valido")
@@ -81,6 +78,7 @@ else:
         st.session_state["logged_in"] = False
         st.rerun()
 
+    # Rutas por país/perfil
     if u_data['pais'] in ["VENEZUELA", "MASTER_VZLA"]:
         paginas = [
             st.Page("vzla/cierre_diario.py", title="Cierre Diario Master", icon="📋"),
@@ -98,5 +96,6 @@ else:
             st.Page("rd/cierre_diario.py", title="Cierre Diario (RD)", icon="📋"),
             st.Page("rd/flota.py", title="Flota y Gastos (RD)", icon="🚛")
         ]
+    
     pg = st.navigation(paginas)
     pg.run()
