@@ -3,7 +3,8 @@ import gspread
 from google.oauth2.service_account import Credentials
 import textwrap
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
+import pandas as pd  # Se importa para evitar el error de "pd no definido"
 import os
 import extra_streamlit_components as stx 
 
@@ -11,7 +12,7 @@ import extra_streamlit_components as stx
 st.set_page_config(page_title="PCD Internacional - Login", layout="centered")
 
 # ==========================================
-# CREDENCIALES Y CONEXIÓN DINÁMICA (MODERNIZADA)
+# CREDENCIALES Y CONEXIÓN DINÁMICA
 # ==========================================
 CREDENCIALES_GOOGLE = dict(st.secrets["gcp_service_account"])
 
@@ -26,131 +27,105 @@ def obtener_cliente_sheets():
     credenciales = Credentials.from_service_account_info(CREDENCIALES_GOOGLE, scopes=alcance)
     return gspread.authorize(credenciales)
 
-def guardar_en_google_sheets_directo(nombre_hoja, df):
-    try:
-        cliente = obtener_cliente_sheets()
-        u_data = st.session_state.get("user_data", {})
-        doc = cliente.open_by_key(u_data.get("sheet_id"))
-        
-        try:
-            hoja = doc.worksheet(nombre_hoja)
-        except Exception:
-            hoja = doc.add_worksheet(title=nombre_hoja, rows=1000, cols=20)
-            hoja.append_row(list(df.columns))
-            
-        df_guardar = df.copy().astype(str)
-        if "Fecha Sistema" not in df_guardar.columns:
-            df_guardar.insert(0, "Fecha Sistema", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
-            
-        valores = df_guardar.values.tolist()
-        
-        try:
-            hoja.append_rows(valores, value_input_option='USER_ENTERED')
-        except Exception as error_interno:
-            if "200" in str(error_interno):
-                pass
-            else:
-                raise error_interno
-                
-        return True, "Datos sincronizados correctamente."
-    except Exception as e:
-        return False, f"Error: {e}"
-
 # ==========================================
-# CONFIGURACIÓN REAL DE ACCESOS CON IDs DE SHEETS
+# GESTIÓN DE USUARIOS Y ROLES
 # ==========================================
-CONFIG_PAISES = {
-    "admin_vzla": {
-        "clave": "Vzla2026*", 
-        "pais": "VENEZUELA", 
-        "sheet_id": "1wCM3tcfQJtIQ4gDB0gLe9gJ4_ON7Vl6U4cBGuxXTKZ0" 
-    },
-    "admin_rd": {
-        "clave": "Dom2026*", 
-        "pais": "DOMINICANA", 
-        "sheet_id": "1ourNW6VifjXiJFsyVKamjeBL7iACKEpH0ozdWo8rCMc" 
-    },
-    "david_master": {
-        "clave": "Master123", 
-        "pais": "MASTER_VZLA", 
-        "sheet_id": "1wCM3tcfQJtIQ4gDB0gLe9gJ4_ON7Vl6U4cBGuxXTKZ0" 
-    }
+USUARIOS = {
+    "admin_vzla": {"pass": "Admin1234*", "rol": "Admin", "pais": "VENEZUELA"},
+    "flota_vzla": {"pass": "Flota2026*", "rol": "Coordinador", "pais": "VENEZUELA"},
+    "flota_rd": {"pass": "RDFlota2026*", "rol": "Coordinador", "pais": "DOMINICANA"},
+    "admin_master": {"pass": "MasterDrotaca*", "rol": "Master", "pais": "MASTER_VZLA"},
+    "compras_vzla": {"pass": "Compras2026*", "rol": "Compras", "pais": "COMPRAS_VZLA"}
 }
 
+@st.cache_resource(experimental_allow_widgets=True)
+def get_cookie_manager():
+    return stx.CookieManager()
+
+cookie_manager = get_cookie_manager()
+
+def check_login():
+    if "logged_in" not in st.session_state:
+        st.session_state["logged_in"] = False
+        st.session_state["usuario"] = None
+
+    if st.session_state["logged_in"]:
+        return True
+
+    # Revisar cookie para autologin
+    cookie_user = cookie_manager.get("pcd_usuario_valido")
+    if cookie_user and cookie_user in USUARIOS:
+        st.session_state["logged_in"] = True
+        st.session_state["usuario"] = cookie_user
+        return True
+
+    return False
+
 # ==========================================
-# MANEJO DE SESIÓN Y COOKIES (EVITA EL DESLOGUEO)
+# INTERFAZ DE LOGIN
 # ==========================================
-cookie_manager = stx.CookieManager()
-
-if "logged_in" not in st.session_state:
-    st.session_state["logged_in"] = False
-
-# MAGIA DE LAS COOKIES: Verificamos si el usuario ya se había logueado antes
-usuario_guardado = cookie_manager.get(cookie="pcd_usuario_valido")
-
-# Si hay una cookie guardada en el navegador y el usuario no está logueado en la sesión actual, lo dejamos pasar
-if usuario_guardado in CONFIG_PAISES and not st.session_state["logged_in"]:
-    st.session_state["logged_in"] = True
-    st.session_state["user_data"] = CONFIG_PAISES[usuario_guardado]
-
-def login():
-    try:
-        st.image("logo.png", width=200) 
-    except Exception:
-        pass
-        
-    st.title("🔐 Acceso PCD Internacional")
+if not check_login():
+    st.markdown("<h1 style='text-align: center; color: #0d47a1;'>PCD Internacional</h1>", unsafe_allow_html=True)
+    st.markdown("<h3 style='text-align: center; color: #666;'>Control Tower 2026</h3>", unsafe_allow_True=True)
     
     with st.form("login_form"):
-        usuario = st.text_input("Usuario", placeholder="Ingresa tu usuario")
-        clave = st.text_input("Contraseña", type="password")
-        submit_button = st.form_submit_button("🚀 Ingresar", use_container_width=True)
+        st.write("🔒 Ingrese sus credenciales")
+        usuario_input = st.text_input("Usuario")
+        password_input = st.text_input("Contraseña", type="password")
+        submit_button = st.form_submit_button("Ingresar al Sistema")
         
         if submit_button:
-            if usuario in CONFIG_PAISES and CONFIG_PAISES[usuario]["clave"] == clave:
-                # Guardamos la cookie por 30 días
-                cookie_manager.set("pcd_usuario_valido", usuario, max_age=2592000)
+            if usuario_input in USUARIOS and USUARIOS[usuario_input]["pass"] == password_input:
                 st.session_state["logged_in"] = True
-                st.session_state["user_data"] = CONFIG_PAISES[usuario]
+                st.session_state["usuario"] = usuario_input
+                # Guardar sesión por 30 días
+                cookie_manager.set("pcd_usuario_valido", usuario_input, expires_at=datetime.now() + timedelta(days=30))
+                st.success("✅ Acceso Concedido. Cargando módulos...")
                 st.rerun()
             else:
-                st.error("Usuario o contraseña incorrectos")
-
-# --- LÓGICA DE NAVEGACIÓN ---
-if not st.session_state["logged_in"]:
-    login()
+                st.error("❌ Usuario o contraseña incorrectos")
 else:
-    u_data = st.session_state["user_data"]
-    st.sidebar.title(f"📍 {u_data['pais']}")
+    # ==========================================
+    # ENRUTAMIENTO DINÁMICO (MENÚ LATERAL)
+    # ==========================================
+    usuario_actual = st.session_state["usuario"]
+    u_data = USUARIOS[usuario_actual]
+    
+    st.sidebar.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=80)
+    st.sidebar.markdown(f"**Usuario:** {usuario_actual.upper()}")
+    st.sidebar.markdown(f"**Rol:** {u_data['rol']}")
+    st.sidebar.markdown(f"**Región:** {u_data['pais']}")
     
     if st.sidebar.button("🚪 Cerrar Sesión"):
-        # SOLUCIÓN AL ERROR DE KEYERROR
         try:
             cookie_manager.delete("pcd_usuario_valido")
-        except Exception:
-            pass # Si la cookie no existe o no la encuentra, lo ignoramos sin dar error rojo
-        
+        except:
+            pass 
         st.session_state["logged_in"] = False
         st.rerun()
 
-    # Rutas para Venezuela y Master
-    if u_data['pais'] == "VENEZUELA" or u_data['pais'] == "MASTER_VZLA":
+    # Lógica de navegación por permisos
+    if u_data['pais'] in ["VENEZUELA", "MASTER_VZLA"]:
         paginas = [
             st.Page("vzla/cierre_diario.py", title="Cierre Diario Master", icon="📋"),
             st.Page("vzla/flota.py", title="Flota y Mantenimiento", icon="🚛"),
             st.Page("vzla/monitoreo.py", title="Monitoreo de Despachos", icon="🖥️"),
             st.Page("vzla/seguridad.py", title="Prevención y Control", icon="🛡️"),
             st.Page("vzla/cierre_semanal.py", title="Reporte Semanal", icon="📊"),
-            st.Page("vzla/app.py", title="Trafico y Salidas", icon="📊")
+            st.Page("vzla/compras_flota.py", title="Solicitud de Compras", icon="🛒")
         ]
-    # Rutas para República Dominicana
+    elif u_data['pais'] == "COMPRAS_VZLA":
+        paginas = [
+            st.Page("vzla/compras_flota.py", title="Solicitud de Compras", icon="🛒")
+        ]
     elif u_data['pais'] == "DOMINICANA":
         paginas = [
-            st.Page("rd/cierre_diario.py", title="Cierre Diario Master", icon="📋"),
-            st.Page("rd/flota.py", title="Flota y Mantenimiento", icon="🚛"),
-            st.Page("rd/monitoreo.py", title="Monitoreo de Despachos", icon="🖥️"),
-            st.Page("rd/seguridad.py", title="Prevención y Control", icon="🛡️")
+            st.Page("rd/cierre_diario.py", title="Cierre Diario (RD)", icon="📋"),
+            st.Page("rd/flota.py", title="Flota y Gastos (RD)", icon="🚛")
         ]
-    
+    else:
+        st.error("Configuración de región no encontrada.")
+        st.stop()
+
     pg = st.navigation(paginas)
     pg.run()
