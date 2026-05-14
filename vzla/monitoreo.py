@@ -95,8 +95,30 @@ def guardar_en_google_sheets(df_para_guardar, nombre_hoja):
         return False
 
 # ==========================================
-# CREADORES DE WHATSAPP
+# CREADORES DE WHATSAPP Y CLASIFICADORES
 # ==========================================
+def asignar_subregion(ruta, macro_default):
+    r = str(ruta).upper()
+    # ORIENTE
+    if any(x in r for x in ["ANACO", "CANTAURA", "CARUPANO", "GUIRIA", "CUMANA", "MATURIN", "PUNTA DE MATA", "ESPARTA", "ARAGUA DE BARCELONA"]): return "ORIENTE NORTE"
+    if any(x in r for x in ["BARCELONA", "CLARINES", "BOLIVAR", "DELTA", "TUMEREMO", "GUARICO", "PARIAGUAN", "ORDAZ", "FELIX", "UPATA", "PIAR", "PARAGUA"]): return "ORIENTE SUR"
+    
+    # CENTRO
+    if any(x in r for x in ["CARACAS", "ARAGUA", "SAN JUAN"]): return "CENTRO"
+    if any(x in r for x in ["CARABOBO", "COJEDES"]): return "CENTRO OCCIDENTE"
+    
+    # OCCIDENTE
+    if any(x in r for x in ["LARA 1", "PORTUGUESA 1", "LARA 2", "YARACUY"]): return "OCCIDENTE SUR"
+    if any(x in r for x in ["PORTUGUESA 2", "BARINAS"]): return "LOS LLANOS"
+    if any(x in r for x in ["CORO", "PUNTO FIJO", "MARACAIBO", "CABIMAS", "OJEDA"]): return "OCCIDENTE NORTE"
+    if any(x in r for x in ["MERIDA", "TRUJILLO", "PORTUGUESA 3", "TACHIRA"]): return "LOS ANDES / TACHIRA"
+    
+    # Fallbacks si no detecta nada exacto
+    if macro_default == "ORIENTE": return "ORIENTE SUR"
+    if macro_default == "CENTRO": return "CENTRO"
+    if macro_default == "OCCIDENTE": return "OCCIDENTE NORTE"
+    return "OTRAS REGIONES"
+
 def generar_ws_nacional(dict_dfs, g_rutas, g_cubiertos, g_bultos, g_kms, fecha_str):
     msg = f"*Reporte Nacional de Despachos Drotaca* 🚚\n📅 Fecha: {fecha_str}\n\n"
     
@@ -106,21 +128,25 @@ def generar_ws_nacional(dict_dfs, g_rutas, g_cubiertos, g_bultos, g_kms, fecha_s
     msg += f"📦 Total Bultos Entregados: {g_bultos:,.0f}\n"
     msg += f"📏 Kilómetros Recorridos: {g_kms:,.2f} Km\n\n"
     
-    msg += "🏆 *TOP RUTAS (POR BULTOS ENTREGADOS):*\n"
+    msg += "📊 *DISTRIBUCIÓN NACIONAL DE DESPACHOS:*\n"
     
     orden_esperado = ["ORIENTE", "CENTRO", "OCCIDENTE"]
     for reg in orden_esperado:
         if reg in dict_dfs:
-            df = dict_dfs[reg]
-            nombre_reg = "CENTRO OCCIDENTE" if reg == "CENTRO" else reg
-            msg += f"\n*{nombre_reg}:*\n"
+            df = dict_dfs[reg].copy()
+            df['SubRegion'] = df['DESPACHOS'].apply(lambda x: asignar_subregion(x, reg))
             
-            top_df = df.sort_values(by='BULTOS', ascending=False).head(3)
-            for i, r in top_df.iterrows():
-                chofer = str(r['CHOFER']).title()
-                bultos = r['BULTOS']
-                ruta = str(r['DESPACHOS']).title()
-                msg += f"▪️ {chofer} - *{bultos} Bultos* ({ruta})\n"
+            bultos_macro = df['BULTOS'].sum()
+            porc_macro = (bultos_macro / g_bultos * 100) if g_bultos > 0 else 0
+            
+            msg += f"\n🌍 *{reg} - {porc_macro:.1f}%* ({bultos_macro:,.0f} Bultos)\n"
+            
+            # Ordenar alfabéticamente las subregiones para mantener consistencia
+            for subreg in sorted(df['SubRegion'].unique()):
+                df_sub = df[df['SubRegion'] == subreg]
+                bultos_sub = df_sub['BULTOS'].sum()
+                porc_sub = (bultos_sub / bultos_macro * 100) if bultos_macro > 0 else 0
+                msg += f" ├ {subreg}: {porc_sub:.1f}% ({bultos_sub:,.0f} Bultos)\n"
                 
     msg += "\n✅ *Pizarra visual de cobertura adjunta.*"
     return msg
@@ -445,7 +471,7 @@ def procesar_excel_region(file, hojas_posibles, region_nombre):
 
 
 # ==========================================
-# CREADOR DEL MEGA-HTML NACIONAL DESPACHOS
+# CREADOR DEL MEGA-HTML NACIONAL DESPACHOS (SUBREGIONES)
 # ==========================================
 def html_pizarra_nacional(dict_dfs, fecha_str):
     logo = obtener_logo_base64()
@@ -459,7 +485,10 @@ def html_pizarra_nacional(dict_dfs, fecha_str):
     regiones_presentes = [r for r in orden_esperado if r in dict_dfs]
     
     for region in regiones_presentes:
-        df = dict_dfs[region]
+        df = dict_dfs[region].copy()
+        
+        # Mapeamos a la subregión
+        df['SubRegion'] = df['DESPACHOS'].apply(lambda x: asignar_subregion(x, region))
         
         t_rutas = len(df); t_cubrir = df['CUBRIR'].sum(); t_cubiertos = df['CUBIERTOS'].sum()
         t_pendientes = df['PENDIENTES'].sum(); t_bultos = df['BULTOS'].sum(); t_kms = df['KILOMETROS'].sum()
@@ -467,37 +496,49 @@ def html_pizarra_nacional(dict_dfs, fecha_str):
         g_rutas += t_rutas; g_cubrir += t_cubrir; g_cubiertos += t_cubiertos
         g_pendientes += t_pendientes; g_bultos += t_bultos; g_kms += t_kms
         
-        nombre_mostrar = "CENTRO OCCIDENTE" if region == "CENTRO" else region
-        
-        filas_html = ""
-        for i, r in df.iterrows():
-            bg = "#e9edf4" if i % 2 != 0 else "#ffffff"
-            filas_html += f"""
-            <tr style="background-color: {bg}; text-align: center; font-size: 14px; color: #000000;">
-                <td style="border: 1px solid #000; padding: 8px; font-weight: bold;">{r['ITEM']}</td>
-                <td style="border: 1px solid #000; padding: 8px;">{r['UNIDAD']}</td>
-                <td style="border: 1px solid #000; padding: 8px; font-weight: bold;">{r['CHOFER']}</td>
-                <td style="border: 1px solid #000; padding: 8px; font-weight: bold;">{r['AYUDANTE']}</td>
-                <td style="border: 1px solid #000; padding: 8px; font-size: 12px;">{r['DESPACHOS']}</td>
-                <td style="border: 1px solid #000; padding: 8px; font-weight: bold; font-size: 16px;">{r['CUBRIR']}</td>
-                <td style="border: 1px solid #000; padding: 8px; font-weight: bold; font-size: 16px;">{r['CUBIERTOS']}</td>
-                <td style="border: 1px solid #000; padding: 8px; font-weight: bold; font-size: 16px;">{r['PENDIENTES']}</td>
-                <td style="border: 1px solid #000; padding: 8px; font-weight: bold; font-size: 16px;">{r['BULTOS']}</td>
-                <td style="border: 1px solid #000; padding: 8px; font-weight: bold; font-size: 16px;">{r['KILOMETROS']:,.2f}</td>
-            </tr>
-            """
-            
+        # Título principal de la Macro Zona
         html_tablas_regiones += f"""
         <div style="margin-top: 30px;">
-            <h3 style="color: {color_header}; border-bottom: 3px solid {color_header}; padding-bottom: 5px; margin-bottom: 10px; font-size: 20px; padding-left: 10px;">📍 RUTA {nombre_mostrar}</h3>
-            <table style="width: 100%; border-collapse: collapse; border: 2px solid #000;">
+            <h3 style="color: {color_header}; border-bottom: 3px solid {color_header}; padding-bottom: 5px; margin-bottom: 10px; font-size: 22px; padding-left: 10px; text-transform: uppercase;">🌍 MACRO ZONA: {region}</h3>
+        """
+        
+        for subreg in sorted(df['SubRegion'].unique()):
+            df_sub = df[df['SubRegion'] == subreg]
+            
+            filas_html = ""
+            for i, r in df_sub.reset_index().iterrows():
+                bg = "#e9edf4" if i % 2 != 0 else "#ffffff"
+                filas_html += f"""
+                <tr style="background-color: {bg}; text-align: center; font-size: 14px; color: #000000;">
+                    <td style="border: 1px solid #000; padding: 8px; font-weight: bold;">{r['UNIDAD']}</td>
+                    <td style="border: 1px solid #000; padding: 8px; font-weight: bold;">{r['CHOFER']}</td>
+                    <td style="border: 1px solid #000; padding: 8px; font-weight: bold;">{r['AYUDANTE']}</td>
+                    <td style="border: 1px solid #000; padding: 8px; font-size: 12px; text-align: left;">{r['DESPACHOS']}</td>
+                    <td style="border: 1px solid #000; padding: 8px; font-weight: bold; font-size: 16px;">{r['CUBRIR']}</td>
+                    <td style="border: 1px solid #000; padding: 8px; font-weight: bold; font-size: 16px;">{r['CUBIERTOS']}</td>
+                    <td style="border: 1px solid #000; padding: 8px; font-weight: bold; font-size: 16px;">{r['PENDIENTES']}</td>
+                    <td style="border: 1px solid #000; padding: 8px; font-weight: bold; font-size: 16px;">{r['BULTOS']}</td>
+                    <td style="border: 1px solid #000; padding: 8px; font-weight: bold; font-size: 16px;">{r['KILOMETROS']:,.2f}</td>
+                </tr>
+                """
+            
+            sub_cubrir = df_sub['CUBRIR'].sum()
+            sub_cubiertos = df_sub['CUBIERTOS'].sum()
+            sub_pendientes = df_sub['PENDIENTES'].sum()
+            sub_bultos = df_sub['BULTOS'].sum()
+            sub_kms = df_sub['KILOMETROS'].sum()
+            
+            html_tablas_regiones += f"""
+            <div style="background-color: #e3f2fd; color: #0d47a1; padding: 8px 12px; font-weight: bold; font-size: 16px; border: 2px solid #000; border-bottom: none; margin-top: 15px;">
+                📍 Región: {subreg}
+            </div>
+            <table style="width: 100%; border-collapse: collapse; border: 2px solid #000; margin-bottom: 10px;">
                 <thead>
                     <tr style="background-color: #f2f2f2; font-size: 12px; text-align: center; color: #000;">
-                        <th style="border: 1px solid #000; padding: 8px;">ITEM</th>
-                        <th style="border: 1px solid #000; padding: 8px;">UNIDAD</th>
-                        <th style="border: 1px solid #000; padding: 8px;">CHOFER</th>
-                        <th style="border: 1px solid #000; padding: 8px;">AYUDANTE</th>
-                        <th style="border: 1px solid #000; padding: 8px;">DESPACHOS</th>
+                        <th style="border: 1px solid #000; padding: 8px; width:12%;">UNIDAD</th>
+                        <th style="border: 1px solid #000; padding: 8px; width:15%;">CHOFER</th>
+                        <th style="border: 1px solid #000; padding: 8px; width:15%;">AYUDANTE</th>
+                        <th style="border: 1px solid #000; padding: 8px; width:22%;">DESPACHOS</th>
                         <th style="border: 1px solid #000; padding: 8px;">Cubrir</th>
                         <th style="border: 1px solid #000; padding: 8px;">Cubiertos</th>
                         <th style="border: 1px solid #000; padding: 8px;">Pendientes</th>
@@ -507,18 +548,18 @@ def html_pizarra_nacional(dict_dfs, fecha_str):
                 </thead>
                 <tbody>
                     {filas_html}
-                    <tr style="background-color: #ffffff; text-align: center; font-size: 16px; color: #000;">
-                        <td colspan="5" style="border: 1px solid #000; padding: 10px; text-align: right; font-weight: bold;">Subtotal {nombre_mostrar.title()}:</td>
-                        <td style="border: 1px solid #000; padding: 10px; font-weight: bold;">{t_cubrir}</td>
-                        <td style="border: 1px solid #000; padding: 10px; font-weight: bold; background-color: #c8e6c9; color: #1b5e20;">{t_cubiertos}</td>
-                        <td style="border: 1px solid #000; padding: 10px; font-weight: bold; background-color: #ffcdd2; color: #b71c1c;">{t_pendientes}</td>
-                        <td style="border: 1px solid #000; padding: 10px; font-weight: bold; background-color: #fffb00;">{t_bultos}</td>
-                        <td style="border: 1px solid #000; padding: 10px; font-weight: bold; background-color: #e8f5e9; color: #2e7d32;">{t_kms:,.2f}</td>
+                    <tr style="background-color: #ffe082; text-align: center; font-size: 15px; color: #000;">
+                        <td colspan="4" style="border: 1px solid #000; padding: 8px; text-align: right; font-weight: bold;">Subtotal {subreg}:</td>
+                        <td style="border: 1px solid #000; padding: 8px; font-weight: bold;">{sub_cubrir}</td>
+                        <td style="border: 1px solid #000; padding: 8px; font-weight: bold; background-color: #c8e6c9; color: #1b5e20;">{sub_cubiertos}</td>
+                        <td style="border: 1px solid #000; padding: 8px; font-weight: bold; background-color: #ffcdd2; color: #b71c1c;">{sub_pendientes}</td>
+                        <td style="border: 1px solid #000; padding: 8px; font-weight: bold; background-color: #fffb00;">{sub_bultos}</td>
+                        <td style="border: 1px solid #000; padding: 8px; font-weight: bold; background-color: #e8f5e9; color: #2e7d32;">{sub_kms:,.2f}</td>
                     </tr>
                 </tbody>
             </table>
-        </div>
-        """
+            """
+        html_tablas_regiones += "</div>"
 
     bloque_estadistica_general = f"""
     <div style="margin-top: 40px; padding: 25px; border: 3px solid {color_header}; border-radius: 10px; background-color: #f8f9fa;">
