@@ -107,11 +107,11 @@ def asignar_subregion(ruta, macro_default):
     if any(x in r for x in ["CARACAS", "ARAGUA", "SAN JUAN"]): return "CENTRO"
     if any(x in r for x in ["CARABOBO", "COJEDES"]): return "CENTRO OCCIDENTE"
     
-    # OCCIDENTE
-    if any(x in r for x in ["LARA 1", "PORTUGUESA 1", "LARA 2", "YARACUY"]): return "OCCIDENTE SUR"
-    if any(x in r for x in ["PORTUGUESA 2", "BARINAS"]): return "LOS LLANOS"
+    # OCCIDENTE (Blindado contra 1 vs 01, 2 vs 02, etc.)
+    if any(x in r for x in ["LARA 1", "LARA 01", "PORTUGUESA 1", "PORTUGUESA 01", "LARA 2", "LARA 02", "YARACUY"]): return "OCCIDENTE SUR"
+    if any(x in r for x in ["PORTUGUESA 2", "PORTUGUESA 02", "BARINAS"]): return "LOS LLANOS"
     if any(x in r for x in ["CORO", "PUNTO FIJO", "MARACAIBO", "CABIMAS", "OJEDA"]): return "OCCIDENTE NORTE"
-    if any(x in r for x in ["MERIDA", "TRUJILLO", "PORTUGUESA 3", "TACHIRA"]): return "LOS ANDES / TACHIRA"
+    if any(x in r for x in ["MERIDA", "TRUJILLO", "PORTUGUESA 3", "PORTUGUESA 03", "TACHIRA"]): return "LOS ANDES / TACHIRA"
     
     # Fallbacks si no detecta nada exacto
     if macro_default == "ORIENTE": return "ORIENTE SUR"
