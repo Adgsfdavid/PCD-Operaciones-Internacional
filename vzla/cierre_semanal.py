@@ -124,7 +124,7 @@ rango_fechas = calcular_rango_semana(ano_sel, num_sem)
 t_trafico, t_cierres = st.tabs(["📈 Desempeño de Tráfico", "⏱️ Cronometría de Cierres"])
 
 # ---------------------------------------------------------
-# PESTAÑA 1: DESEMPEÑO DE TRÁFICO (Se mantiene igual)
+# PESTAÑA 1: DESEMPEÑO DE TRÁFICO
 # ---------------------------------------------------------
 with t_trafico:
     st.info("Consolida la data de despachos diarios en una pizarra semanal.")
@@ -248,7 +248,7 @@ with t_trafico:
                     st.code(txt_ws, language="markdown")
 
 # ---------------------------------------------------------
-# PESTAÑA 2: CRONOMETRÍA DE CIERRES (REDISEÑO MATRIZ)
+# PESTAÑA 2: CRONOMETRÍA DE CIERRES
 # ---------------------------------------------------------
 with t_cierres:
     st.info("Análisis de Apertura y Cierres Drotaca 2.0 (Lunes a Viernes).")
@@ -294,7 +294,7 @@ with t_cierres:
                         dict_j = f_j.groupby('Dia_Norm')[c_hora_j].last().to_dict()
                         df_resumen['Juanita'] = df_resumen['Dia_Norm'].map(dict_j).fillna("N/R")
 
-                # 3. DROTACA (Búsqueda específica de *CIERRE DE DROGUERÍA*)
+                # 3. DROTACA Y DEPARTAMENTOS
                 pivot_deps = pd.DataFrame()
                 if not df_d_raw.empty:
                     df_d_raw['Num_Semana'] = df_d_raw[buscar_columna_estricta(df_d_raw, ['semana'])].astype(str).str.extract(r'(\d+)').astype(float)
@@ -303,24 +303,29 @@ with t_cierres:
                     if not f_d.empty:
                         c_dia_d = buscar_columna_estricta(f_d, ['dia', 'día'], evitar=['fecha'])
                         c_fecha_d = buscar_columna_estricta(f_d, ['fecha'])
-                        c_drog = buscar_columna_estricta(f_d, ['cierre de drogueria', 'cierre de droguería', 'drogueria'])
-                        c_dep = buscar_columna_estricta(f_d, ['departamento', 'area'], evitar=['fecha', 'hora'])
-                        c_hora_sal = buscar_columna_estricta(f_d, ['hora salida', 'salida'], evitar=['fecha', 'drogueria'])
+                        c_dep = buscar_columna_estricta(f_d, ['departamento', 'area', 'área'], evitar=['fecha', 'hora'])
+                        c_hora_sal = buscar_columna_estricta(f_d, ['hora salida', 'salida', 'hora', 'cierre'], evitar=['fecha'])
                         
                         f_d['Dia_Norm'] = f_d[c_dia_d].apply(norm_dia) if c_dia_d else ""
                         
-                        if c_drog:
-                            dict_d = f_d.dropna(subset=[c_drog]).groupby('Dia_Norm')[c_drog].last().to_dict()
-                            df_resumen['Drotaca'] = df_resumen['Dia_Norm'].map(dict_d).fillna("N/R")
-                        
-                        if c_fecha_d:
-                            dict_f = f_d.dropna(subset=[c_fecha_d]).groupby('Dia_Norm')[c_fecha_d].last().to_dict()
-                            df_resumen['Fecha'] = df_resumen['Dia_Norm'].map(dict_f).fillna("")
+                        if c_dep and c_hora_sal and c_dia_d:
+                            # A. Extraer el Cierre de Droguería (Fila específica dentro de Departamentos)
+                            filtro_cierre_gen = f_d[c_dep].astype(str).str.upper().str.contains(r"CIERRE DE DROG|CIERRE GENERAL|CIERRE DROTACA", na=False)
+                            df_cierre_gral = f_d[filtro_cierre_gen]
+                            
+                            if not df_cierre_gral.empty:
+                                dict_d = df_cierre_gral.groupby('Dia_Norm')[c_hora_sal].last().to_dict()
+                                df_resumen['Drotaca'] = df_resumen['Dia_Norm'].map(dict_d).fillna("N/R")
+                            
+                            if c_fecha_d:
+                                dict_f = f_d.dropna(subset=[c_fecha_d]).groupby('Dia_Norm')[c_fecha_d].last().to_dict()
+                                df_resumen['Fecha'] = df_resumen['Dia_Norm'].map(dict_f).fillna("")
 
-                        # MATRIZ DE DEPARTAMENTOS
-                        if c_dep and c_hora_sal:
-                            df_deps = f_d.dropna(subset=[c_dep, c_hora_sal]).copy()
-                            df_deps = df_deps[~df_deps[c_dep].str.upper().str.contains("CIERRE DROTACA|CIERRE GENERAL", na=False)]
+                            # B. Extraer Departamentos (Resto de las Filas)
+                            df_deps = f_d[~filtro_cierre_gen].dropna(subset=[c_dep, c_hora_sal]).copy()
+                            df_deps = df_deps[df_deps[c_dep].str.strip() != ""]
+                            df_deps = df_deps[df_deps[c_dep].astype(str).str.lower() != "nan"]
+                            
                             if not df_deps.empty:
                                 pivot_deps = df_deps.pivot_table(index=c_dep, columns='Dia_Norm', values=c_hora_sal, aggfunc='last')
                                 for d in dias_base:
@@ -338,19 +343,19 @@ with t_cierres:
                 
                 filas_gral_html = ""
                 for _, r in df_resumen.iterrows():
-                    h_ap = a_12h(r['Apertura'])
-                    h_ju = a_12h(r['Juanita'])
-                    h_dr = a_12h(r['Drotaca'])
+                    hora_ap = a_12h(r['Apertura'])
+                    hora_ju = a_12h(r['Juanita'])
+                    hora_dr = a_12h(r['Drotaca'])
                     
-                    color_ap = "#2e7d32" if "06:" in h_ap or "07:00" in h_ap else "#000"
-                    color_ju = "#e65100" if h_ju != "N/R" else "#777"
+                    color_ap = "#2e7d32" if "06:" in hora_ap or "07:00" in hora_ap else "#000"
+                    color_ju = "#e65100" if hora_ju != "N/R" else "#777"
                     
                     filas_gral_html += f"""
                     <tr style="text-align: center; border-bottom: 1px solid #ddd;">
                         <td style="padding: 15px; font-weight: bold; background-color: #f8f9fa;">{r['Día'].upper()}<br><small style="color:#666;">{r['Fecha']}</small></td>
-                        <td style="padding: 15px; color: {color_ap}; font-weight: bold; font-size: 16px;">{h_ap}</td>
-                        <td style="padding: 15px; color: {color_ju}; font-weight: bold; font-size: 16px;">{h_ju}</td>
-                        <td style="padding: 15px; font-weight: 900; font-size: 16px;">{h_dr}</td>
+                        <td style="padding: 15px; color: {color_ap}; font-weight: bold; font-size: 16px;">{hora_ap}</td>
+                        <td style="padding: 15px; color: {color_ju}; font-weight: bold; font-size: 16px;">{hora_ju}</td>
+                        <td style="padding: 15px; font-weight: 900; font-size: 16px;">{hora_dr}</td>
                     </tr>
                     """
 
