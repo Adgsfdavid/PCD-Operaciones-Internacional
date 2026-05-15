@@ -62,12 +62,11 @@ def a_12h(hora_24):
     except: return hora_limpia
 
 def buscar_columna(df, palabras_clave):
-    """Busca dinámicamente el nombre de la columna. Retorna None si no la encuentra para evitar mezclar datos."""
     if df.empty: return None
     for col in df.columns:
         if any(p.lower() in str(col).lower() for p in palabras_clave):
             return col
-    return None
+    return None 
 
 def calcular_rango_semana(ano, semana):
     lunes = datetime.strptime(f'{int(ano)}-W{int(semana)}-1', "%G-W%V-%u")
@@ -115,7 +114,7 @@ with t_trafico:
                 rango_fechas = calcular_rango_semana(ano_sel, num_sem)
                 
                 c_sem = buscar_columna(df_raw, ['semana'])
-                if not c_sem: st.error("No se encontró columna de Semana en Tráfico."); st.stop()
+                if not c_sem: st.error("No se encontró columna Semana en Tráfico."); st.stop()
                 
                 df_raw['Num_Semana'] = df_raw[c_sem].astype(str).str.extract(r'(\d+)').astype(float)
                 df_sem = df_raw[df_raw['Num_Semana'] == num_sem].copy()
@@ -228,21 +227,22 @@ with t_trafico:
                     st.code(txt_ws, language="markdown")
 
 # ---------------------------------------------------------
-# PESTAÑA 2: CRONOMETRÍA DE CIERRES (DROTACA 2.0 & JUANITA & DEPARTAMENTOS)
+# PESTAÑA 2: CRONOMETRÍA DE CIERRES (3 HOJAS)
 # ---------------------------------------------------------
 with t_cierres:
-    st.info("Cruza la data de SEG_CIERRE_DROTACA y SEG_CIERRE_JUANITA para auditar los tiempos semanales y por departamento.")
+    st.info("Cruza la data de Aperturas, Juanita y Drotaca 2.0 (Departamentos).")
     if st.button("🕒 Procesar Cronometría de Cierres", type="primary", use_container_width=True):
-        with st.spinner("Analizando y cruzando registros de Cierres..."):
+        with st.spinner("Extrayendo y cruzando 3 bases de datos..."):
             
-            # EXTRAEMOS AMBAS HOJAS
-            df_d_raw = extraer_datos("SEG_CIERRE_DROTACA")
+            # EXTRAEMOS LAS 3 HOJAS
+            df_a_raw = extraer_datos("SEG_APERTURA")
             df_j_raw = extraer_datos("SEG_CIERRE_JUANITA")
+            df_d_raw = extraer_datos("SEG_CIERRE_DROTACA")
             
             if df_d_raw.empty:
-                st.error("No se pudo acceder a la hoja SEG_CIERRE_DROTACA.")
+                st.error("No se pudo acceder a la hoja principal SEG_CIERRE_DROTACA.")
             else:
-                # 1. Preparar DROTACA
+                # 1. Preparar DROTACA (Base Principal para Fechas y Departamentos)
                 c_sem_d = buscar_columna(df_d_raw, ['semana'])
                 if not c_sem_d: st.error("No se encontró columna Semana en SEG_CIERRE_DROTACA."); st.stop()
                 
@@ -254,66 +254,77 @@ with t_cierres:
                 else:
                     c_fecha_d = buscar_columna(f_d, ['fecha'])
                     c_dia_d = buscar_columna(f_d, ['dia', 'día'])
-                    c_aper = buscar_columna(f_d, ['apertur', 'hora ap'])
                     c_drog = buscar_columna(f_d, ['cierre dro', 'cierre de dro', 'cierre general'])
                     
-                    # Evitar Cartesian Explosion: Borrar fechas duplicadas
-                    if c_fecha_d:
-                        f_d = f_d.drop_duplicates(subset=[c_fecha_d])
+                    if c_fecha_d: f_d = f_d.drop_duplicates(subset=[c_fecha_d])
 
                     # Determinar Columnas de Departamentos (Todo lo que no sea base)
-                    cols_basicas_d = [c for c in [c_sem_d, 'Num_Semana', c_dia_d, c_fecha_d, c_aper, c_drog] if c]
+                    cols_basicas_d = [c for c in [c_sem_d, 'Num_Semana', c_dia_d, c_fecha_d, c_drog] if c]
                     deps_cols = [c for c in f_d.columns if c not in cols_basicas_d and str(c).strip() != '' and 'unnamed' not in str(c).lower()]
 
-                    # 2. Preparar JUANITA
-                    f_j_clean = pd.DataFrame(columns=['Fecha_Join', 'Hora_Juanita'])
+                    # 2. Preparar APERTURA
+                    f_a_clean = pd.DataFrame(columns=['Fecha_Join_A', 'Hora_Apertura'])
+                    if not df_a_raw.empty:
+                        c_sem_a = buscar_columna(df_a_raw, ['semana'])
+                        if c_sem_a:
+                            df_a_raw['Num_Semana'] = df_a_raw[c_sem_a].astype(str).str.extract(r'(\d+)').astype(float)
+                            f_a = df_a_raw[df_a_raw['Num_Semana'] == num_sem].copy()
+                            c_fecha_a = buscar_columna(f_a, ['fecha'])
+                            c_aper = buscar_columna(f_a, ['apertura', 'hora', 'apertur'])
+                            if c_fecha_a and c_aper:
+                                f_a = f_a.drop_duplicates(subset=[c_fecha_a])
+                                f_a_clean = f_a[[c_fecha_a, c_aper]].rename(columns={c_fecha_a: 'Fecha_Join_A', c_aper: 'Hora_Apertura'})
+
+                    # 3. Preparar JUANITA
+                    f_j_clean = pd.DataFrame(columns=['Fecha_Join_J', 'Hora_Juanita'])
                     if not df_j_raw.empty:
                         c_sem_j = buscar_columna(df_j_raw, ['semana'])
                         if c_sem_j:
                             df_j_raw['Num_Semana'] = df_j_raw[c_sem_j].astype(str).str.extract(r'(\d+)').astype(float)
                             f_j = df_j_raw[df_j_raw['Num_Semana'] == num_sem].copy()
-                            
                             c_fecha_j = buscar_columna(f_j, ['fecha'])
                             c_juan_hora = buscar_columna(f_j, ['cierre juanita', 'hora juanita', 'juanita', 'hora'])
-                            
                             if c_fecha_j and c_juan_hora:
-                                f_j = f_j.drop_duplicates(subset=[c_fecha_j]) # Evitar duplicados
-                                f_j_clean = f_j[[c_fecha_j, c_juan_hora]].rename(columns={c_fecha_j: 'Fecha_Join', c_juan_hora: 'Hora_Juanita'})
+                                f_j = f_j.drop_duplicates(subset=[c_fecha_j])
+                                f_j_clean = f_j[[c_fecha_j, c_juan_hora]].rename(columns={c_fecha_j: 'Fecha_Join_J', c_juan_hora: 'Hora_Juanita'})
 
-                    # 3. CRUZAR DATOS (MERGE por FECHA)
+                    # 4. CRUZAR DATOS (Base = Drotaca)
+                    f_c = f_d.copy()
+                    
+                    if not f_a_clean.empty and c_fecha_d:
+                        f_c = pd.merge(f_c, f_a_clean, left_on=c_fecha_d, right_on='Fecha_Join_A', how='left')
+                    else: f_c['Hora_Apertura'] = "N/R"
+                        
                     if not f_j_clean.empty and c_fecha_d:
-                        f_c = pd.merge(f_d, f_j_clean, left_on=c_fecha_d, right_on='Fecha_Join', how='left')
-                    else:
-                        f_c = f_d.copy()
-                        f_c['Hora_Juanita'] = "N/R"
+                        f_c = pd.merge(f_c, f_j_clean, left_on=c_fecha_d, right_on='Fecha_Join_J', how='left')
+                    else: f_c['Hora_Juanita'] = "N/R"
 
-                    # 4. ORDENAR CRONOLÓGICAMENTE
+                    # 5. ORDENAR CRONOLÓGICAMENTE
                     dias_orden = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
                     if c_dia_d:
                         f_c['Dia_Orden'] = pd.Categorical(f_c[c_dia_d].str.capitalize(), categories=dias_orden, ordered=True)
                         f_c = f_c.sort_values('Dia_Orden')
                     
-                    # 5. CÁLCULO DE PROMEDIOS (Generales y Departamentos)
+                    # 6. CÁLCULO DE PROMEDIOS
                     prom_juanita = calcular_promedio_horas(f_c['Hora_Juanita'].tolist())
                     prom_drotaca = calcular_promedio_horas(f_c[c_drog].tolist()) if c_drog else "N/R"
 
                     promedios_deps = {}
-                    for dep in deps_cols:
-                        promedios_deps[dep] = calcular_promedio_horas(f_c[dep].tolist())
+                    for dep in deps_cols: promedios_deps[dep] = calcular_promedio_horas(f_c[dep].tolist())
 
+                    logo_b64 = obtener_logo_base64()
+                    
                     # ==========================================
                     # GENERACIÓN HTML - PIZARRA 1: DROTACA & JUANITA
                     # ==========================================
-                    logo_b64 = obtener_logo_base64()
-                    
                     filas_drotaca_html = ""
                     for _, r in f_c.iterrows():
-                        hora_ap = str(r[c_aper]) if c_aper and pd.notna(r[c_aper]) else 'N/R'
+                        hora_ap = str(r['Hora_Apertura']) if pd.notna(r['Hora_Apertura']) else 'N/R'
                         hora_ju = str(r['Hora_Juanita']) if pd.notna(r['Hora_Juanita']) else 'N/R'
                         hora_dr = str(r[c_drog]) if c_drog and pd.notna(r[c_drog]) else 'N/R'
                         
                         color_ap = "#2e7d32" if "06:" in hora_ap or "07:00" in hora_ap else "#000"
-                        color_ju = "#e65100" if hora_ju != "N/R" and hora_ju != "nan" else "#777"
+                        color_ju = "#e65100" if hora_ju != "N/R" and hora_ju.lower() != "nan" else "#777"
                         
                         d_str = str(r[c_dia_d]).upper() if c_dia_d else "DÍA"
                         f_str = str(r[c_fecha_d]) if c_fecha_d else ""
@@ -321,9 +332,9 @@ with t_cierres:
                         filas_drotaca_html += f"""
                         <tr style="text-align: center; border-bottom: 1px solid #ddd;">
                             <td style="padding: 15px; font-weight: bold; background-color: #f8f9fa;">{d_str}<br><small style="color:#666;">{f_str}</small></td>
-                            <td style="padding: 15px; color: {color_ap}; font-weight: bold; font-size: 16px;">{hora_ap}</td>
-                            <td style="padding: 15px; color: {color_ju}; font-weight: bold; font-size: 16px;">{hora_ju if hora_ju != 'nan' else 'N/R'}</td>
-                            <td style="padding: 15px; font-weight: 900; font-size: 16px;">{hora_dr}</td>
+                            <td style="padding: 15px; color: {color_ap}; font-weight: bold; font-size: 16px;">{hora_ap if hora_ap.lower()!='nan' else 'N/R'}</td>
+                            <td style="padding: 15px; color: {color_ju}; font-weight: bold; font-size: 16px;">{hora_ju if hora_ju.lower()!='nan' else 'N/R'}</td>
+                            <td style="padding: 15px; font-weight: 900; font-size: 16px;">{hora_dr if hora_dr.lower()!='nan' else 'N/R'}</td>
                         </tr>
                         """
 
