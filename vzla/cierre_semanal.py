@@ -103,6 +103,16 @@ def calcular_rango_semana(ano, semana):
     domingo = lunes + timedelta(days=6)
     return f"{lunes.strftime('%d/%m/%Y')} al {domingo.strftime('%d/%m/%Y')}"
 
+def extraer_fecha_limpia(fecha_str):
+    """Atrapa la fecha DD/MM/YYYY sin importar si trae hora pegada o texto"""
+    if pd.isna(fecha_str): return pd.NaT
+    match = re.search(r'(\d{2}/\d{2}/\d{4})', str(fecha_str))
+    if match:
+        try:
+            return datetime.strptime(match.group(1), "%d/%m/%Y")
+        except: return pd.NaT
+    return pd.NaT
+
 # ==========================================
 # INTERFAZ PRINCIPAL
 # ==========================================
@@ -346,11 +356,11 @@ with t_cierres:
                     color_ju = "#e65100" if hora_ju != "N/R" else "#777"
                     
                     filas_gral_html += f"""
-                    <tr style="text-align: center; border-bottom: 1px solid #ddd;">
-                        <td style="padding: 15px; font-weight: bold; background-color: #f8f9fa;">{r['Día'].upper()}<br><small style="color:#666;">{r['Fecha']}</small></td>
-                        <td style="padding: 15px; color: {color_ap}; font-weight: bold; font-size: 16px;">{hora_ap}</td>
-                        <td style="padding: 15px; color: {color_ju}; font-weight: bold; font-size: 16px;">{hora_ju}</td>
-                        <td style="padding: 15px; font-weight: 900; font-size: 16px;">{hora_dr}</td>
+                    <tr style="text-align: center;">
+                        <td style="padding: 15px; font-weight: bold; background-color: #f8f9fa; border: 1px solid #000;">{r['Día'].upper()}<br><small style="color:#666;">{r['Fecha']}</small></td>
+                        <td style="padding: 15px; color: {color_ap}; font-weight: bold; font-size: 16px; border: 1px solid #000;">{hora_ap}</td>
+                        <td style="padding: 15px; color: {color_ju}; font-weight: bold; font-size: 16px; border: 1px solid #000;">{hora_ju}</td>
+                        <td style="padding: 15px; font-weight: 900; font-size: 16px; border: 1px solid #000;">{hora_dr}</td>
                     </tr>
                     """
 
@@ -363,7 +373,7 @@ with t_cierres:
                         .pizarra {{ background: white; width: 900px; margin: auto; border-radius: 15px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid {color_azul}; margin-bottom: 40px; }}
                         .header {{ background: {color_azul}; color: white; padding: 30px; display: flex; justify-content: space-between; align-items: center; }}
                         table {{ width: 100%; border-collapse: collapse; }}
-                        th {{ background: #f1f4f9; color: {color_azul}; padding: 15px; text-transform: uppercase; font-size: 12px; border-bottom: 2px solid {color_azul}; }}
+                        th {{ background: #f1f4f9; color: {color_azul}; padding: 15px; text-transform: uppercase; font-size: 12px; border: 1px solid #000; }}
                         .footer-promedios {{ background: #f1f4f9; padding: 20px; display: flex; justify-content: space-around; border-top: 2px solid {color_azul}; }}
                         .promedio-box {{ text-align: center; }}
                         .promedio-label {{ font-size: 12px; font-weight: bold; color: #555; text-transform: uppercase; }}
@@ -405,14 +415,14 @@ with t_cierres:
                         tds = ""
                         for dia in dias_base:
                             val = a_12h(row[dia])
-                            tds += f"<td style='padding: 10px; border: 1px solid #ddd; font-weight: bold; font-size: 13px;'>{val}</td>"
+                            tds += f"<td style='padding: 10px; border: 1px solid #000; font-weight: bold; font-size: 13px;'>{val}</td>"
                         
                         prom = row['Promedio']
                         filas_deps_html += f"""
                         <tr style="text-align: center;">
-                            <td style="padding: 10px; border: 1px solid #ddd; font-weight: 900; background-color: #f8f9fa; text-align: left; color: {color_azul}; font-size: 12px;">{str(dep_nombre).upper()}</td>
+                            <td style="padding: 10px; border: 1px solid #000; font-weight: 900; background-color: #f8f9fa; text-align: left; color: {color_azul}; font-size: 12px;">{str(dep_nombre).upper()}</td>
                             {tds}
-                            <td style="padding: 10px; border: 1px solid #ddd; font-weight: 900; font-size: 14px; color: #1b5e20; background-color: #e8f5e9;">{prom}</td>
+                            <td style="padding: 10px; border: 1px solid #000; font-weight: 900; font-size: 14px; color: #1b5e20; background-color: #e8f5e9;">{prom}</td>
                         </tr>
                         """
 
@@ -431,13 +441,13 @@ with t_cierres:
                             <table>
                                 <thead>
                                     <tr>
-                                        <th style="text-align: left;">DEPARTAMENTO</th>
-                                        <th>LUNES</th>
-                                        <th>MARTES</th>
-                                        <th>MIÉRCOLES</th>
-                                        <th>JUEVES</th>
-                                        <th>VIERNES</th>
-                                        <th style="background: #c8e6c9; color: #1b5e20;">PROMEDIO</th>
+                                        <th style="text-align: left; border: 1px solid #000;">DEPARTAMENTO</th>
+                                        <th style="border: 1px solid #000;">LUNES</th>
+                                        <th style="border: 1px solid #000;">MARTES</th>
+                                        <th style="border: 1px solid #000;">MIÉRCOLES</th>
+                                        <th style="border: 1px solid #000;">JUEVES</th>
+                                        <th style="border: 1px solid #000;">VIERNES</th>
+                                        <th style="background: #c8e6c9; color: #1b5e20; border: 1px solid #000;">PROMEDIO</th>
                                     </tr>
                                 </thead>
                                 <tbody>{filas_deps_html}</tbody>
@@ -463,7 +473,7 @@ with t_cierres:
 
                 st.markdown("---")
                 st.subheader("📱 Resumen para WhatsApp (Cierres y Departamentos)")
-                msg_w = f"⏱️ *Reporte de Cierres Semanal*\n📅 Semana: {int(num_sem)} ({rango_fechas})\n\n"
+                msg_w = f"⏱️ *Reporte de Cierres Semanal - Drotaca 2.0*\n📅 Semana: {int(num_sem)} ({rango_fechas})\n\n"
                 msg_w += f"📍 *Cronometría de la Droguería:*\n"
                 msg_w += f"🔹 Promedio Cierre General: *{prom_drotaca}*\n"
                 msg_w += f"🔹 Promedio Cierre Juanita: *{prom_juanita}*\n\n"
@@ -498,7 +508,7 @@ with t_comensales:
                 else:
                     c_fecha_c = buscar_columna_estricta(df_com_raw, ['fecha', 'timestamp'])
                     if c_fecha_c:
-                        df_com_raw['Fecha_DT'] = pd.to_datetime(df_com_raw[c_fecha_c], dayfirst=True, errors='coerce')
+                        df_com_raw['Fecha_DT'] = df_com_raw[c_fecha_c].apply(extraer_fecha_limpia)
                         df_com_raw['Num_Semana'] = df_com_raw['Fecha_DT'].dt.isocalendar().week
                     else:
                         df_com_raw['Num_Semana'] = num_sem
@@ -537,7 +547,7 @@ with t_comensales:
                     tot_cen = df_grp[c_cen].sum() if c_cen else 0
 
                     # ==========================================
-                    # GENERACIÓN HTML - PIZARRA COMENSALES (DISEÑO AZUL)
+                    # GENERACIÓN HTML - PIZARRA COMENSALES (DISEÑO AZUL CON BORDES NEGROS)
                     # ==========================================
                     color_azul = "#0d47a1"
                     logo_b64 = obtener_logo_base64()
@@ -545,13 +555,13 @@ with t_comensales:
                     filas_com_html = ""
                     for _, r in df_grp.iterrows():
                         filas_com_html += f"""
-                        <tr style="text-align: center; border-bottom: 1px solid #ddd;">
-                            <td style="padding: 12px; font-weight: bold; text-align: left; background-color: #e3f2fd; color: #333;">{r[c_dep]}</td>
-                            <td style="padding: 12px; color: #555;">{f_p(r[c_des]) if c_des else '0'}</td>
-                            <td style="padding: 12px; color: #555;">{f_p(r[c_alm]) if c_alm else '0'}</td>
-                            <td style="padding: 12px; color: #555;">{f_p(r[c_cen]) if c_cen else '0'}</td>
-                            <td style="padding: 12px; font-weight: 900; font-size: 15px; color: {color_azul};">{f_p(r['Total_Servicios'])}</td>
-                            <td style="padding: 12px; font-weight: bold; color: #555;">{r['%']:.1f}%</td>
+                        <tr style="text-align: center;">
+                            <td style="padding: 12px; font-weight: bold; text-align: left; background-color: #e3f2fd; color: #333; border: 1px solid #000;">{r[c_dep]}</td>
+                            <td style="padding: 12px; color: #555; border: 1px solid #000;">{f_p(r[c_des]) if c_des else '0'}</td>
+                            <td style="padding: 12px; color: #555; border: 1px solid #000;">{f_p(r[c_alm]) if c_alm else '0'}</td>
+                            <td style="padding: 12px; color: #555; border: 1px solid #000;">{f_p(r[c_cen]) if c_cen else '0'}</td>
+                            <td style="padding: 12px; font-weight: 900; font-size: 15px; color: {color_azul}; border: 1px solid #000;">{f_p(r['Total_Servicios'])}</td>
+                            <td style="padding: 12px; font-weight: bold; color: #555; border: 1px solid #000;">{r['%']:.1f}%</td>
                         </tr>
                         """
                         
@@ -564,7 +574,7 @@ with t_comensales:
                             .pizarra {{ background: white; width: 900px; margin: auto; border-radius: 15px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid {color_azul}; }}
                             .header {{ background: {color_azul}; color: white; padding: 30px; display: flex; justify-content: space-between; align-items: center; }}
                             table {{ width: 100%; border-collapse: collapse; }}
-                            th {{ background: #e3f2fd; color: {color_azul}; padding: 15px; text-transform: uppercase; font-size: 12px; border-bottom: 2px solid {color_azul}; }}
+                            th {{ background: #e3f2fd; color: {color_azul}; padding: 15px; text-transform: uppercase; font-size: 12px; border: 1px solid #000; }}
                             .footer-totales {{ background: #bbdefb; padding: 15px; display: flex; justify-content: space-around; border-top: 3px solid {color_azul}; font-weight: 900; color: #0d47a1; }}
                             .total-box {{ text-align: center; }}
                         </style>
