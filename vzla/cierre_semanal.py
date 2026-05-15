@@ -56,7 +56,6 @@ def limpiar_hora(hora_str):
     return str(hora_str).replace("*", "").strip()
 
 def a_12h(hora_24):
-    """Convierte cualquier formato de hora a un '05:30 PM' limpio para que el promedio no falle"""
     hora_limpia = limpiar_hora(hora_24)
     if hora_limpia == "N/R" or str(hora_limpia).lower() == "nan" or hora_limpia == "": return "N/R"
     try:
@@ -92,13 +91,10 @@ def calcular_promedio_horas(lista_horas):
             if h_clean != "N/R":
                 tiempos.append(datetime.strptime(h_clean, formato))
         except: continue
-    
     if not tiempos: return "N/R"
-    
     segundos_totales = sum(t.hour * 3600 + t.minute * 60 for t in tiempos) / len(tiempos)
     horas = int(segundos_totales // 3600)
     minutos = int((segundos_totales % 3600) // 60)
-    
     temp_dt = datetime(2026, 1, 1, horas, minutos)
     return temp_dt.strftime("%I:%M %p").upper()
 
@@ -121,7 +117,9 @@ with c2:
     num_sem = st.number_input("Número de Semana a Auditar:", 1, 53, value=semana_actual)
 
 rango_fechas = calcular_rango_semana(ano_sel, num_sem)
-t_trafico, t_cierres = st.tabs(["📈 Desempeño de Tráfico", "⏱️ Cronometría de Cierres"])
+
+# CREAMOS LAS 3 PESTAÑAS
+t_trafico, t_cierres, t_comensales = st.tabs(["📈 Desempeño de Tráfico", "⏱️ Cronometría de Cierres", "🍽️ Pizarra Comensales"])
 
 # ---------------------------------------------------------
 # PESTAÑA 1: DESEMPEÑO DE TRÁFICO
@@ -262,7 +260,6 @@ with t_cierres:
             if df_d_raw.empty:
                 st.error("No se pudo acceder a la hoja principal SEG_CIERRE_DROTACA.")
             else:
-                # SOLO LUNES A VIERNES
                 dias_base = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes"]
                 dias_display = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]
                 
@@ -272,70 +269,68 @@ with t_cierres:
                 df_resumen['Drotaca'] = "N/R"
                 df_resumen['Fecha'] = ""
 
-                # 1. APERTURA
                 if not df_a_raw.empty:
-                    df_a_raw['Num_Semana'] = df_a_raw[buscar_columna_estricta(df_a_raw, ['semana'])].astype(str).str.extract(r'(\d+)').astype(float)
-                    f_a = df_a_raw[df_a_raw['Num_Semana'] == num_sem].copy()
-                    c_dia_a = buscar_columna_estricta(f_a, ['dia', 'día'], evitar=['fecha'])
-                    c_hora_a = buscar_columna_estricta(f_a, ['apertura', 'hora'], evitar=['fecha', 'dia'])
-                    if c_dia_a and c_hora_a:
-                        f_a['Dia_Norm'] = f_a[c_dia_a].apply(norm_dia)
-                        dict_a = f_a.groupby('Dia_Norm')[c_hora_a].last().to_dict()
-                        df_resumen['Apertura'] = df_resumen['Dia_Norm'].map(dict_a).fillna("N/R")
+                    c_sem_a = buscar_columna_estricta(df_a_raw, ['semana'])
+                    if c_sem_a:
+                        df_a_raw['Num_Semana'] = df_a_raw[c_sem_a].astype(str).str.extract(r'(\d+)').astype(float)
+                        f_a = df_a_raw[df_a_raw['Num_Semana'] == num_sem].copy()
+                        c_dia_a = buscar_columna_estricta(f_a, ['dia', 'día'], evitar=['fecha'])
+                        c_hora_a = buscar_columna_estricta(f_a, ['apertura', 'hora'], evitar=['fecha', 'dia'])
+                        if c_dia_a and c_hora_a:
+                            f_a['Dia_Norm'] = f_a[c_dia_a].apply(norm_dia)
+                            dict_a = f_a.groupby('Dia_Norm')[c_hora_a].last().to_dict()
+                            df_resumen['Apertura'] = df_resumen['Dia_Norm'].map(dict_a).fillna("N/R")
 
-                # 2. JUANITA
                 if not df_j_raw.empty:
-                    df_j_raw['Num_Semana'] = df_j_raw[buscar_columna_estricta(df_j_raw, ['semana'])].astype(str).str.extract(r'(\d+)').astype(float)
-                    f_j = df_j_raw[df_j_raw['Num_Semana'] == num_sem].copy()
-                    c_dia_j = buscar_columna_estricta(f_j, ['dia', 'día'], evitar=['fecha'])
-                    c_hora_j = buscar_columna_estricta(f_j, ['juanita', 'hora', 'cierre'], evitar=['fecha', 'dia'])
-                    if c_dia_j and c_hora_j:
-                        f_j['Dia_Norm'] = f_j[c_dia_j].apply(norm_dia)
-                        dict_j = f_j.groupby('Dia_Norm')[c_hora_j].last().to_dict()
-                        df_resumen['Juanita'] = df_resumen['Dia_Norm'].map(dict_j).fillna("N/R")
+                    c_sem_j = buscar_columna_estricta(df_j_raw, ['semana'])
+                    if c_sem_j:
+                        df_j_raw['Num_Semana'] = df_j_raw[c_sem_j].astype(str).str.extract(r'(\d+)').astype(float)
+                        f_j = df_j_raw[df_j_raw['Num_Semana'] == num_sem].copy()
+                        c_dia_j = buscar_columna_estricta(f_j, ['dia', 'día'], evitar=['fecha'])
+                        c_hora_j = buscar_columna_estricta(f_j, ['juanita', 'hora', 'cierre'], evitar=['fecha', 'dia'])
+                        if c_dia_j and c_hora_j:
+                            f_j['Dia_Norm'] = f_j[c_dia_j].apply(norm_dia)
+                            dict_j = f_j.groupby('Dia_Norm')[c_hora_j].last().to_dict()
+                            df_resumen['Juanita'] = df_resumen['Dia_Norm'].map(dict_j).fillna("N/R")
 
-                # 3. DROTACA Y DEPARTAMENTOS
                 pivot_deps = pd.DataFrame()
                 if not df_d_raw.empty:
-                    df_d_raw['Num_Semana'] = df_d_raw[buscar_columna_estricta(df_d_raw, ['semana'])].astype(str).str.extract(r'(\d+)').astype(float)
-                    f_d = df_d_raw[df_d_raw['Num_Semana'] == num_sem].copy()
-                    
-                    if not f_d.empty:
-                        c_dia_d = buscar_columna_estricta(f_d, ['dia', 'día'], evitar=['fecha'])
-                        c_fecha_d = buscar_columna_estricta(f_d, ['fecha'])
-                        c_dep = buscar_columna_estricta(f_d, ['departamento', 'area', 'área'], evitar=['fecha', 'hora'])
-                        c_hora_sal = buscar_columna_estricta(f_d, ['hora salida', 'salida', 'hora', 'cierre'], evitar=['fecha'])
+                    c_sem_d = buscar_columna_estricta(df_d_raw, ['semana'])
+                    if c_sem_d:
+                        df_d_raw['Num_Semana'] = df_d_raw[c_sem_d].astype(str).str.extract(r'(\d+)').astype(float)
+                        f_d = df_d_raw[df_d_raw['Num_Semana'] == num_sem].copy()
                         
-                        f_d['Dia_Norm'] = f_d[c_dia_d].apply(norm_dia) if c_dia_d else ""
-                        
-                        if c_dep and c_hora_sal and c_dia_d:
-                            # A. Extraer el Cierre de Droguería (Fila específica dentro de Departamentos)
-                            filtro_cierre_gen = f_d[c_dep].astype(str).str.upper().str.contains(r"CIERRE DE DROG|CIERRE GENERAL|CIERRE DROTACA", na=False)
-                            df_cierre_gral = f_d[filtro_cierre_gen]
+                        if not f_d.empty:
+                            c_dia_d = buscar_columna_estricta(f_d, ['dia', 'día'], evitar=['fecha'])
+                            c_fecha_d = buscar_columna_estricta(f_d, ['fecha'])
+                            c_dep = buscar_columna_estricta(f_d, ['departamento', 'area', 'área'], evitar=['fecha', 'hora'])
+                            c_hora_sal = buscar_columna_estricta(f_d, ['hora salida', 'salida', 'hora', 'cierre'], evitar=['fecha'])
                             
-                            if not df_cierre_gral.empty:
-                                dict_d = df_cierre_gral.groupby('Dia_Norm')[c_hora_sal].last().to_dict()
-                                df_resumen['Drotaca'] = df_resumen['Dia_Norm'].map(dict_d).fillna("N/R")
+                            f_d['Dia_Norm'] = f_d[c_dia_d].apply(norm_dia) if c_dia_d else ""
                             
-                            if c_fecha_d:
-                                dict_f = f_d.dropna(subset=[c_fecha_d]).groupby('Dia_Norm')[c_fecha_d].last().to_dict()
-                                df_resumen['Fecha'] = df_resumen['Dia_Norm'].map(dict_f).fillna("")
+                            if c_dep and c_hora_sal and c_dia_d:
+                                filtro_cierre_gen = f_d[c_dep].astype(str).str.upper().str.contains(r"CIERRE DE DROG|CIERRE GENERAL|CIERRE DROTACA", na=False)
+                                df_cierre_gral = f_d[filtro_cierre_gen]
+                                
+                                if not df_cierre_gral.empty:
+                                    dict_d = df_cierre_gral.groupby('Dia_Norm')[c_hora_sal].last().to_dict()
+                                    df_resumen['Drotaca'] = df_resumen['Dia_Norm'].map(dict_d).fillna("N/R")
+                                
+                                if c_fecha_d:
+                                    dict_f = f_d.dropna(subset=[c_fecha_d]).groupby('Dia_Norm')[c_fecha_d].last().to_dict()
+                                    df_resumen['Fecha'] = df_resumen['Dia_Norm'].map(dict_f).fillna("")
 
-                            # B. Extraer Departamentos (Resto de las Filas)
-                            df_deps = f_d[~filtro_cierre_gen].dropna(subset=[c_dep, c_hora_sal]).copy()
-                            df_deps = df_deps[df_deps[c_dep].str.strip() != ""]
-                            df_deps = df_deps[df_deps[c_dep].astype(str).str.lower() != "nan"]
-                            
-                            if not df_deps.empty:
-                                pivot_deps = df_deps.pivot_table(index=c_dep, columns='Dia_Norm', values=c_hora_sal, aggfunc='last')
-                                for d in dias_base:
-                                    if d not in pivot_deps.columns: pivot_deps[d] = "N/R"
-                                pivot_deps = pivot_deps[dias_base].fillna("N/R")
-                                pivot_deps['Promedio'] = pivot_deps.apply(lambda row: calcular_promedio_horas(row.tolist()), axis=1)
+                                df_deps = f_d[~filtro_cierre_gen].dropna(subset=[c_dep, c_hora_sal]).copy()
+                                df_deps = df_deps[df_deps[c_dep].str.strip() != ""]
+                                df_deps = df_deps[df_deps[c_dep].astype(str).str.lower() != "nan"]
+                                
+                                if not df_deps.empty:
+                                    pivot_deps = df_deps.pivot_table(index=c_dep, columns='Dia_Norm', values=c_hora_sal, aggfunc='last')
+                                    for d in dias_base:
+                                        if d not in pivot_deps.columns: pivot_deps[d] = "N/R"
+                                    pivot_deps = pivot_deps[dias_base].fillna("N/R")
+                                    pivot_deps['Promedio'] = pivot_deps.apply(lambda row: calcular_promedio_horas(row.tolist()), axis=1)
 
-                # ==========================================
-                # HTML RENDERING - PIZARRA GENERAL
-                # ==========================================
                 prom_juanita = calcular_promedio_horas(df_resumen['Juanita'].tolist())
                 prom_drotaca = calcular_promedio_horas(df_resumen['Drotaca'].tolist())
                 logo_b64 = obtener_logo_base64()
@@ -403,9 +398,6 @@ with t_cierres:
                     </div>
                 """
 
-                # ==========================================
-                # HTML RENDERING - PIZARRA DEPARTAMENTOS
-                # ==========================================
                 html_pizarra_deps = ""
                 if not pivot_deps.empty:
                     filas_deps_html = ""
@@ -467,13 +459,11 @@ with t_cierres:
                     </body></html>
                     """
 
-                # Renderizamos ambas pizarras
                 components.html(html_pizarra_general + html_pizarra_deps, height=1600, scrolling=True)
 
-                # --- WHATSAPP CIERRES ---
                 st.markdown("---")
                 st.subheader("📱 Resumen para WhatsApp (Cierres y Departamentos)")
-                msg_w = f"⏱️ *Reporte de Cierres Semanal*\n📅 Semana: {int(num_sem)} ({rango_fechas})\n\n"
+                msg_w = f"⏱️ *Reporte de Cierres Semanal - Drotaca 2.0*\n📅 Semana: {int(num_sem)} ({rango_fechas})\n\n"
                 msg_w += f"📍 *Cronometría de la Droguería:*\n"
                 msg_w += f"🔹 Promedio Cierre General: *{prom_drotaca}*\n"
                 msg_w += f"🔹 Promedio Cierre Juanita: *{prom_juanita}*\n\n"
@@ -484,8 +474,163 @@ with t_cierres:
                         pivot_deps['Para_Ordenar'] = pd.to_datetime(pivot_deps['Promedio'], format="%I:%M %p", errors='coerce')
                         top_10 = pivot_deps.sort_values(by='Para_Ordenar', ascending=False).head(10)
                         for dep, row in top_10.iterrows():
-                            msg_w += f"🔹 {str(dep).title()}: *{row['Promedio']}*\n"
+                            if pd.notna(row['Para_Ordenar']):
+                                msg_w += f"🔹 {str(dep).title()}: *{row['Promedio']}*\n"
                     except: pass
                         
                 msg_w += f"\n✅ Tablas de auditoría detalladas adjuntas en imagen."
                 st.code(msg_w, language="markdown")
+
+# ---------------------------------------------------------
+# PESTAÑA 3: PIZARRA COMENSALES
+# ---------------------------------------------------------
+with t_comensales:
+    st.info("Consolida el consumo de comedor por departamento para la semana seleccionada.")
+    if st.button("🍽️ Generar Auditoría de Comensales", type="primary", use_container_width=True):
+        with st.spinner("Procesando datos de comedor..."):
+            df_com_raw = extraer_datos("PIZARRA_COMENSALES")
+            if df_com_raw.empty:
+                st.error("No se pudo acceder a la hoja PIZARRA_COMENSALES o está vacía.")
+            else:
+                # Filtrar la semana correctamente
+                c_sem_c = buscar_columna_estricta(df_com_raw, ['semana'])
+                if c_sem_c:
+                    df_com_raw['Num_Semana'] = df_com_raw[c_sem_c].astype(str).str.extract(r'(\d+)').astype(float)
+                else:
+                    # Fallback robusto si no hay columna 'Semana': sacarla de la Fecha
+                    c_fecha_c = buscar_columna_estricta(df_com_raw, ['fecha', 'timestamp'])
+                    if c_fecha_c:
+                        df_com_raw['Fecha_DT'] = pd.to_datetime(df_com_raw[c_fecha_c], dayfirst=True, errors='coerce')
+                        df_com_raw['Num_Semana'] = df_com_raw['Fecha_DT'].dt.isocalendar().week
+                    else:
+                        df_com_raw['Num_Semana'] = num_sem
+                
+                df_com = df_com_raw[df_com_raw['Num_Semana'] == num_sem].copy()
+                
+                if df_com.empty:
+                    st.warning(f"No hay registros de comensales para la Semana {int(num_sem)}.")
+                else:
+                    c_dep = buscar_columna_estricta(df_com, ['departamento', 'area'])
+                    c_des = buscar_columna_estricta(df_com, ['desayuno'])
+                    c_alm = buscar_columna_estricta(df_com, ['almuerzo'])
+                    c_cen = buscar_columna_estricta(df_com, ['cena'])
+                    
+                    if not c_dep: st.error("No se detectó columna 'Departamento'."); st.stop()
+                    
+                    # Limpieza y conversión a números
+                    df_com[c_dep] = df_com[c_dep].astype(str).str.upper().str.strip()
+                    for c in [c_des, c_alm, c_cen]:
+                        if c: df_com[c] = pd.to_numeric(df_com[c], errors='coerce').fillna(0)
+                    
+                    # Agrupación sumando todo por departamento
+                    df_grp = df_com.groupby(c_dep).agg({
+                        c_des: 'sum' if c_des else lambda x: 0,
+                        c_alm: 'sum' if c_alm else lambda x: 0,
+                        c_cen: 'sum' if c_cen else lambda x: 0
+                    }).reset_index()
+                    
+                    df_grp['Total_Servicios'] = df_grp[c_des] + df_grp[c_alm] + df_grp[c_cen]
+                    df_grp = df_grp[df_grp['Total_Servicios'] > 0] # Limpiar los que tienen 0
+                    df_grp = df_grp.sort_values('Total_Servicios', ascending=False)
+                    
+                    gran_total = df_grp['Total_Servicios'].sum()
+                    df_grp['%'] = (df_grp['Total_Servicios'] / gran_total * 100).fillna(0)
+                    
+                    tot_des = df_grp[c_des].sum() if c_des else 0
+                    tot_alm = df_grp[c_alm].sum() if c_alm else 0
+                    tot_cen = df_grp[c_cen].sum() if c_cen else 0
+
+                    # ==========================================
+                    # GENERACIÓN HTML - PIZARRA COMENSALES
+                    # ==========================================
+                    color_naranja = "#e65100"
+                    logo_b64 = obtener_logo_base64()
+                    
+                    filas_com_html = ""
+                    for _, r in df_grp.iterrows():
+                        filas_com_html += f"""
+                        <tr style="text-align: center; border-bottom: 1px solid #ddd;">
+                            <td style="padding: 12px; font-weight: bold; text-align: left; background-color: #fff3e0; color: #333;">{r[c_dep]}</td>
+                            <td style="padding: 12px; color: #555;">{f_p(r[c_des]) if c_des else '0'}</td>
+                            <td style="padding: 12px; color: #555;">{f_p(r[c_alm]) if c_alm else '0'}</td>
+                            <td style="padding: 12px; color: #555;">{f_p(r[c_cen]) if c_cen else '0'}</td>
+                            <td style="padding: 12px; font-weight: 900; font-size: 15px; color: {color_naranja};">{f_p(r['Total_Servicios'])}</td>
+                            <td style="padding: 12px; font-weight: bold; color: #795548;">{r['%']:.1f}%</td>
+                        </tr>
+                        """
+                        
+                    html_pizarra_comensales = f"""
+                    <html><head>
+                        <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+                        <style>
+                            @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&display=swap');
+                            body {{ font-family: 'Montserrat', sans-serif; padding: 20px; background-color: #f0f2f6; }}
+                            .pizarra {{ background: white; width: 900px; margin: auto; border-radius: 15px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid {color_naranja}; }}
+                            .header {{ background: {color_naranja}; color: white; padding: 30px; display: flex; justify-content: space-between; align-items: center; }}
+                            table {{ width: 100%; border-collapse: collapse; }}
+                            th {{ background: #fff3e0; color: {color_naranja}; padding: 15px; text-transform: uppercase; font-size: 12px; border-bottom: 2px solid {color_naranja}; }}
+                            .footer-totales {{ background: #ffe0b2; padding: 15px; display: flex; justify-content: space-around; border-top: 3px solid {color_naranja}; font-weight: 900; color: #3e2723; }}
+                            .total-box {{ text-align: center; }}
+                        </style>
+                    </head><body>
+                        <div style="text-align: center; margin-bottom: 15px;">
+                            <button onclick="capturarComensales()" style="background: {color_naranja}; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR PIZARRA COMENSALES</button>
+                        </div>
+                        <div class="pizarra" id="pizarra-comensales">
+                            <div class="header">
+                                <img src="{logo_b64}" style="height: 50px;">
+                                <div style="text-align: right;">
+                                    <div style="font-size: 22px; font-weight: 900; letter-spacing: 1px;">AUDITORÍA DE COMENSALES</div>
+                                    <div style="font-size: 14px; font-weight: bold; opacity: 0.9;">SEMANA {int(num_sem)} ({rango_fechas})</div>
+                                </div>
+                            </div>
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th style="text-align: left;">DEPARTAMENTO</th>
+                                        <th>DESAYUNOS</th>
+                                        <th>ALMUERZOS</th>
+                                        <th>CENAS</th>
+                                        <th style="background: #ffe0b2;">TOTAL PLATOS</th>
+                                        <th>% CONSUMO</th>
+                                    </tr>
+                                </thead>
+                                <tbody>{filas_com_html}</tbody>
+                            </table>
+                            <div class="footer-totales">
+                                <div class="total-box"><span style="font-size:12px; color:#555;">TOT. DESAYUNOS</span><br><span style="font-size:20px;">{f_p(tot_des)}</span></div>
+                                <div class="total-box"><span style="font-size:12px; color:#555;">TOT. ALMUERZOS</span><br><span style="font-size:20px;">{f_p(tot_alm)}</span></div>
+                                <div class="total-box"><span style="font-size:12px; color:#555;">TOT. CENAS</span><br><span style="font-size:20px;">{f_p(tot_cen)}</span></div>
+                                <div class="total-box" style="color:{color_naranja};"><span style="font-size:12px;">GRAN TOTAL</span><br><span style="font-size:24px;">{f_p(gran_total)}</span></div>
+                            </div>
+                        </div>
+                        <script>
+                            function capturarComensales() {{
+                                html2canvas(document.getElementById('pizarra-comensales'), {{ scale: 2 }}).then(canvas => {{
+                                    var link = document.createElement('a');
+                                    link.download = 'Comensales_Semana_{int(num_sem)}.png';
+                                    link.href = canvas.toDataURL();
+                                    link.click();
+                                }});
+                            }}
+                        </script>
+                    </body></html>
+                    """
+                    components.html(html_pizarra_comensales, height=1200, scrolling=True)
+
+                    # --- WHATSAPP COMENSALES ---
+                    st.markdown("---")
+                    st.subheader("📱 Resumen para WhatsApp (Comedor)")
+                    msg_c = f"🍽️ *Reporte Semanal de Comensales - Drotaca*\n📅 Semana: {int(num_sem)} ({rango_fechas})\n\n"
+                    msg_c += f"*RESUMEN GENERAL:*\n"
+                    msg_c += f"🍳 Desayunos Servidos: *{f_p(tot_des)}*\n"
+                    msg_c += f"🍲 Almuerzos Servidos: *{f_p(tot_alm)}*\n"
+                    msg_c += f"🍝 Cenas Servidas: *{f_p(tot_cen)}*\n"
+                    msg_c += f"📊 Gran Total de Platos: *{f_p(gran_total)}*\n\n"
+                    
+                    msg_c += f"*TOP 5 DEPARTAMENTOS DE MAYOR CONSUMO:*\n"
+                    for idx, r in df_grp.head(5).reset_index().iterrows():
+                        msg_c += f"{idx+1}. {r[c_dep].title()} - {f_p(r['Total_Servicios'])} Platos ({r['%']:.1f}%)\n"
+                        
+                    msg_c += f"\n✅ Pizarra detallada de comedor adjunta."
+                    st.code(msg_c, language="markdown")
