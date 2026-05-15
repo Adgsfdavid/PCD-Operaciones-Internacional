@@ -62,11 +62,12 @@ def a_12h(hora_24):
     except: return hora_limpia
 
 def buscar_columna(df, palabras_clave):
+    """Busca dinámicamente el nombre de la columna. Retorna None si no la encuentra para evitar mezclar datos."""
     if df.empty: return None
     for col in df.columns:
         if any(p.lower() in str(col).lower() for p in palabras_clave):
             return col
-    return df.columns[0] 
+    return None
 
 def calcular_rango_semana(ano, semana):
     lunes = datetime.strptime(f'{int(ano)}-W{int(semana)}-1', "%G-W%V-%u")
@@ -114,6 +115,8 @@ with t_trafico:
                 rango_fechas = calcular_rango_semana(ano_sel, num_sem)
                 
                 c_sem = buscar_columna(df_raw, ['semana'])
+                if not c_sem: st.error("No se encontró columna de Semana en Tráfico."); st.stop()
+                
                 df_raw['Num_Semana'] = df_raw[c_sem].astype(str).str.extract(r'(\d+)').astype(float)
                 df_sem = df_raw[df_raw['Num_Semana'] == num_sem].copy()
 
@@ -129,14 +132,13 @@ with t_trafico:
                     c_ruta = buscar_columna(df_sem, ['ruta'])
                     c_zona = buscar_columna(df_sem, ['zona'])
                     c_unidad = buscar_columna(df_sem, ['unidad'])
-                    c_farma = buscar_columna(df_sem, ['farmacia']) # Búsqueda inteligente
+                    c_farma = buscar_columna(df_sem, ['farmacia']) 
                     c_bultos = buscar_columna(df_sem, ['bulto'])
 
                     df_t = df_sem.drop_duplicates(subset=[c_fecha]).copy()
                     df_t['Fecha_Temp'] = pd.to_datetime(df_t[c_fecha], format='%d/%m/%Y', errors='coerce')
                     df_t = df_t.sort_values('Fecha_Temp')
 
-                    # Conversión segura a numérico
                     df_sem[c_farma] = pd.to_numeric(df_sem[c_farma], errors='coerce').fillna(0)
                     df_sem[c_bultos] = pd.to_numeric(df_sem[c_bultos], errors='coerce').fillna(0)
 
@@ -177,7 +179,7 @@ with t_trafico:
                         td {{ border: 1px solid #000; padding: 6px; text-align: center; color: #000; }}
                         .total-bar {{ background: #000; color: white; display: flex; justify-content: space-around; padding: 12px; margin-top: 10px; font-weight: 900; font-size: 13px; border: 1px solid {color_dorado}; }}
                     </style></head><body>
-                        <div style="text-align:center; padding:20px;">
+                        <div style="text-align:center; padding:20px; display: flex; justify-content: center; gap: 15px;">
                             <button onclick="descargarFoto()" style="background:#d32f2f; color:white; border:none; padding:12px 30px; font-weight:bold; cursor:pointer; border-radius:5px;">📸 DESCARGAR PIZARRA (FOTO)</button>
                         </div>
                         <div class="page" id="pizarra-trafico">
@@ -226,12 +228,13 @@ with t_trafico:
                     st.code(txt_ws, language="markdown")
 
 # ---------------------------------------------------------
-# PESTAÑA 2: CRONOMETRÍA DE CIERRES (DROTACA 2.0 & JUANITA)
+# PESTAÑA 2: CRONOMETRÍA DE CIERRES (DROTACA 2.0 & JUANITA & DEPARTAMENTOS)
 # ---------------------------------------------------------
 with t_cierres:
-    st.info("Cruza la data de SEG_CIERRE_DROTACA y SEG_CIERRE_JUANITA para auditar los tiempos.")
+    st.info("Cruza la data de SEG_CIERRE_DROTACA y SEG_CIERRE_JUANITA para auditar los tiempos semanales y por departamento.")
     if st.button("🕒 Procesar Cronometría de Cierres", type="primary", use_container_width=True):
         with st.spinner("Analizando y cruzando registros de Cierres..."):
+            
             # EXTRAEMOS AMBAS HOJAS
             df_d_raw = extraer_datos("SEG_CIERRE_DROTACA")
             df_j_raw = extraer_datos("SEG_CIERRE_JUANITA")
@@ -239,8 +242,10 @@ with t_cierres:
             if df_d_raw.empty:
                 st.error("No se pudo acceder a la hoja SEG_CIERRE_DROTACA.")
             else:
-                # Filtrar DROTACA
+                # 1. Preparar DROTACA
                 c_sem_d = buscar_columna(df_d_raw, ['semana'])
+                if not c_sem_d: st.error("No se encontró columna Semana en SEG_CIERRE_DROTACA."); st.stop()
+                
                 df_d_raw['Num_Semana'] = df_d_raw[c_sem_d].astype(str).str.extract(r'(\d+)').astype(float)
                 f_d = df_d_raw[df_d_raw['Num_Semana'] == num_sem].copy()
                 
@@ -249,39 +254,59 @@ with t_cierres:
                 else:
                     c_fecha_d = buscar_columna(f_d, ['fecha'])
                     c_dia_d = buscar_columna(f_d, ['dia', 'día'])
-                    c_aper = buscar_columna(f_d, ['apertura'])
-                    c_drog = buscar_columna(f_d, ['droguer', 'drotaca'])
+                    c_aper = buscar_columna(f_d, ['apertur', 'hora ap'])
+                    c_drog = buscar_columna(f_d, ['cierre dro', 'cierre de dro', 'cierre general'])
+                    
+                    # Evitar Cartesian Explosion: Borrar fechas duplicadas
+                    if c_fecha_d:
+                        f_d = f_d.drop_duplicates(subset=[c_fecha_d])
 
-                    # Filtrar JUANITA
+                    # Determinar Columnas de Departamentos (Todo lo que no sea base)
+                    cols_basicas_d = [c for c in [c_sem_d, 'Num_Semana', c_dia_d, c_fecha_d, c_aper, c_drog] if c]
+                    deps_cols = [c for c in f_d.columns if c not in cols_basicas_d and str(c).strip() != '' and 'unnamed' not in str(c).lower()]
+
+                    # 2. Preparar JUANITA
                     f_j_clean = pd.DataFrame(columns=['Fecha_Join', 'Hora_Juanita'])
                     if not df_j_raw.empty:
                         c_sem_j = buscar_columna(df_j_raw, ['semana'])
-                        df_j_raw['Num_Semana'] = df_j_raw[c_sem_j].astype(str).str.extract(r'(\d+)').astype(float)
-                        f_j = df_j_raw[df_j_raw['Num_Semana'] == num_sem].copy()
-                        if not f_j.empty:
+                        if c_sem_j:
+                            df_j_raw['Num_Semana'] = df_j_raw[c_sem_j].astype(str).str.extract(r'(\d+)').astype(float)
+                            f_j = df_j_raw[df_j_raw['Num_Semana'] == num_sem].copy()
+                            
                             c_fecha_j = buscar_columna(f_j, ['fecha'])
-                            c_juan_hora = buscar_columna(f_j, ['cierre', 'hora', 'juanita'])
-                            f_j_clean = f_j[[c_fecha_j, c_juan_hora]].rename(columns={c_fecha_j: 'Fecha_Join', c_juan_hora: 'Hora_Juanita'})
+                            c_juan_hora = buscar_columna(f_j, ['cierre juanita', 'hora juanita', 'juanita', 'hora'])
+                            
+                            if c_fecha_j and c_juan_hora:
+                                f_j = f_j.drop_duplicates(subset=[c_fecha_j]) # Evitar duplicados
+                                f_j_clean = f_j[[c_fecha_j, c_juan_hora]].rename(columns={c_fecha_j: 'Fecha_Join', c_juan_hora: 'Hora_Juanita'})
 
-                    # CRUZAR DATOS (MERGE por FECHA)
+                    # 3. CRUZAR DATOS (MERGE por FECHA)
                     if not f_j_clean.empty and c_fecha_d:
                         f_c = pd.merge(f_d, f_j_clean, left_on=c_fecha_d, right_on='Fecha_Join', how='left')
                     else:
                         f_c = f_d.copy()
                         f_c['Hora_Juanita'] = "N/R"
 
-                    # ORDENAR POR DÍAS
+                    # 4. ORDENAR CRONOLÓGICAMENTE
                     dias_orden = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
-                    f_c['Dia_Orden'] = pd.Categorical(f_c[c_dia_d].str.capitalize(), categories=dias_orden, ordered=True)
-                    f_c = f_c.sort_values('Dia_Orden')
+                    if c_dia_d:
+                        f_c['Dia_Orden'] = pd.Categorical(f_c[c_dia_d].str.capitalize(), categories=dias_orden, ordered=True)
+                        f_c = f_c.sort_values('Dia_Orden')
                     
-                    # PROMEDIOS
+                    # 5. CÁLCULO DE PROMEDIOS (Generales y Departamentos)
                     prom_juanita = calcular_promedio_horas(f_c['Hora_Juanita'].tolist())
                     prom_drotaca = calcular_promedio_horas(f_c[c_drog].tolist()) if c_drog else "N/R"
 
+                    promedios_deps = {}
+                    for dep in deps_cols:
+                        promedios_deps[dep] = calcular_promedio_horas(f_c[dep].tolist())
+
+                    # ==========================================
+                    # GENERACIÓN HTML - PIZARRA 1: DROTACA & JUANITA
+                    # ==========================================
                     logo_b64 = obtener_logo_base64()
                     
-                    filas_cierres_html = ""
+                    filas_drotaca_html = ""
                     for _, r in f_c.iterrows():
                         hora_ap = str(r[c_aper]) if c_aper and pd.notna(r[c_aper]) else 'N/R'
                         hora_ju = str(r['Hora_Juanita']) if pd.notna(r['Hora_Juanita']) else 'N/R'
@@ -290,46 +315,48 @@ with t_cierres:
                         color_ap = "#2e7d32" if "06:" in hora_ap or "07:00" in hora_ap else "#000"
                         color_ju = "#e65100" if hora_ju != "N/R" and hora_ju != "nan" else "#777"
                         
-                        filas_cierres_html += f"""
+                        d_str = str(r[c_dia_d]).upper() if c_dia_d else "DÍA"
+                        f_str = str(r[c_fecha_d]) if c_fecha_d else ""
+                        
+                        filas_drotaca_html += f"""
                         <tr style="text-align: center; border-bottom: 1px solid #ddd;">
-                            <td style="padding: 15px; font-weight: bold; background-color: #f8f9fa;">{str(r[c_dia_d]).upper()}<br><small style="color:#666;">{r[c_fecha_d] if c_fecha_d else ''}</small></td>
+                            <td style="padding: 15px; font-weight: bold; background-color: #f8f9fa;">{d_str}<br><small style="color:#666;">{f_str}</small></td>
                             <td style="padding: 15px; color: {color_ap}; font-weight: bold; font-size: 16px;">{hora_ap}</td>
                             <td style="padding: 15px; color: {color_ju}; font-weight: bold; font-size: 16px;">{hora_ju if hora_ju != 'nan' else 'N/R'}</td>
                             <td style="padding: 15px; font-weight: 900; font-size: 16px;">{hora_dr}</td>
                         </tr>
                         """
 
-                    html_pizarra_cierres = f"""
+                    html_pizarra_drotaca = f"""
                     <html><head>
                         <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
                         <style>
                             @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&display=swap');
                             body {{ font-family: 'Montserrat', sans-serif; padding: 20px; background-color: #f0f2f6; }}
-                            #pizarra-cierres {{ background: white; width: 900px; margin: auto; border-radius: 15px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #0d47a1; }}
+                            .pizarra {{ background: white; width: 900px; margin: auto; border-radius: 15px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid #0d47a1; margin-bottom: 40px; }}
                             .header {{ background: #0d47a1; color: white; padding: 30px; display: flex; justify-content: space-between; align-items: center; }}
-                            .table-cierres {{ width: 100%; border-collapse: collapse; }}
-                            .table-cierres th {{ background: #f1f4f9; color: #0d47a1; padding: 15px; text-transform: uppercase; font-size: 12px; border-bottom: 2px solid #0d47a1; }}
+                            table {{ width: 100%; border-collapse: collapse; }}
+                            th {{ background: #f1f4f9; color: #0d47a1; padding: 15px; text-transform: uppercase; font-size: 12px; border-bottom: 2px solid #0d47a1; }}
                             .footer-promedios {{ background: #f1f4f9; padding: 20px; display: flex; justify-content: space-around; border-top: 2px solid #0d47a1; }}
                             .promedio-box {{ text-align: center; }}
                             .promedio-label {{ font-size: 12px; font-weight: bold; color: #555; text-transform: uppercase; }}
                             .promedio-val {{ font-size: 20px; font-weight: 900; color: #0d47a1; }}
-                            .btn-capture {{ background: #2e7d32; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer; margin-bottom: 15px; }}
                         </style>
                     </head><body>
-                        <div style="text-align: center;">
-                            <button class="btn-capture" onclick="capturarCierres()">📸 DESCARGAR REPORTE DE HORAS</button>
+                        <div style="text-align: center; margin-bottom: 15px;">
+                            <button onclick="capturar('pizarra-drotaca', 'Cierres_Generales_Semana_{int(num_sem)}.png')" style="background: #2e7d32; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR REPORTE GENERAL</button>
                         </div>
-                        <div id="pizarra-cierres">
+                        <div class="pizarra" id="pizarra-drotaca">
                             <div class="header">
                                 <img src="{logo_b64}" style="height: 50px;">
                                 <div style="text-align: right;">
                                     <div style="font-size: 22px; font-weight: 900; letter-spacing: 1px;">REPORTE SEMANAL DE GESTIÓN</div>
-                                    <div style="font-size: 14px; font-weight: bold; opacity: 0.9;">SEMANA {int(num_sem)} | DROTACA 2.0</div>
+                                    <div style="font-size: 14px; font-weight: bold; opacity: 0.9;">SEMANA {int(num_sem)} | CIERRES GENERALES</div>
                                 </div>
                             </div>
-                            <table class="table-cierres">
+                            <table>
                                 <thead><tr><th>DÍA</th><th>APERTURA</th><th>CIERRE JUANITA</th><th>CIERRE DROTACA</th></tr></thead>
-                                <tbody>{filas_cierres_html}</tbody>
+                                <tbody>{filas_drotaca_html}</tbody>
                             </table>
                             <div class="footer-promedios">
                                 <div class="promedio-box">
@@ -342,11 +369,65 @@ with t_cierres:
                                 </div>
                             </div>
                         </div>
+                    """
+
+                    # ==========================================
+                    # GENERACIÓN HTML - PIZARRA 2: DEPARTAMENTOS
+                    # ==========================================
+                    th_deps = "".join([f"<th>{str(dep).upper()}</th>" for dep in deps_cols])
+                    
+                    filas_deps_html = ""
+                    for _, r in f_c.iterrows():
+                        td_deps = ""
+                        for dep in deps_cols:
+                            val = str(r[dep]) if pd.notna(r[dep]) else "N/R"
+                            if val.strip() == "" or val.strip().lower() == "nan": val = "N/R"
+                            td_deps += f"<td style='padding: 12px; font-weight: bold; font-size: 14px;'>{val}</td>"
+                        
+                        d_str = str(r[c_dia_d]).upper() if c_dia_d else "DÍA"
+                        f_str = str(r[c_fecha_d]) if c_fecha_d else ""
+                        
+                        filas_deps_html += f"""
+                        <tr style="text-align: center; border-bottom: 1px solid #ddd;">
+                            <td style="padding: 12px; font-weight: bold; background-color: #f8f9fa;">{d_str}<br><small style="color:#666;">{f_str}</small></td>
+                            {td_deps}
+                        </tr>
+                        """
+                        
+                    td_proms = ""
+                    for dep in deps_cols:
+                        prom = promedios_deps[dep]
+                        td_proms += f"<td style='padding: 12px; font-weight: 900; font-size: 15px; color: #d32f2f;'>{prom}</td>"
+                        
+                    filas_deps_html += f"""
+                        <tr style="text-align: center; background-color: #e3f2fd; border-top: 3px solid #0d47a1;">
+                            <td style="padding: 12px; font-weight: 900; font-size: 14px; color: #0d47a1;">PROMEDIOS</td>
+                            {td_proms}
+                        </tr>
+                    """
+
+                    html_pizarra_deps = f"""
+                        <div style="text-align: center; margin-bottom: 15px; margin-top: 20px;">
+                            <button onclick="capturar('pizarra-departamentos', 'Cierres_Departamentos_Semana_{int(num_sem)}.png')" style="background: #e65100; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR DEPARTAMENTOS</button>
+                        </div>
+                        <div class="pizarra" id="pizarra-departamentos">
+                            <div class="header" style="background: #1565c0;">
+                                <img src="{logo_b64}" style="height: 50px;">
+                                <div style="text-align: right;">
+                                    <div style="font-size: 22px; font-weight: 900; letter-spacing: 1px;">CIERRES POR DEPARTAMENTO</div>
+                                    <div style="font-size: 14px; font-weight: bold; opacity: 0.9;">SEMANA {int(num_sem)} | AUDITORÍA</div>
+                                </div>
+                            </div>
+                            <table>
+                                <thead><tr><th>DÍA</th>{th_deps}</tr></thead>
+                                <tbody>{filas_deps_html}</tbody>
+                            </table>
+                        </div>
                         <script>
-                            function capturarCierres() {{
-                                html2canvas(document.getElementById('pizarra-cierres'), {{ scale: 2 }}).then(canvas => {{
+                            function capturar(id, filename) {{
+                                html2canvas(document.getElementById(id), {{ scale: 2 }}).then(canvas => {{
                                     var link = document.createElement('a');
-                                    link.download = 'Gestion_Horas_Semana_{int(num_sem)}.png';
+                                    link.download = filename;
                                     link.href = canvas.toDataURL();
                                     link.click();
                                 }});
@@ -354,18 +435,22 @@ with t_cierres:
                         </script>
                     </body></html>
                     """
-                    components.html(html_pizarra_cierres, height=800, scrolling=True)
 
+                    # Renderizamos ambas pizarras
+                    components.html(html_pizarra_drotaca + html_pizarra_deps, height=1400, scrolling=True)
+
+                    # --- WHATSAPP CIERRES ---
                     st.markdown("---")
-                    st.subheader("📱 Resumen para WhatsApp (Cierres)")
-                    msg_w = f"⏱️ *Reporte de Cierres Semanal - Drotaca 2.0*\n📅 Semana: {int(num_sem)}\n\n"
-                    msg_w += f"📍 *Cronometría de la Droguería:*\n🔹 Promedio Cierre General: *{prom_drotaca}*\n🔹 Promedio Cierre Juanita: *{prom_juanita}*\n\n✅ Detalle de apertura y cierres diarios adjunto en imagen."
+                    st.subheader("📱 Resumen para WhatsApp (Cierres y Departamentos)")
+                    msg_w = f"⏱️ *Reporte de Cierres Semanal*\n📅 Semana: {int(num_sem)}\n\n"
+                    msg_w += f"📍 *Cronometría de la Droguería:*\n"
+                    msg_w += f"🔹 Promedio Cierre General: *{prom_drotaca}*\n"
+                    msg_w += f"🔹 Promedio Cierre Juanita: *{prom_juanita}*\n\n"
+                    
+                    if deps_cols:
+                        msg_w += f"📍 *Cierre por Departamentos (Promedios):*\n"
+                        for dep in deps_cols:
+                            msg_w += f"🔹 {str(dep).title()}: *{promedios_deps[dep]}*\n"
+                            
+                    msg_w += f"\n✅ Detalle de horarios adjunto en imágenes."
                     st.code(msg_w, language="markdown")
-
-                    with st.expander("🔍 Ver Cierre por Departamentos"):
-                        st.write("Horas de culminación registradas por área:")
-                        # Buscamos columnas extra (Departamentos) que no sean base
-                        cols_basicas = [c_sem_d, 'Num_Semana', 'Dia_Orden', c_dia_d, c_fecha_d, c_aper, c_drog, 'Fecha_Join', 'Hora_Juanita']
-                        deps = [c for c in f_c.columns if c not in cols_basicas]
-                        if deps: st.dataframe(f_c[deps], use_container_width=True, hide_index=True)
-                        else: st.info("No se encontraron columnas adicionales de departamentos.")
