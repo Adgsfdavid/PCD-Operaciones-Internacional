@@ -99,12 +99,18 @@ def calcular_promedio_horas(lista_horas):
     return temp_dt.strftime("%I:%M %p").upper()
 
 def calcular_rango_semana(ano, semana):
+    """Lunes a Domingo (Para Tráfico Operativo)"""
     lunes = datetime.strptime(f'{int(ano)}-W{int(semana)}-1', "%G-W%V-%u")
     domingo = lunes + timedelta(days=6)
     return f"{lunes.strftime('%d/%m/%Y')} al {domingo.strftime('%d/%m/%Y')}"
 
+def calcular_rango_lunes_viernes(ano, semana):
+    """Lunes a Viernes (Para Cierres y Comensales)"""
+    lunes = datetime.strptime(f'{int(ano)}-W{int(semana)}-1', "%G-W%V-%u")
+    viernes = lunes + timedelta(days=4)
+    return f"{lunes.strftime('%d/%m/%Y')} al {viernes.strftime('%d/%m/%Y')}"
+
 def extraer_fecha_limpia(fecha_str):
-    """Atrapa la fecha DD/MM/YYYY sin importar si trae hora pegada o texto"""
     if pd.isna(fecha_str): return pd.NaT
     match = re.search(r'(\d{2}/\d{2}/\d{4})', str(fecha_str))
     if match:
@@ -127,6 +133,7 @@ with c2:
     num_sem = st.number_input("Número de Semana a Auditar:", 1, 53, value=semana_actual)
 
 rango_fechas = calcular_rango_semana(ano_sel, num_sem)
+rango_fechas_lv = calcular_rango_lunes_viernes(ano_sel, num_sem)
 
 # CREAMOS LAS 3 PESTAÑAS
 t_trafico, t_cierres, t_comensales = st.tabs(["📈 Desempeño de Tráfico", "⏱️ Cronometría de Cierres", "🍽️ Pizarra Comensales"])
@@ -388,7 +395,7 @@ with t_cierres:
                             <img src="{logo_b64}" style="height: 50px;">
                             <div style="text-align: right;">
                                 <div style="font-size: 22px; font-weight: 900; letter-spacing: 1px;">REPORTE SEMANAL DE GESTIÓN</div>
-                                <div style="font-size: 14px; font-weight: bold; opacity: 0.9;">SEMANA {int(num_sem)} ({rango_fechas}) | CIERRES GENERALES</div>
+                                <div style="font-size: 14px; font-weight: bold; opacity: 0.9;">SEMANA {int(num_sem)} ({rango_fechas_lv}) | CIERRES GENERALES</div>
                             </div>
                         </div>
                         <table>
@@ -435,7 +442,7 @@ with t_cierres:
                                 <img src="{logo_b64}" style="height: 50px;">
                                 <div style="text-align: right;">
                                     <div style="font-size: 22px; font-weight: 900; letter-spacing: 1px;">MATRIZ DE DEPARTAMENTOS</div>
-                                    <div style="font-size: 14px; font-weight: bold; opacity: 0.9;">SEMANA {int(num_sem)} ({rango_fechas}) | HORARIOS DE SALIDA</div>
+                                    <div style="font-size: 14px; font-weight: bold; opacity: 0.9;">SEMANA {int(num_sem)} ({rango_fechas_lv}) | HORARIOS DE SALIDA</div>
                                 </div>
                             </div>
                             <table>
@@ -471,9 +478,10 @@ with t_cierres:
 
                 components.html(html_pizarra_general + html_pizarra_deps, height=1600, scrolling=True)
 
+                # --- WHATSAPP CIERRES ---
                 st.markdown("---")
                 st.subheader("📱 Resumen para WhatsApp (Cierres y Departamentos)")
-                msg_w = f"⏱️ *Reporte de Cierres Semanal - Drotaca 2.0*\n📅 Semana: {int(num_sem)} ({rango_fechas})\n\n"
+                msg_w = f"⏱️ *Reporte de Cierres Semanal - Drotaca 2.0*\n📅 Semana: {int(num_sem)} ({rango_fechas_lv})\n\n"
                 msg_w += f"📍 *Cronometría de la Droguería:*\n"
                 msg_w += f"🔹 Promedio Cierre General: *{prom_drotaca}*\n"
                 msg_w += f"🔹 Promedio Cierre Juanita: *{prom_juanita}*\n\n"
@@ -495,29 +503,32 @@ with t_cierres:
 # PESTAÑA 3: PIZARRA COMENSALES
 # ---------------------------------------------------------
 with t_comensales:
-    st.info("Consolida el consumo de comedor por departamento para la semana seleccionada.")
+    st.info("Consolida el consumo de comedor por departamento de Lunes a Viernes.")
     if st.button("🍽️ Generar Auditoría de Comensales", type="primary", use_container_width=True):
         with st.spinner("Procesando datos de comedor..."):
             df_com_raw = extraer_datos("PIZARRA_COMENSALES")
             if df_com_raw.empty:
                 st.error("No se pudo acceder a la hoja PIZARRA_COMENSALES o está vacía.")
             else:
-                c_sem_c = buscar_columna_estricta(df_com_raw, ['semana'])
-                if c_sem_c:
-                    df_com_raw['Num_Semana'] = df_com_raw[c_sem_c].astype(str).str.extract(r'(\d+)').astype(float)
+                c_fecha_c = buscar_columna_estricta(df_com_raw, ['fecha', 'timestamp'])
+                if c_fecha_c:
+                    df_com_raw['Fecha_DT'] = df_com_raw[c_fecha_c].apply(extraer_fecha_limpia)
+                    df_com_raw['Num_Semana'] = df_com_raw['Fecha_DT'].dt.isocalendar().week
                 else:
-                    c_fecha_c = buscar_columna_estricta(df_com_raw, ['fecha', 'timestamp'])
-                    if c_fecha_c:
-                        df_com_raw['Fecha_DT'] = df_com_raw[c_fecha_c].apply(extraer_fecha_limpia)
-                        df_com_raw['Num_Semana'] = df_com_raw['Fecha_DT'].dt.isocalendar().week
-                    else:
-                        df_com_raw['Num_Semana'] = num_sem
+                    c_sem_c = buscar_columna_estricta(df_com_raw, ['semana'])
+                    if c_sem_c: df_com_raw['Num_Semana'] = df_com_raw[c_sem_c].astype(str).str.extract(r'(\d+)').astype(float)
+                    else: df_com_raw['Num_Semana'] = num_sem
                 
                 df_com = df_com_raw[df_com_raw['Num_Semana'] == num_sem].copy()
                 
                 if df_com.empty:
                     st.warning(f"No hay registros de comensales para la Semana {int(num_sem)}.")
                 else:
+                    # Filtramos rigurosamente para ignorar sábados (5) y domingos (6)
+                    if c_fecha_c:
+                        df_com = df_com.dropna(subset=['Fecha_DT'])
+                        df_com = df_com[df_com['Fecha_DT'].dt.weekday < 5].copy()
+
                     c_dep = buscar_columna_estricta(df_com, ['departamento', 'area'])
                     c_des = buscar_columna_estricta(df_com, ['desayuno'])
                     c_alm = buscar_columna_estricta(df_com, ['almuerzo'])
@@ -560,7 +571,7 @@ with t_comensales:
                             <td style="padding: 12px; color: #555; border: 1px solid #000;">{f_p(r[c_des]) if c_des else '0'}</td>
                             <td style="padding: 12px; color: #555; border: 1px solid #000;">{f_p(r[c_alm]) if c_alm else '0'}</td>
                             <td style="padding: 12px; color: #555; border: 1px solid #000;">{f_p(r[c_cen]) if c_cen else '0'}</td>
-                            <td style="padding: 12px; font-weight: 900; font-size: 15px; color: {color_azul}; border: 1px solid #000;">{f_p(r['Total_Servicios'])}</td>
+                            <td style="padding: 12px; font-weight: 900; font-size: 15px; color: #000; border: 1px solid #000;">{f_p(r['Total_Servicios'])}</td>
                             <td style="padding: 12px; font-weight: bold; color: #555; border: 1px solid #000;">{r['%']:.1f}%</td>
                         </tr>
                         """
@@ -587,7 +598,7 @@ with t_comensales:
                                 <img src="{logo_b64}" style="height: 50px;">
                                 <div style="text-align: right;">
                                     <div style="font-size: 22px; font-weight: 900; letter-spacing: 1px;">AUDITORÍA DE COMENSALES</div>
-                                    <div style="font-size: 14px; font-weight: bold; opacity: 0.9;">SEMANA {int(num_sem)} ({rango_fechas})</div>
+                                    <div style="font-size: 14px; font-weight: bold; opacity: 0.9;">SEMANA {int(num_sem)} ({rango_fechas_lv})</div>
                                 </div>
                             </div>
                             <table>
@@ -627,7 +638,7 @@ with t_comensales:
                     # --- WHATSAPP COMENSALES ---
                     st.markdown("---")
                     st.subheader("📱 Resumen para WhatsApp (Comedor)")
-                    msg_c = f"🍽️ *Reporte Semanal de Comensales - Drotaca*\n📅 Semana: {int(num_sem)} ({rango_fechas})\n\n"
+                    msg_c = f"🍽️ *Reporte Semanal de Comensales - Drotaca*\n📅 Semana: {int(num_sem)} ({rango_fechas_lv})\n\n"
                     msg_c += f"*RESUMEN GENERAL:*\n"
                     msg_c += f"🍳 Desayunos Servidos: *{f_p(tot_des)}*\n"
                     msg_c += f"🍲 Almuerzos Servidos: *{f_p(tot_alm)}*\n"
