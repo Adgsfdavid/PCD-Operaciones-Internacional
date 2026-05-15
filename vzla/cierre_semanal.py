@@ -248,7 +248,7 @@ with t_trafico:
                     st.code(txt_ws, language="markdown")
 
 # ---------------------------------------------------------
-# PESTAÑA 2: CRONOMETRÍA DE CIERRES (DROTACA 2.0)
+# PESTAÑA 2: CRONOMETRÍA DE CIERRES (REDISEÑO MATRIZ)
 # ---------------------------------------------------------
 with t_cierres:
     st.info("Análisis de Apertura y Cierres Drotaca 2.0 (Lunes a Viernes).")
@@ -262,7 +262,7 @@ with t_cierres:
             if df_d_raw.empty:
                 st.error("No se pudo acceder a la hoja principal SEG_CIERRE_DROTACA.")
             else:
-                # ESTRUCTURA LUNES A VIERNES
+                # SOLO LUNES A VIERNES
                 dias_base = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes"]
                 dias_display = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]
                 
@@ -274,95 +274,83 @@ with t_cierres:
 
                 # 1. APERTURA
                 if not df_a_raw.empty:
-                    c_sem_a = buscar_columna_estricta(df_a_raw, ['semana'])
-                    if c_sem_a:
-                        df_a_raw['Num_Semana'] = df_a_raw[c_sem_a].astype(str).str.extract(r'(\d+)').astype(float)
-                        f_a = df_a_raw[df_a_raw['Num_Semana'] == num_sem].copy()
-                        c_dia_a = buscar_columna_estricta(f_a, ['dia', 'día'], evitar=['fecha'])
-                        c_hora_a = buscar_columna_estricta(f_a, ['apertura', 'hora'], evitar=['fecha', 'dia'])
-                        if c_dia_a and c_hora_a:
-                            f_a['Dia_Norm'] = f_a[c_dia_a].apply(norm_dia)
-                            dict_a = f_a.groupby('Dia_Norm')[c_hora_a].last().to_dict()
-                            df_resumen['Apertura'] = df_resumen['Dia_Norm'].map(dict_a).fillna("N/R")
+                    df_a_raw['Num_Semana'] = df_a_raw[buscar_columna_estricta(df_a_raw, ['semana'])].astype(str).str.extract(r'(\d+)').astype(float)
+                    f_a = df_a_raw[df_a_raw['Num_Semana'] == num_sem].copy()
+                    c_dia_a = buscar_columna_estricta(f_a, ['dia', 'día'], evitar=['fecha'])
+                    c_hora_a = buscar_columna_estricta(f_a, ['apertura', 'hora'], evitar=['fecha', 'dia'])
+                    if c_dia_a and c_hora_a:
+                        f_a['Dia_Norm'] = f_a[c_dia_a].apply(norm_dia)
+                        dict_a = f_a.groupby('Dia_Norm')[c_hora_a].last().to_dict()
+                        df_resumen['Apertura'] = df_resumen['Dia_Norm'].map(dict_a).fillna("N/R")
 
                 # 2. JUANITA
                 if not df_j_raw.empty:
-                    c_sem_j = buscar_columna_estricta(df_j_raw, ['semana'])
-                    if c_sem_j:
-                        df_j_raw['Num_Semana'] = df_j_raw[c_sem_j].astype(str).str.extract(r'(\d+)').astype(float)
-                        f_j = df_j_raw[df_j_raw['Num_Semana'] == num_sem].copy()
-                        c_dia_j = buscar_columna_estricta(f_j, ['dia', 'día'], evitar=['fecha'])
-                        c_hora_j = buscar_columna_estricta(f_j, ['juanita', 'hora', 'cierre'], evitar=['fecha', 'dia'])
-                        if c_dia_j and c_hora_j:
-                            f_j['Dia_Norm'] = f_j[c_dia_j].apply(norm_dia)
-                            dict_j = f_j.groupby('Dia_Norm')[c_hora_j].last().to_dict()
-                            df_resumen['Juanita'] = df_resumen['Dia_Norm'].map(dict_j).fillna("N/R")
+                    df_j_raw['Num_Semana'] = df_j_raw[buscar_columna_estricta(df_j_raw, ['semana'])].astype(str).str.extract(r'(\d+)').astype(float)
+                    f_j = df_j_raw[df_j_raw['Num_Semana'] == num_sem].copy()
+                    c_dia_j = buscar_columna_estricta(f_j, ['dia', 'día'], evitar=['fecha'])
+                    c_hora_j = buscar_columna_estricta(f_j, ['juanita', 'hora', 'cierre'], evitar=['fecha', 'dia'])
+                    if c_dia_j and c_hora_j:
+                        f_j['Dia_Norm'] = f_j[c_dia_j].apply(norm_dia)
+                        dict_j = f_j.groupby('Dia_Norm')[c_hora_j].last().to_dict()
+                        df_resumen['Juanita'] = df_resumen['Dia_Norm'].map(dict_j).fillna("N/R")
 
-                # 3. DROTACA (Extracción en Fila y Matriz)
+                # 3. DROTACA (Búsqueda específica de *CIERRE DE DROGUERÍA*)
                 pivot_deps = pd.DataFrame()
                 if not df_d_raw.empty:
-                    c_sem_d = buscar_columna_estricta(df_d_raw, ['semana'])
-                    if c_sem_d:
-                        df_d_raw['Num_Semana'] = df_d_raw[c_sem_d].astype(str).str.extract(r'(\d+)').astype(float)
-                        f_d = df_d_raw[df_d_raw['Num_Semana'] == num_sem].copy()
+                    df_d_raw['Num_Semana'] = df_d_raw[buscar_columna_estricta(df_d_raw, ['semana'])].astype(str).str.extract(r'(\d+)').astype(float)
+                    f_d = df_d_raw[df_d_raw['Num_Semana'] == num_sem].copy()
+                    
+                    if not f_d.empty:
+                        c_dia_d = buscar_columna_estricta(f_d, ['dia', 'día'], evitar=['fecha'])
+                        c_fecha_d = buscar_columna_estricta(f_d, ['fecha'])
+                        c_drog = buscar_columna_estricta(f_d, ['cierre de drogueria', 'cierre de droguería', 'drogueria'])
+                        c_dep = buscar_columna_estricta(f_d, ['departamento', 'area'], evitar=['fecha', 'hora'])
+                        c_hora_sal = buscar_columna_estricta(f_d, ['hora salida', 'salida'], evitar=['fecha', 'drogueria'])
                         
-                        if not f_d.empty:
-                            c_dia_d = buscar_columna_estricta(f_d, ['dia', 'día'], evitar=['fecha'])
-                            c_fecha_d = buscar_columna_estricta(f_d, ['fecha'])
-                            c_dep = buscar_columna_estricta(f_d, ['departamento', 'area', 'área'], evitar=['fecha', 'hora'])
-                            c_hora_sal = buscar_columna_estricta(f_d, ['hora salida', 'salida', 'hora', 'cierre'], evitar=['fecha'])
-                            
-                            f_d['Dia_Norm'] = f_d[c_dia_d].apply(norm_dia) if c_dia_d else ""
-                            
-                            if c_dep and c_hora_sal and c_dia_d:
-                                # A. Extraer el Cierre de Droguería (Fila específica)
-                                filtro_cierre_gen = f_d[c_dep].astype(str).str.upper().str.contains("CIERRE DE DROG|CIERRE GENERAL|CIERRE DROTACA", na=False)
-                                df_cierre_gral = f_d[filtro_cierre_gen]
-                                
-                                if not df_cierre_gral.empty:
-                                    dict_d = df_cierre_gral.groupby('Dia_Norm')[c_hora_sal].last().to_dict()
-                                    df_resumen['Drotaca'] = df_resumen['Dia_Norm'].map(dict_d).fillna("N/R")
-                                
-                                if c_fecha_d:
-                                    dict_f = f_d.dropna(subset=[c_fecha_d]).groupby('Dia_Norm')[c_fecha_d].last().to_dict()
-                                    df_resumen['Fecha'] = df_resumen['Dia_Norm'].map(dict_f).fillna("")
+                        f_d['Dia_Norm'] = f_d[c_dia_d].apply(norm_dia) if c_dia_d else ""
+                        
+                        if c_drog:
+                            dict_d = f_d.dropna(subset=[c_drog]).groupby('Dia_Norm')[c_drog].last().to_dict()
+                            df_resumen['Drotaca'] = df_resumen['Dia_Norm'].map(dict_d).fillna("N/R")
+                        
+                        if c_fecha_d:
+                            dict_f = f_d.dropna(subset=[c_fecha_d]).groupby('Dia_Norm')[c_fecha_d].last().to_dict()
+                            df_resumen['Fecha'] = df_resumen['Dia_Norm'].map(dict_f).fillna("")
 
-                                # B. Extraer Departamentos (Resto de las Filas)
-                                df_deps = f_d[~filtro_cierre_gen].dropna(subset=[c_dep, c_hora_sal]).copy()
-                                df_deps = df_deps[df_deps[c_dep].str.strip() != ""]
-                                df_deps = df_deps[df_deps[c_dep].astype(str).str.lower() != "nan"]
-                                
-                                if not df_deps.empty:
-                                    pivot_deps = df_deps.pivot_table(index=c_dep, columns='Dia_Norm', values=c_hora_sal, aggfunc='last')
-                                    for d in dias_base:
-                                        if d not in pivot_deps.columns: pivot_deps[d] = "N/R"
-                                    pivot_deps = pivot_deps[dias_base].fillna("N/R")
-                                    pivot_deps['Promedio'] = pivot_deps.apply(lambda row: calcular_promedio_horas(row.tolist()), axis=1)
+                        # MATRIZ DE DEPARTAMENTOS
+                        if c_dep and c_hora_sal:
+                            df_deps = f_d.dropna(subset=[c_dep, c_hora_sal]).copy()
+                            df_deps = df_deps[~df_deps[c_dep].str.upper().str.contains("CIERRE DROTACA|CIERRE GENERAL", na=False)]
+                            if not df_deps.empty:
+                                pivot_deps = df_deps.pivot_table(index=c_dep, columns='Dia_Norm', values=c_hora_sal, aggfunc='last')
+                                for d in dias_base:
+                                    if d not in pivot_deps.columns: pivot_deps[d] = "N/R"
+                                pivot_deps = pivot_deps[dias_base].fillna("N/R")
+                                pivot_deps['Promedio'] = pivot_deps.apply(lambda row: calcular_promedio_horas(row.tolist()), axis=1)
 
                 # ==========================================
                 # HTML RENDERING - PIZARRA GENERAL
                 # ==========================================
                 prom_juanita = calcular_promedio_horas(df_resumen['Juanita'].tolist())
                 prom_drotaca = calcular_promedio_horas(df_resumen['Drotaca'].tolist())
-
                 logo_b64 = obtener_logo_base64()
                 color_azul = "#0d47a1"
                 
                 filas_gral_html = ""
                 for _, r in df_resumen.iterrows():
-                    hora_ap = a_12h(r['Apertura'])
-                    hora_ju = a_12h(r['Juanita'])
-                    hora_dr = a_12h(r['Drotaca'])
+                    h_ap = a_12h(r['Apertura'])
+                    h_ju = a_12h(r['Juanita'])
+                    h_dr = a_12h(r['Drotaca'])
                     
-                    color_ap = "#2e7d32" if "06:" in hora_ap or "07:00" in hora_ap else "#000"
-                    color_ju = "#e65100" if hora_ju != "N/R" else "#777"
+                    color_ap = "#2e7d32" if "06:" in h_ap or "07:00" in h_ap else "#000"
+                    color_ju = "#e65100" if h_ju != "N/R" else "#777"
                     
                     filas_gral_html += f"""
                     <tr style="text-align: center; border-bottom: 1px solid #ddd;">
                         <td style="padding: 15px; font-weight: bold; background-color: #f8f9fa;">{r['Día'].upper()}<br><small style="color:#666;">{r['Fecha']}</small></td>
-                        <td style="padding: 15px; color: {color_ap}; font-weight: bold; font-size: 16px;">{hora_ap}</td>
-                        <td style="padding: 15px; color: {color_ju}; font-weight: bold; font-size: 16px;">{hora_ju}</td>
-                        <td style="padding: 15px; font-weight: 900; font-size: 16px;">{hora_dr}</td>
+                        <td style="padding: 15px; color: {color_ap}; font-weight: bold; font-size: 16px;">{h_ap}</td>
+                        <td style="padding: 15px; color: {color_ju}; font-weight: bold; font-size: 16px;">{h_ju}</td>
+                        <td style="padding: 15px; font-weight: 900; font-size: 16px;">{h_dr}</td>
                     </tr>
                     """
 
@@ -390,7 +378,7 @@ with t_cierres:
                             <img src="{logo_b64}" style="height: 50px;">
                             <div style="text-align: right;">
                                 <div style="font-size: 22px; font-weight: 900; letter-spacing: 1px;">REPORTE SEMANAL DE GESTIÓN</div>
-                                <div style="font-size: 14px; font-weight: bold; opacity: 0.9;">SEMANA {int(num_sem)} | CIERRES GENERALES</div>
+                                <div style="font-size: 14px; font-weight: bold; opacity: 0.9;">SEMANA {int(num_sem)} ({rango_fechas}) | CIERRES GENERALES</div>
                             </div>
                         </div>
                         <table>
@@ -427,7 +415,7 @@ with t_cierres:
                         <tr style="text-align: center;">
                             <td style="padding: 10px; border: 1px solid #ddd; font-weight: 900; background-color: #f8f9fa; text-align: left; color: {color_azul}; font-size: 12px;">{str(dep_nombre).upper()}</td>
                             {tds}
-                            <td style="padding: 10px; border: 1px solid #ddd; font-weight: 900; font-size: 14px; color: #d32f2f; background-color: #ffebee;">{prom}</td>
+                            <td style="padding: 10px; border: 1px solid #ddd; font-weight: 900; font-size: 14px; color: #1b5e20; background-color: #e8f5e9;">{prom}</td>
                         </tr>
                         """
 
@@ -440,7 +428,7 @@ with t_cierres:
                                 <img src="{logo_b64}" style="height: 50px;">
                                 <div style="text-align: right;">
                                     <div style="font-size: 22px; font-weight: 900; letter-spacing: 1px;">MATRIZ DE DEPARTAMENTOS</div>
-                                    <div style="font-size: 14px; font-weight: bold; opacity: 0.9;">SEMANA {int(num_sem)} | HORARIOS DE SALIDA</div>
+                                    <div style="font-size: 14px; font-weight: bold; opacity: 0.9;">SEMANA {int(num_sem)} ({rango_fechas}) | HORARIOS DE SALIDA</div>
                                 </div>
                             </div>
                             <table>
@@ -452,7 +440,7 @@ with t_cierres:
                                         <th>MIÉRCOLES</th>
                                         <th>JUEVES</th>
                                         <th>VIERNES</th>
-                                        <th style="background: #ffcdd2; color: #b71c1c;">PROMEDIO</th>
+                                        <th style="background: #c8e6c9; color: #1b5e20;">PROMEDIO</th>
                                     </tr>
                                 </thead>
                                 <tbody>{filas_deps_html}</tbody>
@@ -480,21 +468,19 @@ with t_cierres:
                 # --- WHATSAPP CIERRES ---
                 st.markdown("---")
                 st.subheader("📱 Resumen para WhatsApp (Cierres y Departamentos)")
-                msg_w = f"⏱️ *Reporte de Cierres Semanal - Drotaca 2.0*\n📅 Semana: {int(num_sem)}\n\n"
+                msg_w = f"⏱️ *Reporte de Cierres Semanal*\n📅 Semana: {int(num_sem)} ({rango_fechas})\n\n"
                 msg_w += f"📍 *Cronometría de la Droguería:*\n"
                 msg_w += f"🔹 Promedio Cierre General: *{prom_drotaca}*\n"
                 msg_w += f"🔹 Promedio Cierre Juanita: *{prom_juanita}*\n\n"
                 
                 if not pivot_deps.empty:
-                    msg_w += f"📍 *Top 3 Áreas que salieron más tarde (Promedio):*\n"
-                    # Calculamos el top 3 para el Whatsapp (ordenando las horas de manera simple para el texto)
+                    msg_w += f"📍 *Top 10 Áreas que salieron más tarde (Promedio):*\n"
                     try:
                         pivot_deps['Para_Ordenar'] = pd.to_datetime(pivot_deps['Promedio'], format="%I:%M %p", errors='coerce')
-                        top_3 = pivot_deps.sort_values(by='Para_Ordenar', ascending=False).head(3)
-                        for dep, row in top_3.iterrows():
+                        top_10 = pivot_deps.sort_values(by='Para_Ordenar', ascending=False).head(10)
+                        for dep, row in top_10.iterrows():
                             msg_w += f"🔹 {str(dep).title()}: *{row['Promedio']}*\n"
-                    except:
-                        pass
+                    except: pass
                         
                 msg_w += f"\n✅ Tablas de auditoría detalladas adjuntas en imagen."
                 st.code(msg_w, language="markdown")
