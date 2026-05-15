@@ -67,10 +67,16 @@ def buscar_columna(df, palabras_clave):
 
 def calcular_rango_semana(ano, semana):
     """Calcula el lunes y domingo de una semana ISO"""
-    # ISO week 1 is the week with the first Thursday of the year
     lunes = datetime.strptime(f'{int(ano)}-W{int(semana)}-1', "%G-W%V-%u")
     domingo = lunes + timedelta(days=6)
     return f"{lunes.strftime('%d/%m/%Y')} al {domingo.strftime('%d/%m/%Y')}"
+
+# NUEVA FUNCIÓN: FORMATO DE MILES CON PUNTO
+def f_p(valor):
+    try:
+        return f"{int(float(valor)):,.0f}".replace(",", ".")
+    except:
+        return str(valor)
 
 # ==========================================
 # INTERFAZ
@@ -90,7 +96,7 @@ if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container
         
         df_raw = extraer_datos("PIZARRA_TRAFICO")
         if df_raw.empty:
-            st.error("Error al conectar con la base de datos.")
+            st.error("Error al conectar con la base de datos o la hoja está vacía.")
             st.stop()
 
         # Calculamos rango de fechas para el reporte
@@ -139,12 +145,15 @@ if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container
         color_azul = "#0d47a1"
         color_dorado = "#d4af37"
 
+        # APLICANDO EL FORMATO DE PUNTOS f_p()
         filas_t = "".join([f"<tr><td>{r[c_fecha]}</td><td>{r[c_dia]}</td><td>{a_12h(r[c_h1])}</td><td>{a_12h(r[c_hu])}</td><td>{a_12h(r[c_it])}</td><td>{a_12h(r[c_ct])}</td></tr>" for _,r in df_t.iterrows()])
-        filas_r = "".join([f"<tr><td style='text-align:left;'>{r[c_ruta]}</td><td>{r[c_zona]}</td><td>{r[c_unidad]}</td><td style='font-weight:bold;'>{int(r[c_farma])}</td><td style='font-weight:bold;'>{int(r[c_bultos])}</td></tr>" for _,r in df_rutas.iterrows()])
-        filas_z = "".join([f"<tr><td style='text-align:left; font-weight:bold;'>{r[c_zona]}</td><td>{int(r[c_farma])}</td><td style='color:{color_azul}; font-weight:bold;'>{r['%_Far']}%</td><td>{int(r[c_bultos])}</td><td style='color:#e65100; font-weight:bold;'>{r['%_Bul']}%</td></tr>" for _,r in df_zonas.iterrows()])
+        filas_r = "".join([f"<tr><td style='text-align:left;'>{r[c_ruta]}</td><td>{r[c_zona]}</td><td>{r[c_unidad]}</td><td style='font-weight:bold;'>{f_p(r[c_farma])}</td><td style='font-weight:bold;'>{f_p(r[c_bultos])}</td></tr>" for _,r in df_rutas.iterrows()])
+        filas_z = "".join([f"<tr><td style='text-align:left; font-weight:bold;'>{r[c_zona]}</td><td>{f_p(r[c_farma])}</td><td style='color:{color_azul}; font-weight:bold;'>{r['%_Far']}%</td><td>{f_p(r[c_bultos])}</td><td style='color:#e65100; font-weight:bold;'>{r['%_Bul']}%</td></tr>" for _,r in df_zonas.iterrows()])
 
         html_pdf = f"""
-        <!DOCTYPE html><html><head><style>
+        <!DOCTYPE html><html><head>
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+            <style>
             @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&display=swap');
             body {{ font-family: 'Montserrat', sans-serif; background:#525659; margin:0; }}
             .page {{ width: 210mm; background: white; margin: 10mm auto; padding: 0; box-shadow: 0 0 10px rgba(0,0,0,0.5); overflow:hidden; border: 1px solid #000; }}
@@ -164,8 +173,9 @@ if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container
             .total-bar {{ background: #000; color: white; display: flex; justify-content: space-around; padding: 12px; margin-top: 10px; font-weight: 900; font-size: 13px; border: 1px solid {color_dorado}; }}
             @media print {{ .no-print {{ display: none; }} body {{ background: white; }} .page {{ margin: 0; box-shadow: none; }} }}
         </style></head><body>
-            <div class="no-print" style="text-align:center; padding:20px;">
+            <div class="no-print" style="text-align:center; padding:20px; display: flex; justify-content: center; gap: 15px;">
                 <button onclick="window.print()" style="background:#e65100; color:white; border:none; padding:12px 30px; font-weight:bold; cursor:pointer; border-radius:5px;">🖨️ IMPRIMIR REPORTE MASTER</button>
+                <button onclick="descargarFoto()" style="background:#d32f2f; color:white; border:none; padding:12px 30px; font-weight:bold; cursor:pointer; border-radius:5px;">📸 DESCARGAR PIZARRA (FOTO)</button>
             </div>
             
             <div class="page">
@@ -173,6 +183,7 @@ if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container
                     <img src="{logo}" style="height: 55px;">
                     <div class="header-info">
                         <h2>AUDITORÍA SEMANAL DE TRÁFICO</h2>
+                        <h3 style="margin: 5px 0 0 0; color: #fff; font-size: 14px;">DEPARTAMENTO DE TRÁFICO</h3>
                         <p>Semana {int(num_sem)} ({rango_fechas})</p>
                     </div>
                 </div>
@@ -185,7 +196,7 @@ if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container
                     <div class="section-title">🚛 2. CONSOLIDADO DE RUTAS (GESTIÓN SEMANAL)</div>
                     <table><thead><tr><th style='text-align:left;'>RUTA</th><th>ZONA</th><th>UNIDAD (ÚLT.)</th><th>FARMACIAS TOT.</th><th>BULTOS TOT.</th></tr></thead>
                     <tbody>{filas_r}</tbody></table>
-                    <div class="total-bar"><span>TOTAL FARMACIAS: {int(total_f)}</span><span>TOTAL BULTOS: {int(total_b)}</span></div>
+                    <div class="total-bar"><span>TOTAL FARMACIAS: {f_p(total_f)}</span><span>TOTAL BULTOS: {f_p(total_b)}</span></div>
                     
                     <div class="section-title">🌍 3. DISTRIBUCIÓN POR ZONAS LOGÍSTICAS</div>
                     <table><thead><tr><th style='text-align:left;'>ZONA</th><th>FARMACIAS</th><th>% FAR.</th><th>BULTOS</th><th>% BUL.</th></tr></thead>
@@ -195,6 +206,36 @@ if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container
                         REPORTING SYSTEM PCD - DROGUERÍA DROTACA VENEZUELA
                     </div>
                 </div>
-            </div></body></html>
+            </div>
+            <script>
+                function descargarFoto() {{
+                    html2canvas(document.querySelector('.page'), {{ scale: 2 }}).then(canvas => {{
+                        var link = document.createElement('a');
+                        link.download = 'Reporte_Semanal_Semana_{int(num_sem)}.png';
+                        link.href = canvas.toDataURL();
+                        link.click();
+                    }});
+                }}
+            </script>
+        </body></html>
         """
         components.html(html_pdf, height=1200, scrolling=True)
+
+        # ==========================================
+        # WHATSAPP SEMANAL REDACTADO
+        # ==========================================
+        st.markdown("---")
+        st.subheader("📱 Mensaje para WhatsApp (Copiado Rápido)")
+        
+        txt_ws = f"*Reporte Semanal de Tráfico Drotaca* 🚚\n"
+        txt_ws += f"📅 Semana: {int(num_sem)} ({rango_fechas})\n\n"
+        txt_ws += f"*RESUMEN OPERATIVO:*\n"
+        txt_ws += f"📍 Total Despachos: {len(df_rutas)}\n"
+        txt_ws += f"🏥 Farmacias Atendidas: {f_p(total_f)}\n"
+        txt_ws += f"📦 Total Bultos Procesados: {f_p(total_b)}\n\n"
+        txt_ws += f"*PESO LOGÍSTICO POR ZONA:*\n"
+        for _, r in df_zonas.iterrows():
+            txt_ws += f"▪️ {r[c_zona]}: {f_p(r[c_bultos])} Bultos ({r['%_Bul']}%)\n"
+        txt_ws += "\n✅ *Pizarra de auditoría adjunta.*"
+        
+        st.code(txt_ws, language="markdown")
