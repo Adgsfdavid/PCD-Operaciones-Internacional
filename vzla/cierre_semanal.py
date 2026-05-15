@@ -463,7 +463,7 @@ with t_cierres:
 
                 st.markdown("---")
                 st.subheader("📱 Resumen para WhatsApp (Cierres y Departamentos)")
-                msg_w = f"⏱️ *Reporte de Cierres Semanal - Drotaca 2.0*\n📅 Semana: {int(num_sem)} ({rango_fechas})\n\n"
+                msg_w = f"⏱️ *Reporte de Cierres Semanal*\n📅 Semana: {int(num_sem)} ({rango_fechas})\n\n"
                 msg_w += f"📍 *Cronometría de la Droguería:*\n"
                 msg_w += f"🔹 Promedio Cierre General: *{prom_drotaca}*\n"
                 msg_w += f"🔹 Promedio Cierre Juanita: *{prom_juanita}*\n\n"
@@ -492,12 +492,10 @@ with t_comensales:
             if df_com_raw.empty:
                 st.error("No se pudo acceder a la hoja PIZARRA_COMENSALES o está vacía.")
             else:
-                # Filtrar la semana correctamente
                 c_sem_c = buscar_columna_estricta(df_com_raw, ['semana'])
                 if c_sem_c:
                     df_com_raw['Num_Semana'] = df_com_raw[c_sem_c].astype(str).str.extract(r'(\d+)').astype(float)
                 else:
-                    # Fallback robusto si no hay columna 'Semana': sacarla de la Fecha
                     c_fecha_c = buscar_columna_estricta(df_com_raw, ['fecha', 'timestamp'])
                     if c_fecha_c:
                         df_com_raw['Fecha_DT'] = pd.to_datetime(df_com_raw[c_fecha_c], dayfirst=True, errors='coerce')
@@ -517,12 +515,10 @@ with t_comensales:
                     
                     if not c_dep: st.error("No se detectó columna 'Departamento'."); st.stop()
                     
-                    # Limpieza y conversión a números
                     df_com[c_dep] = df_com[c_dep].astype(str).str.upper().str.strip()
                     for c in [c_des, c_alm, c_cen]:
                         if c: df_com[c] = pd.to_numeric(df_com[c], errors='coerce').fillna(0)
                     
-                    # Agrupación sumando todo por departamento
                     df_grp = df_com.groupby(c_dep).agg({
                         c_des: 'sum' if c_des else lambda x: 0,
                         c_alm: 'sum' if c_alm else lambda x: 0,
@@ -530,7 +526,7 @@ with t_comensales:
                     }).reset_index()
                     
                     df_grp['Total_Servicios'] = df_grp[c_des] + df_grp[c_alm] + df_grp[c_cen]
-                    df_grp = df_grp[df_grp['Total_Servicios'] > 0] # Limpiar los que tienen 0
+                    df_grp = df_grp[df_grp['Total_Servicios'] > 0]
                     df_grp = df_grp.sort_values('Total_Servicios', ascending=False)
                     
                     gran_total = df_grp['Total_Servicios'].sum()
@@ -541,21 +537,21 @@ with t_comensales:
                     tot_cen = df_grp[c_cen].sum() if c_cen else 0
 
                     # ==========================================
-                    # GENERACIÓN HTML - PIZARRA COMENSALES
+                    # GENERACIÓN HTML - PIZARRA COMENSALES (DISEÑO AZUL)
                     # ==========================================
-                    color_naranja = "#e65100"
+                    color_azul = "#0d47a1"
                     logo_b64 = obtener_logo_base64()
                     
                     filas_com_html = ""
                     for _, r in df_grp.iterrows():
                         filas_com_html += f"""
                         <tr style="text-align: center; border-bottom: 1px solid #ddd;">
-                            <td style="padding: 12px; font-weight: bold; text-align: left; background-color: #fff3e0; color: #333;">{r[c_dep]}</td>
+                            <td style="padding: 12px; font-weight: bold; text-align: left; background-color: #e3f2fd; color: #333;">{r[c_dep]}</td>
                             <td style="padding: 12px; color: #555;">{f_p(r[c_des]) if c_des else '0'}</td>
                             <td style="padding: 12px; color: #555;">{f_p(r[c_alm]) if c_alm else '0'}</td>
                             <td style="padding: 12px; color: #555;">{f_p(r[c_cen]) if c_cen else '0'}</td>
-                            <td style="padding: 12px; font-weight: 900; font-size: 15px; color: {color_naranja};">{f_p(r['Total_Servicios'])}</td>
-                            <td style="padding: 12px; font-weight: bold; color: #795548;">{r['%']:.1f}%</td>
+                            <td style="padding: 12px; font-weight: 900; font-size: 15px; color: {color_azul};">{f_p(r['Total_Servicios'])}</td>
+                            <td style="padding: 12px; font-weight: bold; color: #555;">{r['%']:.1f}%</td>
                         </tr>
                         """
                         
@@ -565,16 +561,16 @@ with t_comensales:
                         <style>
                             @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&display=swap');
                             body {{ font-family: 'Montserrat', sans-serif; padding: 20px; background-color: #f0f2f6; }}
-                            .pizarra {{ background: white; width: 900px; margin: auto; border-radius: 15px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid {color_naranja}; }}
-                            .header {{ background: {color_naranja}; color: white; padding: 30px; display: flex; justify-content: space-between; align-items: center; }}
+                            .pizarra {{ background: white; width: 900px; margin: auto; border-radius: 15px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid {color_azul}; }}
+                            .header {{ background: {color_azul}; color: white; padding: 30px; display: flex; justify-content: space-between; align-items: center; }}
                             table {{ width: 100%; border-collapse: collapse; }}
-                            th {{ background: #fff3e0; color: {color_naranja}; padding: 15px; text-transform: uppercase; font-size: 12px; border-bottom: 2px solid {color_naranja}; }}
-                            .footer-totales {{ background: #ffe0b2; padding: 15px; display: flex; justify-content: space-around; border-top: 3px solid {color_naranja}; font-weight: 900; color: #3e2723; }}
+                            th {{ background: #e3f2fd; color: {color_azul}; padding: 15px; text-transform: uppercase; font-size: 12px; border-bottom: 2px solid {color_azul}; }}
+                            .footer-totales {{ background: #bbdefb; padding: 15px; display: flex; justify-content: space-around; border-top: 3px solid {color_azul}; font-weight: 900; color: #0d47a1; }}
                             .total-box {{ text-align: center; }}
                         </style>
                     </head><body>
                         <div style="text-align: center; margin-bottom: 15px;">
-                            <button onclick="capturarComensales()" style="background: {color_naranja}; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR PIZARRA COMENSALES</button>
+                            <button onclick="capturarComensales()" style="background: {color_azul}; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR PIZARRA COMENSALES</button>
                         </div>
                         <div class="pizarra" id="pizarra-comensales">
                             <div class="header">
@@ -591,7 +587,7 @@ with t_comensales:
                                         <th>DESAYUNOS</th>
                                         <th>ALMUERZOS</th>
                                         <th>CENAS</th>
-                                        <th style="background: #ffe0b2;">TOTAL PLATOS</th>
+                                        <th style="background: #bbdefb;">TOTAL PLATOS</th>
                                         <th>% CONSUMO</th>
                                     </tr>
                                 </thead>
@@ -601,7 +597,7 @@ with t_comensales:
                                 <div class="total-box"><span style="font-size:12px; color:#555;">TOT. DESAYUNOS</span><br><span style="font-size:20px;">{f_p(tot_des)}</span></div>
                                 <div class="total-box"><span style="font-size:12px; color:#555;">TOT. ALMUERZOS</span><br><span style="font-size:20px;">{f_p(tot_alm)}</span></div>
                                 <div class="total-box"><span style="font-size:12px; color:#555;">TOT. CENAS</span><br><span style="font-size:20px;">{f_p(tot_cen)}</span></div>
-                                <div class="total-box" style="color:{color_naranja};"><span style="font-size:12px;">GRAN TOTAL</span><br><span style="font-size:24px;">{f_p(gran_total)}</span></div>
+                                <div class="total-box" style="color:{color_azul};"><span style="font-size:12px;">GRAN TOTAL</span><br><span style="font-size:24px;">{f_p(gran_total)}</span></div>
                             </div>
                         </div>
                         <script>
