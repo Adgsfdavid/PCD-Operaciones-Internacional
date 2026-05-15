@@ -1,5 +1,5 @@
 # ==========================================
-# Archivo: cierre_semanal.py (Auditoría Logística - Con Rango de Fechas)
+# Archivo: cierre_semanal.py (Auditoría Logística - Orden de Fecha Corregido)
 # ==========================================
 import streamlit as st
 import pandas as pd
@@ -71,7 +71,7 @@ def calcular_rango_semana(ano, semana):
     domingo = lunes + timedelta(days=6)
     return f"{lunes.strftime('%d/%m/%Y')} al {domingo.strftime('%d/%m/%Y')}"
 
-# NUEVA FUNCIÓN: FORMATO DE MILES CON PUNTO
+# FORMATO DE MILES CON PUNTO
 def f_p(valor):
     try:
         return f"{int(float(valor)):,.0f}".replace(",", ".")
@@ -118,6 +118,10 @@ if st.button("⚡ GENERAR AUDITORÍA DE TRÁFICO", type="primary", use_container
         c_ct = buscar_columna(df_sem, ['culminacion', 'fin'])
 
         df_t = df_sem.drop_duplicates(subset=[c_fecha]).copy()
+        
+        # SOLUCIÓN: ORDENAR CRONOLÓGICAMENTE LAS FECHAS
+        df_t['Fecha_Temp'] = pd.to_datetime(df_t[c_fecha], format='%d/%m/%Y', errors='coerce')
+        df_t = df_t.sort_values('Fecha_Temp')
         
         # --- CONSOLIDADO DE RUTAS ---
         c_ruta, c_zona, c_unidad, c_farma, c_bultos = buscar_columna(df_sem, ['ruta']), buscar_columna(df_sem, ['zona']), buscar_columna(df_sem, ['unidad']), buscar_columna(df_sem, ['farmacias']), buscar_columna(df_sem, ['bultos'])
