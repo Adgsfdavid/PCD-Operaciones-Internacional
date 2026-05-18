@@ -1322,10 +1322,10 @@ with t_surtido:
                     st.code(msg_surt, language="markdown")
                     
 # ---------------------------------------------------------
-# PESTAÑA 8: GENERADOR DEL MASTER REPORTE SEMANAL (PDF)
+# PESTAÑA 8: GENERADOR DEL MASTER REPORTE SEMANAL (PDF - CORREGIDO SIN HOJAS EN BLANCO)
 # ---------------------------------------------------------
 with t_pdf:
-    st.info("Ensamblador Final: Sube la foto de portada, llena los datos clave y carga las imágenes en el orden establecido para generar el Reporte Master PDF.")
+    st.info("Ensamblador Final: Sube la foto de portada, llena los datos clave y carga las imágenes en el orden establecido para generar el Reporte Master PDF sin páginas en blanco.")
 
     col_p1, col_p2 = st.columns([1, 1])
 
@@ -1392,16 +1392,16 @@ with t_pdf:
                     </tr>
                     """
                     
-                    # Generar Página de Contenido
+                    # Generar Página de Contenido (Usando la clase combinada page page-break)
                     img_file.seek(0)
                     b64_img = base64.b64encode(img_file.read()).decode()
                     html_paginas += f"""
-                    <div class="page">
+                    <div class="page page-break">
                         <div style="background-color: #000; color: white; padding: 20px 40px; display: flex; justify-content: space-between; align-items: center; border-bottom: 6px solid #d4af37;">
                             <div style="font-size: 22px; font-weight: 900; text-transform: uppercase;">{titulo}</div>
                             <div style="font-size: 16px; font-weight: bold; color: #d4af37;">SEMANA {int(num_sem)}</div>
                         </div>
-                        <div style="padding: 20px; text-align: center; height: 850px; display: flex; align-items: center; justify-content: center; background: #fafafa;">
+                        <div style="padding: 20px; text-align: center; height: 840px; display: flex; align-items: center; justify-content: center; background: #fafafa;">
                             <img src="data:image/png;base64,{b64_img}" style="max-width: 95%; max-height: 100%; object-fit: contain; border: 3px solid #ccc; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
                         </div>
                         <div style="position: absolute; bottom: 0; width: 100%; background: #111; padding: 15px 40px; font-size: 13px; font-weight: bold; color: #fff; display: flex; justify-content: space-between; border-top: 4px solid #d4af37; box-sizing: border-box;">
@@ -1418,7 +1418,12 @@ with t_pdf:
                     <style>
                         @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&display=swap');
                         body {{ font-family: 'Montserrat', sans-serif; background: #525659; margin: 0; padding: 20px; }}
-                        .page {{ width: 210mm; height: 297mm; background: white; margin: 0 auto 20px auto; position: relative; box-shadow: 0 0 10px rgba(0,0,0,0.5); overflow: hidden; page-break-after: always; }}
+                        
+                        /* Ajuste de altura a 296.2mm para evitar desbordes por subpíxeles */
+                        .page {{ width: 210mm; height: 296.2mm; background: white; margin: 0 auto 20px auto; position: relative; box-shadow: 0 0 10px rgba(0,0,0,0.5); overflow: hidden; box-sizing: border-box; }}
+                        
+                        /* Regla estricta de salto previo */
+                        .page-break {{ page-break-before: always !important; }}
                         
                         /* Estilos de la Portada */
                         .portada-bg {{ background-image: url('data:image/png;base64,{b64_portada}'); background-size: cover; background-position: center; height: 60%; position: relative; }}
@@ -1464,7 +1469,7 @@ with t_pdf:
                             </div>
                         </div>
 
-                        <div class="page">
+                        <div class="page page-break">
                             <div style="padding: 60px;">
                                 <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 5px solid #000; padding-bottom: 25px; margin-bottom: 40px;">
                                     <div>
@@ -1498,7 +1503,8 @@ with t_pdf:
                             filename:     'Master_Reporte_Semanal_{int(num_sem)}.pdf',
                             image:        {{ type: 'jpeg', quality: 0.98 }},
                             html2canvas:  {{ scale: 2, useCORS: true }},
-                            jsPDF:        {{ unit: 'mm', format: 'a4', orientation: 'portrait' }}
+                            jsPDF:        {{ unit: 'mm', format: 'a4', orientation: 'portrait' }},
+                            pagebreak:    {{ mode: ['css', 'legacy'] }}
                         }};
                         html2pdf().set(opt).from(element).save();
                     }}
@@ -1506,4 +1512,4 @@ with t_pdf:
                 </body></html>
                 """
                 components.html(html_pdf_master, height=1200, scrolling=True)
-                st.toast("✅ Master PDF generado exitosamente.")                    
+                st.toast("✅ Master PDF generado exitosamente sin páginas vacías.")
