@@ -95,7 +95,7 @@ def calcular_promedio_horas(lista_horas):
     segundos_totales = sum(t.hour * 3600 + t.minute * 60 for t in tiempos) / len(tiempos)
     horas = int(segundos_totales // 3600)
     minutos = int((segundos_totales % 3600) // 60)
-    temp_dt = datetime(2026, 1, 1, horas, minutes)
+    temp_dt = datetime(2026, 1, 1, horas, minutos)
     return temp_dt.strftime("%I:%M %p").upper()
 
 def calcular_rango_semana(ano, semana):
@@ -816,21 +816,22 @@ with t_despachos:
                     try:
                         if 'ORIENTE' in filename:
                             df = pd.read_excel(file, sheet_name="FARMACIAS", header=6)
-                            df.columns = df.columns.str.strip().str.upper() # Limpieza de espacios
+                            # Convertimos todos los nombres de columnas a texto antes de limpiar (Evita errores con columnas numéricas/nulas)
+                            df.columns = df.columns.astype(str).str.strip().str.upper() 
                             cols_map = {'FECHA DE ENTREGA': 'Fecha', 'BULTOS': 'Bultos', 'TIPO DE ENTREGA': 'Status', 'RUTAS': 'SubRegion', 'DISTRIBUCION': 'Region'}
                             df_renamed = df.rename(columns=cols_map)
                             df_renamed['Region_Macro'] = 'ORIENTE'
                             
                         elif 'CENTRO' in filename:
                             df = pd.read_excel(file, sheet_name="FARMACIAS", header=5)
-                            df.columns = df.columns.str.strip().str.upper() # Limpieza de espacios
+                            df.columns = df.columns.astype(str).str.strip().str.upper() 
                             cols_map = {'FECHA DE ENTREGA': 'Fecha', 'BULTOS': 'Bultos', 'TIPO DE ENTREGA': 'Status', 'DESPACHO': 'SubRegion', 'DISTRIBUCION': 'Region'}
                             df_renamed = df.rename(columns=cols_map)
                             df_renamed['Region_Macro'] = 'CENTRO'
                             
                         elif 'OCCIDENTE' in filename:
                             df = pd.read_excel(file, sheet_name="FARMACIAS", header=5)
-                            df.columns = df.columns.str.strip().str.upper() # Limpieza de espacios o diferencias de case
+                            df.columns = df.columns.astype(str).str.strip().str.upper() 
                             cols_map = {'FECHA DE ENTREGA': 'Fecha', 'BULTOS': 'Bultos', 'TIPO DE ENTREGA': 'Status', 'RUTAS': 'SubRegion', 'ZONA': 'Region'}
                             df_renamed = df.rename(columns=cols_map)
                             df_renamed['Region_Macro'] = 'OCCIDENTE'
@@ -839,11 +840,20 @@ with t_despachos:
                             continue
                         
                         cols_to_keep = ['Fecha', 'Bultos', 'Status', 'SubRegion', 'Region', 'Region_Macro']
+                        
+                        # Validar si las columnas realmente existen (para que lo veas en el log si algo falla)
+                        columnas_faltantes = [c for c in cols_to_keep if c not in df_renamed.columns and c != 'Region_Macro']
+                        if columnas_faltantes:
+                            registros_log.append(f"⚠️ {file.name} no tiene las columnas mapeadas: {columnas_faltantes}. Asegúrate que la hoja sea 'FARMACIAS' y la cabecera esté en la fila correcta.")
+                        
                         df_renamed = df_renamed[[c for c in cols_to_keep if c in df_renamed.columns]]
                         
                         # Guardar total de filas brutas leídas
                         filas_brutas = len(df_renamed)
+                        
+                        # [CORRECCIÓN CRÍTICA] Rellenar fechas hacia abajo (efecto de celdas combinadas o vacías del martes en adelante)
                         df_renamed['Fecha'] = pd.to_datetime(df_renamed['Fecha'], dayfirst=True, errors='coerce')
+                        df_renamed['Fecha'] = df_renamed['Fecha'].ffill() 
                         df_renamed = df_renamed.dropna(subset=['Fecha'])
                         
                         registros_log.append(f"✅ Archivo leído: {file.name} | Filas brutas: {filas_brutas} -> Con Fecha válida: {len(df_renamed)}")
@@ -853,6 +863,7 @@ with t_despachos:
                 
                 if not dfs_despacho:
                     st.error("No se pudo extraer información válida de los archivos de despacho cargados.")
+                    for log_msg in registros_log: st.write(log_msg)
                     st.stop()
 
                 df_desp = pd.concat(dfs_despacho, ignore_index=True)
@@ -876,9 +887,12 @@ with t_despachos:
                 # --- 2. PROCESAR FLOTA (KILOMETRAJE) ---
                 try:
                     df_flota_raw = pd.read_excel(archivo_flota, sheet_name="BASE DE DATOS", usecols=lambda x: 'Unnamed' not in x)
-                    df_flota_raw.columns = df_flota_raw.columns.str.strip().str.upper() # Limpieza estricta de nombres de columnas
+                    # Convertimos todos los nombres de columnas a texto antes de limpiar
+                    df_flota_raw.columns = df_flota_raw.columns.astype(str).str.strip().str.upper() 
                     
                     df_flota_raw['FECHAS'] = pd.to_datetime(df_flota_raw['FECHAS'], dayfirst=True, errors='coerce')
+                    # [CORRECCIÓN CRÍTICA] Rellenar fechas hacia abajo por si hay vacíos
+                    df_flota_raw['FECHAS'] = df_flota_raw['FECHAS'].ffill() 
                     df_flota_raw = df_flota_raw.dropna(subset=['FECHAS'])
                     
                     columnas_id = ['FECHAS', 'DIA', 'MES']
