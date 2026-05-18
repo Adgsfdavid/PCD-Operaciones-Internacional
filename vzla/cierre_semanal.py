@@ -211,12 +211,13 @@ rango_fechas_lv = calcular_rango_lunes_viernes(ano_sel, num_sem)
 color_azul = "#0d47a1"
 logo_b64 = obtener_logo_base64()
 
-t_trafico, t_cierres, t_comensales, t_guardias, t_despachos = st.tabs([
+t_trafico, t_cierres, t_comensales, t_guardias, t_despachos, t_combustible = st.tabs([
     "📈 Desempeño de Tráfico", 
     "⏱️ Cronometría de Cierres", 
     "🍽️ Pizarra Comensales",
     "🛡️ Guardias Semanales",
-    "🚚 Resumen de Despachos"
+    "🚚 Resumen de Despachos",
+    "⛽ Reserva Combustible"
 ])
 
 # (Las Pestañas 1, 2, 3 y 4 se mantienen exactamente iguales...)
@@ -471,7 +472,7 @@ with t_guardias:
                         st.code(msg_mon, language="markdown")
 
 # ---------------------------------------------------------
-# PESTAÑA 5: RESUMEN DE DESPACHOS (MIGRADO NETAMENTE A EXCEL CON FILTRO MAESTRO)
+# PESTAÑA 5: RESUMEN DE DESPACHOS (MIGRADO NETAMENTE A EXCEL)
 # ---------------------------------------------------------
 with t_despachos:
     st.info("Genera el Resumen Logístico de Lunes a Domingo leyendo directamente de los Excels.")
@@ -490,7 +491,7 @@ with t_despachos:
                 registros_log = []
                 registros_log.append(f"ℹ️ Iniciando auditoría para el Año {ano_sel} - Semana {int(num_sem)}.")
                 
-                # --- 1. PROCESAR DESPACHOS (ESCANEO DINÁMICO DE CABECERAS) ---
+                # --- 1. PROCESAR DESPACHOS (ESCANEO DINÁMICO) ---
                 dfs_despacho = []
                 for file in archivos_despacho:
                     filename = file.name.upper()
@@ -554,18 +555,18 @@ with t_despachos:
                 df_desp['Ano_Calc'] = df_desp['Fecha'].dt.isocalendar().year
                 
                 df_sem = df_desp[(df_desp['Num_Semana'] == num_sem) & (df_desp['Ano_Calc'] == ano_sel)].copy()
-                registros_log.append(f"📊 Registros totales de despacho que coinciden con Año {ano_sel} y Semana {int(num_sem)}: {len(df_sem)}")
+                registros_log.append(f"📊 Registros totales de despacho (Semana {int(num_sem)}): {len(df_sem)}")
                 
                 df_sem['Status'] = df_sem['Status'].astype(str).str.upper().str.strip()
                 filas_antes_status = len(df_sem)
                 df_sem = df_sem[df_sem['Status'] == 'ENTREGADO']
-                registros_log.append(f"🎯 Registros filtrados con Status 'ENTREGADO': {len(df_sem)} (Filas con otros status omitidas: {filas_antes_status - len(df_sem)})")
+                registros_log.append(f"🎯 Filtrados con Status 'ENTREGADO': {len(df_sem)} (Omitidos: {filas_antes_status - len(df_sem)})")
                 
                 df_sem['Bultos'] = pd.to_numeric(df_sem['Bultos'], errors='coerce').fillna(0)
                 df_sem['Pedidos'] = 1 
                 df_sem['SubRegion_Clean'] = df_sem.apply(lambda x: asignar_subregion(x['SubRegion'], x['Region_Macro']), axis=1)
 
-                # --- 2. PROCESAR MAESTRO 'FLOTA ACTUAL' (FILTRO DE EXCLUSIÓN) ---
+                # --- 2. PROCESAR MAESTRO 'FLOTA ACTUAL' ---
                 placas_despacho_validas = None
                 try:
                     df_flota_actual = pd.read_excel(archivo_flota, sheet_name="FLOTA ACTUAL")
@@ -575,18 +576,14 @@ with t_despachos:
                         df_flota_actual['PLACA'] = df_flota_actual['PLACA'].astype(str).str.strip().str.upper()
                         df_flota_actual['RUTA'] = df_flota_actual['RUTA'].astype(str).str.strip().str.upper()
                         
-                        # Filtro estricto: Solo incluimos Oriente, Centro u Occidente
                         rutas_operativas = ['ORIENTE', 'CENTRO', 'OCCIDENTE']
                         df_solo_despacho = df_flota_actual[df_flota_actual['RUTA'].isin(rutas_operativas)]
                         placas_despacho_validas = set(df_solo_despacho['PLACA'].unique())
                         
-                        registros_log.append(f"✅ Hoja 'FLOTA ACTUAL' procesada. Total vehículos: {len(df_flota_actual)} | Vehículos autorizados para Despacho: {len(placas_despacho_validas)}")
-                    else:
-                        registros_log.append("⚠️ Advertencia: No se encontraron las columnas 'PLACA' o 'RUTA' en la pestaña FLOTA ACTUAL. Se procesarán todas las placas.")
-                except Exception as e_fa:
-                    registros_log.append(f"⚠️ Advertencia: No se pudo mapear la pestaña 'FLOTA ACTUAL' ({str(e_fa)}). El sistema procesará el kilometraje completo por defecto.")
+                        registros_log.append(f"✅ 'FLOTA ACTUAL' procesada. Vehículos autorizados para Despacho: {len(placas_despacho_validas)}.")
+                except: pass
 
-                # --- 3. PROCESAR HISTÓRICO BASE DE DATOS (KILOMETRAJE) ---
+                # --- 3. PROCESAR KILOMETRAJE ---
                 try:
                     df_flota_raw = pd.read_excel(archivo_flota, sheet_name="BASE DE DATOS")
                     df_flota_raw.columns = df_flota_raw.columns.astype(str).str.strip().str.upper() 
@@ -607,20 +604,12 @@ with t_despachos:
                     
                     df_km_sem = df_flota[(df_flota['Num_Semana'] == num_sem) & (df_flota['Ano_Calc'] == ano_sel)].copy()
                     
-                    # Aplicamos el filtro maestro de placas si se leyó correctamente
                     if placas_despacho_validas is not None:
                         km_brutos = df_km_sem['KILOMETROS'].sum()
                         df_km_sem['PLACA'] = df_km_sem['PLACA'].astype(str).str.strip().str.upper()
-                        # Conservar solo lo operativo de Despacho
                         df_km_sem = df_km_sem[df_km_sem['PLACA'].isin(placas_despacho_validas)].copy()
-                        km_netos = df_km_sem['KILOMETROS'].sum()
-                        km_excluidos = km_brutos - km_netos
-                        
-                        registros_log.append(f"🎯 Filtro Logístico Aplicado: Kilómetros Totales Brutos: {km_brutos:,.2f} Kms -> Kilómetros Reales de Despacho: {km_netos:,.2f} Kms (Kilometraje administrativo/excluido: {km_excluidos:,.2f} Kms).")
-                    else:
-                        registros_log.append(f"🚛 Kilometraje sumado bruto (sin filtro): {df_km_sem['KILOMETROS'].sum():,.2f} Kms")
+                        registros_log.append(f"🎯 KMs Netos de Despacho calculados: {df_km_sem['KILOMETROS'].sum():,.2f} Kms.")
                 except Exception as e:
-                    registros_log.append(f"❌ Error crítico procesando el archivo de Kilometraje: {str(e)}")
                     st.error(f"Error procesando el archivo de Kilometraje: {e}")
                     st.stop()
 
@@ -641,14 +630,11 @@ with t_despachos:
                     total_pedidos = df_diario['Pedidos'].sum()
                     total_bultos = df_diario['Bultos'].sum()
                     total_kms = df_diario['KILOMETROS'].sum()
-                    
-                    dias_activos = len(df_diario[df_diario['Pedidos'] > 0])
-                    if dias_activos == 0: dias_activos = 1
+                    dias_activos = max(len(df_diario[df_diario['Pedidos'] > 0]), 1)
                     
                     prom_ped = total_pedidos / dias_activos
                     prom_bul = total_bultos / dias_activos
                     prom_kms = total_kms / dias_activos
-
                     df_diario['% Diario'] = (df_diario['Pedidos'] / total_pedidos * 100).fillna(0) if total_pedidos > 0 else 0
                     
                     def get_arrow(val, prom):
@@ -662,8 +648,7 @@ with t_despachos:
 
                     for _, r in df_diario.iterrows():
                         fecha_obj = pd.to_datetime(r['Date'])
-                        str_fecha = f"{dias_semana_es[fecha_obj.weekday()]} {fecha_obj.day} de {meses_es[fecha_obj.month-1]} de {fecha_obj.year}"
-                        
+                        str_fecha = f"{dias_semana_es[fecha_obj.weekday()]} {fecha_obj.day} de {meses_es[fecha_obj.month-1]}"
                         arr_ped, c_ped = get_arrow(r['Pedidos'], prom_ped)
                         arr_por, c_por = get_arrow(r['% Diario'], (100/dias_activos))
                         
@@ -677,7 +662,6 @@ with t_despachos:
                         </tr>
                         """
 
-                    # AGRUPACIÓN POR REGIONES
                     df_reg = df_sem.groupby(['Region_Macro', 'SubRegion_Clean']).agg({'Pedidos': 'sum', 'Bultos': 'sum'}).reset_index()
 
                     def generar_bloque_region(nombre_macro, color_macro, df_f):
@@ -709,34 +693,28 @@ with t_despachos:
                             """
                             pct = (r['Pedidos'] / t_ped * 100) if t_ped > 0 else 0
                             col_bar = colores[i % len(colores)]
-                            if pct > 0:
-                                barras_html += f"<div style='width: {pct}%; background-color: {col_bar}; color: white; font-size:10px; text-align:center; font-weight:bold; padding: 5px 0; border-right: 1px solid white;'>{int(r['Pedidos'])} ; {int(pct)}%</div>"
+                            if pct > 0: barras_html += f"<div style='width: {pct}%; background-color: {col_bar}; color: white; font-size:10px; text-align:center; font-weight:bold; padding: 5px 0; border-right: 1px solid white;'>{int(pct)}%</div>"
                             
                         html_bloque += f"""
                                 </table>
                             </div>
                             <div style="width: 43%; background: #333; color: white; padding: 10px; border-radius: 5px; border: 1px solid #000; display:flex; flex-direction:column; justify-content:center;">
                                 <div style="text-align: center; font-size: 12px; font-weight: bold; margin-bottom: 10px; text-transform: uppercase;">PEDIDOS ENTREGADOS {nombre_macro}</div>
-                                <div style="display:flex; width: 100%; border-radius: 4px; overflow: hidden; border: 1px solid #fff;">
-                                    {barras_html}
-                                </div>
+                                <div style="display:flex; width: 100%; border-radius: 4px; overflow: hidden; border: 1px solid #fff;">{barras_html}</div>
                                 <div style="display:flex; flex-wrap: wrap; justify-content: center; margin-top: 10px;">
                         """
                         for i, r in df_f.iterrows():
                             col_bar = colores[i % len(colores)]
                             html_bloque += f"<div style='font-size: 9px; margin-right: 10px;'><span style='display:inline-block; width:10px; height:10px; background:{col_bar}; margin-right:3px;'></span>{r['SubRegion_Clean']}</div>"
                             
-                        html_bloque += """
-                                </div>
-                            </div>
-                        </div>
-                        """
+                        html_bloque += "</div></div></div>"
                         return html_bloque
 
                     bloque_oriente = generar_bloque_region("ORIENTE", "#2e7d32", df_reg[df_reg['Region_Macro'].str.upper() == 'ORIENTE'])
-                    bloque_centro = generar_bloque_region("CENTRO", "#2e7d32", df_reg[df_reg['Region_Macro'].str.upper() == 'CENTRO'])
-                    bloque_occidente = generar_bloque_region("OCCIDENTE", "#2e7d32", df_reg[df_reg['Region_Macro'].str.upper() == 'OCCIDENTE'])
+                    bloque_centro = generar_bloque_region("CENTRO", "#1565c0", df_reg[df_reg['Region_Macro'].str.upper() == 'CENTRO'])
+                    bloque_occidente = generar_bloque_region("OCCIDENTE", "#e65100", df_reg[df_reg['Region_Macro'].str.upper() == 'OCCIDENTE'])
 
+                    # AQUI AGREGAMOS EL HEADER CON LOGO Y TÍTULO A LA PIZARRA DE DESPACHOS
                     html_pizarra_despachos = f"""
                     <html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head>
                     <body style="font-family: Arial, sans-serif; background-color: #f0f2f6; padding: 20px;">
@@ -744,11 +722,20 @@ with t_despachos:
                         <button onclick="capDespachos()" style="background: #1565c0; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR RESUMEN DESPACHOS</button>
                     </div>
                     <div id="piz-despachos" style="background:white; width:950px; margin:auto; border:2px solid #1565c0; border-radius:12px; overflow:hidden;">
-                        <div style="padding: 10px;">
+                        
+                        <div style="background-color: #1565c0; color: white; padding: 25px 30px; display: flex; align-items: center; justify-content: space-between; border-bottom: 5px solid #d4af37;">
+                            <img src="{logo_b64}" style="height: 50px;">
+                            <div style="text-align: right;">
+                                <h2 style="margin:0; font-size:24px; font-weight: 900;">DESPACHOS A NIVEL NACIONAL</h2>
+                                <p style="margin:5px 0 0 0; font-size:14px; font-weight:bold; color:#d4af37; letter-spacing: 1px;">SEMANA {int(num_sem)} ({rango_fechas.upper()})</p>
+                            </div>
+                        </div>
+
+                        <div style="padding: 15px;">
                             <table style="width: 100%; border-collapse: collapse; font-size: 13px; border: 2px solid #000;">
                                 <thead>
-                                    <tr style="background: #1565c0; color: white;">
-                                        <th style="padding: 10px; border: 1px solid #000;">SEMANA {rango_fechas.upper()}</th>
+                                    <tr style="background: #e3f2fd; color: #1565c0;">
+                                        <th style="padding: 10px; border: 1px solid #000;">DÍA DE LA SEMANA</th>
                                         <th style="padding: 10px; border: 1px solid #000;">PEDIDOS ENTREGADOS</th>
                                         <th style="padding: 10px; border: 1px solid #000;">% DIARIO</th>
                                         <th style="padding: 10px; border: 1px solid #000;">BULTOS ENTREGADOS</th>
@@ -800,7 +787,7 @@ with t_despachos:
                     <script>function capDespachos() {{ html2canvas(document.getElementById('piz-despachos'), {{scale: 2}}).then(canvas => {{ var link = document.createElement('a'); link.download = 'Resumen_Despachos_{int(num_sem)}.png'; link.href = canvas.toDataURL(); link.click(); }}); }}</script>
                     </body></html>
                     """
-                    components.html(html_pizarra_despachos, height=1300, scrolling=True)
+                    components.html(html_pizarra_despachos, height=1350, scrolling=True)
 
                     st.markdown("---")
                     st.subheader("📱 Mensaje para WhatsApp (Resumen Ejecutivo)")
@@ -814,7 +801,6 @@ with t_despachos:
                     msg_d += "✅ *Dashboard estadístico adjunto en imagen.*"
                     st.code(msg_d, language="markdown")
                     
-                    # --- PANEL DE LOG ---
                     st.markdown("---")
                     st.subheader("📋 Registro de Auditoría (Log de Procesamiento)")
                     for log_msg in registros_log:
@@ -822,3 +808,227 @@ with t_despachos:
                         elif "⚠️" in log_msg: st.warning(log_msg)
                         elif "✅" in log_msg: st.success(log_msg)
                         else: st.info(log_msg)
+
+# ---------------------------------------------------------
+# PESTAÑA 6: CONTROL DE RESERVA DE COMBUSTIBLE
+# ---------------------------------------------------------
+with t_combustible:
+    st.info("Monitoreo de Extracción y Recarga de Tanques y Bidones de Combustible (Base El Tigre).")
+    
+    if st.button("⛽ Generar Pizarra de Combustible", type="primary", use_container_width=True):
+        with st.spinner("Conectando con Google Sheets y calculando variaciones..."):
+            df_comb_raw = extraer_datos("FLOTA_COMBUSTIBLE")
+            if df_comb_raw.empty:
+                st.error("No se pudo conectar con la hoja 'FLOTA_COMBUSTIBLE' o está vacía.")
+            else:
+                # Estandarizar columnas y buscar num_sem
+                df_comb_raw.columns = df_comb_raw.columns.str.strip()
+                df_comb_raw['Fecha_DT'] = pd.to_datetime(df_comb_raw['Fecha'], format='%d/%m/%Y', errors='coerce')
+                df_comb_raw = df_comb_raw.dropna(subset=['Fecha_DT'])
+                
+                # Filtrar la semana seleccionada
+                df_comb_raw['Num_Semana'] = df_comb_raw['Fecha_DT'].dt.isocalendar().week
+                df_comb = df_comb_raw[df_comb_raw['Num_Semana'] == num_sem].sort_values('Fecha_DT').copy()
+                
+                if df_comb.empty:
+                    st.warning(f"No existen registros de combustible para la Semana {int(num_sem)}.")
+                else:
+                    # Columnas numéricas
+                    cols_tanques = ['Tanque_1_50K', 'Tanque_2_12K', 'Tanque_3_7K', 'Total_Tanques']
+                    cols_bidones = ['Gasolina_Bidones', 'Gasoil_Bidones']
+                    for col in cols_tanques + cols_bidones:
+                        if col in df_comb.columns:
+                            df_comb[col] = pd.to_numeric(df_comb[col], errors='coerce').fillna(0)
+                        else:
+                            df_comb[col] = 0
+
+                    # 1. Apertura (Lunes/Primer día) y Cierre (Viernes/Último día)
+                    row_apertura = df_comb.iloc[0]
+                    row_cierre = df_comb.iloc[-1]
+                    fecha_apertura = row_apertura['Fecha_DT'].strftime('%d/%m/%Y')
+                    fecha_cierre = row_cierre['Fecha_DT'].strftime('%d/%m/%Y')
+
+                    # 2. Función para calcular Consumo (bajadas) y Recargas (subidas)
+                    def calcular_variacion(col_nombre):
+                        consumo = 0
+                        recarga = 0
+                        valores = df_comb[col_nombre].tolist()
+                        for i in range(1, len(valores)):
+                            delta = valores[i] - valores[i-1]
+                            if delta > 0: recarga += delta      # Si sube, llegó cisterna/llenaron
+                            elif delta < 0: consumo += abs(delta) # Si baja, se extrajo para uso
+                        return consumo, recarga
+
+                    cons_50k, rec_50k = calcular_variacion('Tanque_1_50K')
+                    cons_12k, rec_12k = calcular_variacion('Tanque_2_12K')
+                    cons_7k, rec_7k = calcular_variacion('Tanque_3_7K')
+                    cons_tot, rec_tot = calcular_variacion('Total_Tanques')
+
+                    # Para los bidones nos interesa el stock de apertura, cierre y la suma de consumos reales
+                    cons_gasolina, rec_gasolina = calcular_variacion('Gasolina_Bidones')
+                    cons_gasoil, rec_gasoil = calcular_variacion('Gasoil_Bidones')
+
+                    # --- CONSTRUCCIÓN DEL DASHBOARD HTML ---
+                    
+                    # Generador de tarjetas para los Tanques
+                    def crear_card_tanque(titulo, apertura, cierre, consumo, recarga, max_cap):
+                        pct_apertura = min((apertura / max_cap) * 100, 100) if max_cap > 0 else 0
+                        pct_cierre = min((cierre / max_cap) * 100, 100) if max_cap > 0 else 0
+                        
+                        color_tanque = "#2e7d32" if pct_cierre > 50 else ("#f57c00" if pct_cierre > 20 else "#d32f2f")
+
+                        return f"""
+                        <div style="background: white; border: 1px solid #ccc; border-radius: 8px; padding: 15px; width: 31%; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+                            <h3 style="margin: 0 0 10px 0; color: #1565c0; font-size: 16px; border-bottom: 2px solid #1565c0; padding-bottom: 5px;">🛢️ {titulo}</h3>
+                            <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: bold; margin-bottom: 5px;">
+                                <span>Apertura: <span style="color:#555;">{f_p(apertura)} L</span></span>
+                                <span>Cierre: <span style="color:{color_tanque};">{f_p(cierre)} L</span></span>
+                            </div>
+                            <div style="width: 100%; background: #e0e0e0; height: 10px; border-radius: 5px; margin-bottom: 15px; overflow: hidden;">
+                                <div style="width: {pct_cierre}%; background: {color_tanque}; height: 100%;"></div>
+                            </div>
+                            <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
+                                <tr>
+                                    <td style="padding: 5px; border-top: 1px solid #eee;">🔻 <b>Extracción:</b></td>
+                                    <td style="padding: 5px; border-top: 1px solid #eee; text-align: right; color: #d32f2f; font-weight: bold;">{f_p(consumo)} L</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 5px; border-top: 1px solid #eee;">⬆️ <b>Recargas:</b></td>
+                                    <td style="padding: 5px; border-top: 1px solid #eee; text-align: right; color: #2e7d32; font-weight: bold;">{f_p(recarga)} L</td>
+                                </tr>
+                            </table>
+                        </div>
+                        """
+
+                    card_50k = crear_card_tanque("TANQUE 50.000", row_apertura['Tanque_1_50K'], row_cierre['Tanque_1_50K'], cons_50k, rec_50k, 50000)
+                    card_12k = crear_card_tanque("TANQUE 12.000", row_apertura['Tanque_2_12K'], row_cierre['Tanque_2_12K'], cons_12k, rec_12k, 12000)
+                    card_7k = crear_card_tanque("TANQUE 7.000", row_apertura['Tanque_3_7K'], row_cierre['Tanque_3_7K'], cons_7k, rec_7k, 7000)
+
+                    # --- GRÁFICA DE BARRAS DE RENDIMIENTO DIARIO ---
+                    filas_rendimiento = ""
+                    dias_semana_es = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+                    
+                    for i, row in df_comb.iterrows():
+                        fecha_str = row['Fecha_DT'].strftime('%d/%m')
+                        dia_nombre = dias_semana_es[row['Fecha_DT'].weekday()]
+                        
+                        # Barras visuales
+                        l_50 = row['Tanque_1_50K']
+                        l_12 = row['Tanque_2_12K']
+                        l_7 = row['Tanque_3_7K']
+                        t_tot = row['Total_Tanques']
+                        
+                        pct_tot = min((t_tot / 69000) * 100, 100) # Capacidad maxima base 69000
+                        
+                        filas_rendimiento += f"""
+                        <tr>
+                            <td style="padding: 8px; border: 1px solid #ccc; font-weight: bold; width: 15%;">{dia_nombre} {fecha_str}</td>
+                            <td style="padding: 8px; border: 1px solid #ccc; width: 50%;">
+                                <div style="width: 100%; background: #e0e0e0; height: 16px; border-radius: 4px; overflow: hidden; position: relative;">
+                                    <div style="width: {pct_tot}%; background: #1565c0; height: 100%;"></div>
+                                </div>
+                            </td>
+                            <td style="padding: 8px; border: 1px solid #ccc; font-weight: 900; text-align: center; color: #1565c0; width: 15%;">{f_p(t_tot)} L</td>
+                            <td style="padding: 8px; border: 1px solid #ccc; font-size: 11px; color: #555; text-align: center;">50k: {f_p(l_50)} | 12k: {f_p(l_12)} | 7k: {f_p(l_7)}</td>
+                        </tr>
+                        """
+
+                    html_pizarra_combustible = f"""
+                    <html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head>
+                    <body style="font-family: Arial, sans-serif; background-color: #f0f2f6; padding: 20px;">
+                    <div style="text-align: center; margin-bottom: 15px;">
+                        <button onclick="capCombustible()" style="background: #e65100; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR REPORTE COMBUSTIBLE</button>
+                    </div>
+                    <div id="piz-combustible" style="background:white; width:950px; margin:auto; border:2px solid #e65100; border-radius:12px; overflow:hidden;">
+                        
+                        <div style="background-color: #e65100; color: white; padding: 25px 30px; display: flex; align-items: center; justify-content: space-between; border-bottom: 5px solid #333;">
+                            <img src="{logo_b64}" style="height: 50px;">
+                            <div style="text-align: right;">
+                                <h2 style="margin:0; font-size:24px; font-weight: 900;">CONTROL DE RESERVA COMBUSTIBLE</h2>
+                                <p style="margin:5px 0 0 0; font-size:14px; font-weight:bold; letter-spacing: 1px;">SEMANA {int(num_sem)} ({fecha_apertura} - {fecha_cierre})</p>
+                            </div>
+                        </div>
+
+                        <div style="padding: 20px;">
+                            <h3 style="margin-top: 0; color: #333; font-size: 18px; text-transform: uppercase;">1. Estatus de Tanques Principales (Gasoil)</h3>
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
+                                {card_50k}
+                                {card_12k}
+                                {card_7k}
+                            </div>
+
+                            <h3 style="color: #333; font-size: 18px; text-transform: uppercase; margin-top: 30px;">2. Rendimiento y Extracción Semanal</h3>
+                            <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 20px;">
+                                <thead>
+                                    <tr style="background: #f5f5f5; color: #333;">
+                                        <th style="padding: 10px; border: 1px solid #ccc; text-align: left;">DÍA</th>
+                                        <th style="padding: 10px; border: 1px solid #ccc; text-align: left;">NIVEL GLOBAL DE TANQUES</th>
+                                        <th style="padding: 10px; border: 1px solid #ccc;">LITROS TOTALES</th>
+                                        <th style="padding: 10px; border: 1px solid #ccc;">DESGLOSE POR TANQUE</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {filas_rendimiento}
+                                </tbody>
+                            </table>
+
+                            <div style="display: flex; justify-content: space-between; margin-top: 30px;">
+                                <table style="width: 48%; border-collapse: collapse; border: 2px solid #333; font-size: 14px;">
+                                    <tr><th colspan="2" style="background: #333; color: white; padding: 10px; font-size: 15px;">TOTALES BASE (TANQUES)</th></tr>
+                                    <tr style="background: white;">
+                                        <td style="padding: 10px; border: 1px solid #ccc; font-weight: bold;">🔻 Extracción Total (Consumo):</td>
+                                        <td style="padding: 10px; border: 1px solid #ccc; font-weight: 900; text-align: right; color: #d32f2f;">{f_p(cons_tot)} L</td>
+                                    </tr>
+                                    <tr style="background: #f9f9f9;">
+                                        <td style="padding: 10px; border: 1px solid #ccc; font-weight: bold;">⬆️ Llenado Total (Cisternas):</td>
+                                        <td style="padding: 10px; border: 1px solid #ccc; font-weight: 900; text-align: right; color: #2e7d32;">{f_p(rec_tot)} L</td>
+                                    </tr>
+                                    <tr style="background: white;">
+                                        <td style="padding: 10px; border: 1px solid #ccc; font-weight: bold;">📊 Balance Final de Cierre:</td>
+                                        <td style="padding: 10px; border: 1px solid #ccc; font-weight: 900; text-align: right; color: #1565c0; font-size: 16px;">{f_p(row_cierre['Total_Tanques'])} L</td>
+                                    </tr>
+                                </table>
+
+                                <table style="width: 48%; border-collapse: collapse; border: 2px solid #e65100; font-size: 14px;">
+                                    <tr><th colspan="3" style="background: #e65100; color: white; padding: 10px; font-size: 15px;">ESTATUS DE BIDONES (RESERVA MOVIL)</th></tr>
+                                    <tr style="background: #ffe0b2; color: #d84315;">
+                                        <th style="padding: 8px; border: 1px solid #ccc;">Tipo</th>
+                                        <th style="padding: 8px; border: 1px solid #ccc;">Lunes (Ap.)</th>
+                                        <th style="padding: 8px; border: 1px solid #ccc;">Viernes (Ci.)</th>
+                                    </tr>
+                                    <tr style="background: white; text-align: center;">
+                                        <td style="padding: 10px; border: 1px solid #ccc; font-weight: bold;">⛽ Gasolina</td>
+                                        <td style="padding: 10px; border: 1px solid #ccc; font-weight: bold;">{f_p(row_apertura['Gasolina_Bidones'])} L</td>
+                                        <td style="padding: 10px; border: 1px solid #ccc; font-weight: 900; color: #1565c0;">{f_p(row_cierre['Gasolina_Bidones'])} L</td>
+                                    </tr>
+                                    <tr style="background: white; text-align: center;">
+                                        <td style="padding: 10px; border: 1px solid #ccc; font-weight: bold;">🛢️ Gasoil</td>
+                                        <td style="padding: 10px; border: 1px solid #ccc; font-weight: bold;">{f_p(row_apertura['Gasoil_Bidones'])} L</td>
+                                        <td style="padding: 10px; border: 1px solid #ccc; font-weight: 900; color: #1565c0;">{f_p(row_cierre['Gasoil_Bidones'])} L</td>
+                                    </tr>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    <script>function capCombustible() {{ html2canvas(document.getElementById('piz-combustible'), {{scale: 2}}).then(canvas => {{ var link = document.createElement('a'); link.download = 'Combustible_Semana_{int(num_sem)}.png'; link.href = canvas.toDataURL(); link.click(); }}); }}</script>
+                    </body></html>
+                    """
+                    components.html(html_pizarra_combustible, height=1100, scrolling=True)
+
+                    st.markdown("---")
+                    st.subheader("📱 Mensaje para WhatsApp (Resumen Ejecutivo)")
+                    
+                    msg_comb = f"⛽ *REPORTE SEMANAL DE COMBUSTIBLE*\n📅 Semana: {int(num_sem)}\n\n"
+                    msg_comb += f"*ESTATUS DE TANQUES (BASE EL TIGRE):*\n"
+                    msg_comb += f"🛢️ Tanque 50K: {f_p(row_apertura['Tanque_1_50K'])}L ➡️ {f_p(row_cierre['Tanque_1_50K'])}L\n"
+                    msg_comb += f"🛢️ Tanque 12K: {f_p(row_apertura['Tanque_2_12K'])}L ➡️ {f_p(row_cierre['Tanque_2_12K'])}L\n"
+                    msg_comb += f"🛢️ Tanque 7K: {f_p(row_apertura['Tanque_3_7K'])}L ➡️ {f_p(row_cierre['Tanque_3_7K'])}L\n\n"
+                    msg_comb += f"*BIDONES EN BASE (CIERRE):*\n"
+                    msg_comb += f"⛽ Gasolina: *{f_p(row_cierre['Gasolina_Bidones'])}L*\n"
+                    msg_comb += f"🛢️ Gasoil: *{f_p(row_cierre['Gasoil_Bidones'])}L*\n\n"
+                    msg_comb += f"*MOVIMIENTOS DE LA SEMANA (TANQUES):*\n"
+                    msg_comb += f"🔻 Total Extracción/Consumo: *{f_p(cons_tot)} Litros*\n"
+                    msg_comb += f"⬆️ Total Recargas (Cisternas): *{f_p(rec_tot)} Litros*\n\n"
+                    msg_comb += "✅ *Dashboard visual adjunto.*"
+                    
+                    st.code(msg_comb, language="markdown")
