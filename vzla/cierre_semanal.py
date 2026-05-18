@@ -412,62 +412,164 @@ with t_comensales:
                     msg_c += f"\n✅ Pizarra detallada de comedor adjunta."
                     st.code(msg_c, language="markdown")
 
+# ---------------------------------------------------------
+# PESTAÑA 4: GUARDIAS SEMANALES
+# ---------------------------------------------------------
 with t_guardias:
     st.info("Genera las pizarras de Guardia (Seguridad, Flota y Monitoreo).")
     if st.button("🛡️ Generar Pizarras de Guardias", type="primary", use_container_width=True):
         with st.spinner("Extrayendo bases de datos de Guardias..."):
+            
+            # --- GUARDIA DE SEGURIDAD ---
             df_seg_raw = extraer_datos("SEG_ROL_GUARDIA")
             if df_seg_raw.empty: st.error("No se encontraron registros en SEG_ROL_GUARDIA.")
             else:
+                # [CORRECCIÓN CRÍTICA] Arrastrar celdas combinadas de Cantidad hacia abajo
+                c_cant_temp = buscar_columna_estricta(df_seg_raw, ['cant', 'cantidad', 'oficiales'])
+                if c_cant_temp:
+                    df_seg_raw[c_cant_temp] = df_seg_raw[c_cant_temp].replace(r'^\s*$', pd.NA, regex=True).ffill()
+
                 grupos_seg, c_area, c_diu, c_noc, c_cant = agrupar_rol_compacto(df_seg_raw, num_sem)
                 if not grupos_seg: st.warning(f"No hay registros de Seguridad para la semana {int(num_sem)}.")
                 else:
                     for fecha_str, df_grupo in grupos_seg:
                         filas_seg_html = ""
                         for _, r in df_grupo.iterrows():
-                            d_list = [f"✓ {x.strip()}" for x in str(r.get(c_diu, '')).split('\n') if x.strip()]
-                            n_list = [f"✓ {x.strip()}" for x in str(r.get(c_noc, '')).split('\n') if x.strip()]
-                            d_html = "<br>".join(d_list); n_html = "<br>".join(n_list)
-                            cant = str(r.get(c_cant, '')) if c_cant and pd.notna(r.get(c_cant, '')) else ""
-                            filas_seg_html += f"<tr><td style='padding:10px; border:1px solid #000; font-weight:bold; color:{color_azul}; vertical-align:top;'>{r.get(c_area, '')}</td><td style='padding:10px; border:1px solid #000; text-align:center; font-weight:bold; vertical-align:top;'>{cant}</td><td style='padding:10px; border:1px solid #000; vertical-align:top;'>{d_html}</td><td style='padding:10px; border:1px solid #000; vertical-align:top;'>{n_html}</td></tr>"
-                        html_piz_seg = f"""<html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head><body style="font-family: Arial, sans-serif; background-color: #f0f2f6; padding: 20px;"><div style="text-align: center; margin-bottom: 15px;"><button onclick="capSeg('{fecha_str.split()[0]}')" style="background: {color_azul}; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR {fecha_str.split()[0]}</button></div><div id="piz-seg-{fecha_str.split()[0]}" style="background:white; width:800px; margin:auto; border:2px solid {color_azul}; border-radius:12px; overflow:hidden; margin-bottom: 40px;"><div style="background-color: {color_azul}; color: white; padding: 25px; display: flex; align-items: center; justify-content: space-between;"><img src="{logo_b64}" style="height: 50px;"><div style="text-align: right;"><h2 style="margin:0; font-size:22px;">ROL GUARDIA SEMANAL</h2><p style="margin:0; font-size:14px;">SEGURIDAD INTEGRAL - SEMANA {int(num_sem)}</p></div></div><div style="padding: 0;"><table style="width:100%; border-collapse:collapse; font-size:14px;"><thead><tr><th colspan="4" style="background:#e3f2fd; color:{color_azul}; padding:10px; border:1px solid #000; font-size:15px;">OFICIALES DE SEGURIDAD - {fecha_str}</th></tr><tr style="background:#e8eaf6; color:{color_azul};"><th style="padding:10px; border:1px solid #000; text-align:left; width:25%;">ÁREA ASIGNADA</th><th style="padding:10px; border:1px solid #000; text-align:center; width:10%;">CANT.</th><th style="padding:10px; border:1px solid #000; text-align:left; width:32%;">TURNO DIURNO</th><th style="padding:10px; border:1px solid #000; text-align:left; width:33%;">TURNO NOCTURNO</th></tr></thead><tbody>{filas_seg_html}</tbody></table></div></div><script>function capSeg(id) {{ html2canvas(document.getElementById('piz-seg-'+id), {{scale: 2}}).then(canvas => {{ var link = document.createElement('a'); link.download = 'Seguridad_'+id+'.png'; link.href = canvas.toDataURL(); link.click(); }}); }}</script></body></html>"""
+                            d_list = [f"✓ {x.strip()}" for x in str(r.get(c_diu, '')).split('\n') if x.strip() and str(x).lower() not in ['nan', 'none']]
+                            n_list = [f"✓ {x.strip()}" for x in str(r.get(c_noc, '')).split('\n') if x.strip() and str(x).lower() not in ['nan', 'none']]
+                            d_html = "<br>".join(d_list)
+                            n_html = "<br>".join(n_list)
+                            
+                            # Limpieza estricta de la Cantidad para evitar '.0' o textos basuras
+                            val_cant = str(r.get(c_cant, '')).strip()
+                            if val_cant.lower() in ['nan', 'none', '<na>', '']:
+                                cant = ""
+                            else:
+                                cant = val_cant.replace(".0", "")
+                                
+                            filas_seg_html += f"<tr><td style='padding:10px; border:1px solid #000; font-weight:bold; color:{color_azul}; vertical-align:top;'>{r.get(c_area, '')}</td><td style='padding:10px; border:1px solid #000; text-align:center; font-weight:900; color:#d32f2f; font-size:16px; vertical-align:top;'>{cant}</td><td style='padding:10px; border:1px solid #000; vertical-align:top;'>{d_html}</td><td style='padding:10px; border:1px solid #000; vertical-align:top;'>{n_html}</td></tr>"
+
+                        html_piz_seg = f"""
+                        <html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head>
+                        <body style="font-family: Arial, sans-serif; background-color: #f0f2f6; padding: 20px;">
+                        <div style="text-align: center; margin-bottom: 15px;">
+                            <button onclick="capSeg('{fecha_str.split()[0]}')" style="background: {color_azul}; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR {fecha_str.split()[0]}</button>
+                        </div>
+                        <div id="piz-seg-{fecha_str.split()[0]}" style="background:white; width:800px; margin:auto; border:2px solid {color_azul}; border-radius:12px; overflow:hidden; margin-bottom: 40px;">
+                            <div style="background-color: {color_azul}; color: white; padding: 25px; display: flex; align-items: center; justify-content: space-between;">
+                                <img src="{logo_b64}" style="height: 50px;">
+                                <div style="text-align: right;"><h2 style="margin:0; font-size:22px;">ROL GUARDIA SEMANAL</h2><p style="margin:0; font-size:14px;">SEGURIDAD INTEGRAL - SEMANA {int(num_sem)}</p></div>
+                            </div>
+                            <div style="padding: 0;">
+                                <table style="width:100%; border-collapse:collapse; font-size:14px;">
+                                    <thead>
+                                        <tr><th colspan="4" style="background:#e3f2fd; color:{color_azul}; padding:10px; border:1px solid #000; font-size:15px;">OFICIALES DE SEGURIDAD - {fecha_str}</th></tr>
+                                        <tr style="background:#e8eaf6; color:{color_azul};"><th style="padding:10px; border:1px solid #000; text-align:left; width:25%;">ÁREA ASIGNADA</th><th style="padding:10px; border:1px solid #000; text-align:center; width:10%;">CANT.</th><th style="padding:10px; border:1px solid #000; text-align:left; width:32%;">TURNO DIURNO</th><th style="padding:10px; border:1px solid #000; text-align:left; width:33%;">TURNO NOCTURNO</th></tr>
+                                    </thead>
+                                    <tbody>{filas_seg_html}</tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <script>function capSeg(id) {{ html2canvas(document.getElementById('piz-seg-'+id), {{scale: 2}}).then(canvas => {{ var link = document.createElement('a'); link.download = 'Seguridad_'+id+'.png'; link.href = canvas.toDataURL(); link.click(); }}); }}</script>
+                        </body></html>
+                        """
                         components.html(html_piz_seg, height=450 + (len(df_grupo)*45), scrolling=True)
-                    msg_seg = f"🛡️ *ROL DE GUARDIA DE SEGURIDAD*\n📅 Semana: {int(num_sem)}\n\nSi el reporte de personal tiene guardias duplicadas, recuerda que el sistema comprime las planificaciones en bloques limpios por área.\n📸 Ver distribución detallada en las imágenes adjuntas."
+
+                    msg_seg = f"🛡️ *ROL DE GUARDIA DE SEGURIDAD*\n📅 Semana: {int(num_sem)}\n\n✅ Guardias asignadas y compactadas exitosamente.\n📸 Ver distribución detallada en las imágenes adjuntas."
                     st.code(msg_seg, language="markdown")
+            
             st.markdown("---")
+
+            # --- GUARDIA DE FLOTA ---
             df_flo_raw = extraer_datos("GUARDIA_FLOTA")
             if df_flo_raw.empty: st.error("No se encontraron registros en GUARDIA_FLOTA.")
             else:
                 df_flo = filtrar_ultima_carga(df_flo_raw, num_sem)
                 if df_flo.empty: st.warning(f"No hay registros de Flota para la semana {int(num_sem)}.")
                 else:
-                    c_nom = buscar_columna_estricta(df_flo, ['supervisor', 'nombre', 'personal']); c_car = buscar_columna_estricta(df_flo, ['turno', 'cargo']); c_dia = buscar_columna_estricta(df_flo, ['dia', 'dias', 'día', 'días'], evitar=['hora', 'horario']); c_hor = buscar_columna_estricta(df_flo, ['hora', 'horario', 'horas'])
+                    c_nom = buscar_columna_estricta(df_flo, ['supervisor', 'nombre', 'personal'])
+                    c_car = buscar_columna_estricta(df_flo, ['turno', 'cargo'])
+                    c_dia = buscar_columna_estricta(df_flo, ['dia', 'dias', 'día', 'días'], evitar=['hora', 'horario'])
+                    c_hor = buscar_columna_estricta(df_flo, ['hora', 'horario', 'horas'])
+
                     if c_nom and c_car:
                         filas_flo_html = ""
                         for _, r in df_flo.iterrows():
                             filas_flo_html += f"<tr><td style='padding:12px; border:1px solid #000; font-weight:bold; font-size:15px;'>{r.get(c_nom, '')}</td><td style='padding:12px; border:1px solid #000; font-size:14px;'>{r.get(c_car, '')}</td><td style='padding:12px; border:1px solid #000; text-align:center; font-size:14px; font-weight:bold; color:{color_azul};'>{r.get(c_dia, '')}</td><td style='padding:12px; border:1px solid #000; text-align:center; font-size:14px; font-weight:bold; color:#000000;'>{r.get(c_hor, '')}</td></tr>"
-                        html_piz_flo = f"""<html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head><body style="font-family: Arial, sans-serif; background-color: #f0f2f6;"><div style="text-align: center; margin-bottom: 15px;"><button onclick="capFlo()" style="background: {color_azul}; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR GUARDIA FLOTA</button></div><div id="piz-flo" style="background:white; width:800px; margin:auto; border:2px solid {color_azul}; border-radius:12px; overflow:hidden;"><div style="background-color: {color_azul}; color: white; padding: 25px; display: flex; align-items: center; justify-content: space-between;"><img src="{logo_b64}" style="height: 50px;"><div style="text-align: right;"><h2 style="margin:0; font-size:22px;">GUARDIA DE FLOTA</h2><p style="margin:0; font-size:14px;">SEMANA {int(num_sem)} ({rango_fechas})</p></div></div><div style="padding: 20px;"><table style="width:100%; border-collapse:collapse; font-size:14px;"><thead><tr style="background:{color_azul}; color:white;"><th style="padding:10px; border:1px solid #000; text-align:left;">PERSONAL</th><th style="padding:10px; border:1px solid #000; text-align:left;">CARGO Y TURNO</th><th style="padding:10px; border:1px solid #000; text-align:center;">DÍAS</th><th style="padding:10px; border:1px solid #000; text-align:center;">HORARIO</th></tr></thead><tbody>{filas_flo_html}</tbody></table></div></div><script>function capFlo() {{ html2canvas(document.getElementById('piz-flo'), {{scale: 2}}).then(canvas => {{ var link = document.createElement('a'); link.download = 'Flota_Semana_{int(num_sem)}.png'; link.href = canvas.toDataURL(); link.click(); }}); }}</script></body></html>"""
+
+                        html_piz_flo = f"""
+                        <html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head>
+                        <body style="font-family: Arial, sans-serif; background-color: #f0f2f6;">
+                        <div style="text-align: center; margin-bottom: 15px;">
+                            <button onclick="capFlo()" style="background: {color_azul}; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR GUARDIA FLOTA</button>
+                        </div>
+                        <div id="piz-flo" style="background:white; width:800px; margin:auto; border:2px solid {color_azul}; border-radius:12px; overflow:hidden;">
+                            <div style="background-color: {color_azul}; color: white; padding: 25px; display: flex; align-items: center; justify-content: space-between;">
+                                <img src="{logo_b64}" style="height: 50px;">
+                                <div style="text-align: right;"><h2 style="margin:0; font-size:22px;">GUARDIA DE FLOTA</h2><p style="margin:0; font-size:14px;">SEMANA {int(num_sem)} ({rango_fechas})</p></div>
+                            </div>
+                            <div style="padding: 20px;">
+                                <table style="width:100%; border-collapse:collapse; font-size:14px;">
+                                    <thead><tr style="background:{color_azul}; color:white;"><th style="padding:10px; border:1px solid #000; text-align:left;">PERSONAL</th><th style="padding:10px; border:1px solid #000; text-align:left;">CARGO Y TURNO</th><th style="padding:10px; border:1px solid #000; text-align:center;">DÍAS</th><th style="padding:10px; border:1px solid #000; text-align:center;">HORARIO</th></tr></thead>
+                                    <tbody>{filas_flo_html}</tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <script>function capFlo() {{ html2canvas(document.getElementById('piz-flo'), {{scale: 2}}).then(canvas => {{ var link = document.createElement('a'); link.download = 'Flota_Semana_{int(num_sem)}.png'; link.href = canvas.toDataURL(); link.click(); }}); }}</script>
+                        </body></html>
+                        """
                         components.html(html_piz_flo, height=600, scrolling=True)
+
                         msg_flo = f"🚛 *GUARDIA DE FLOTA*\n📅 Semana: {int(num_sem)}\n\n"
                         for _, r in df_flo.iterrows(): msg_flo += f"👤 *{r.get(c_nom, '')}*\n🔹 Rol: {r.get(c_car, '')}\n🗓️ Días: {r.get(c_dia, '')}\n⏰ Horario: {r.get(c_hor, '')}\n\n"
                         st.code(msg_flo, language="markdown")
+
             st.markdown("---")
+
+            # --- GUARDIA DE MONITOREO ---
             df_mon_raw = extraer_datos("GUARDIA_MONITOREO")
             if df_mon_raw.empty: st.error("No se encontraron registros en GUARDIA_MONITOREO.")
             else:
                 df_mon = filtrar_ultima_carga(df_mon_raw, num_sem)
                 if df_mon.empty: st.warning(f"No hay registros de Monitoreo para la semana {int(num_sem)}.")
                 else:
-                    c_nom = buscar_columna_estricta(df_mon, ['analista', 'nombre', 'turno']); c_hor = buscar_columna_estricta(df_mon, ['horario', 'hora']); c_ram = buscar_columna_estricta(df_mon, ['unidades señor ramon', 'ramon', 'ramón', 'responsable', 'unidades'])
+                    c_nom = buscar_columna_estricta(df_mon, ['analista', 'nombre', 'turno'])
+                    c_hor = buscar_columna_estricta(df_mon, ['horario', 'hora'])
+                    c_ram = buscar_columna_estricta(df_mon, ['unidades señor ramon', 'ramon', 'ramón', 'responsable', 'unidades'])
+
                     if c_nom and c_hor:
                         filas_mon_html = ""
                         uni_ramon = ""
                         for _, r in df_mon.iterrows():
                             filas_mon_html += f"<tr><td style='padding:12px; border:1px solid #000; font-weight:bold; font-size:15px; color:{color_azul};'>{r.get(c_nom, '')}</td><td style='padding:12px; border:1px solid #000; font-size:14px; font-weight:bold;'>{r.get(c_hor, '')}</td></tr>"
                             if c_ram and not uni_ramon and pd.notna(r.get(c_ram, '')): uni_ramon = str(r.get(c_ram, ''))
+
                         box_ramon = f"<div style='background-color:#f8f9fa; padding:15px; border-left:5px solid #e65100; margin-top:20px; border-radius:5px;'><h4 style='margin:0 0 5px 0; color:#333;'>🚛 Unidades del Sr. Ramón</h4><span style='font-size:15px; font-weight:bold; color:{color_azul};'>Responsable: {uni_ramon}</span></div>" if uni_ramon else ""
-                        html_piz_mon = f"""<html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head><body style="font-family: Arial, sans-serif; background-color: #f0f2f6;"><div style="text-align: center; margin-bottom: 15px;"><button onclick="capMon()" style="background: {color_azul}; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR GUARDIA MONITOREO</button></div><div id="piz-mon" style="background:white; width:750px; margin:auto; border:2px solid {color_azul}; border-radius:12px; overflow:hidden;"><div style="background-color: {color_azul}; color: white; padding: 25px; display: flex; align-items: center; justify-content: space-between;"><img src="{logo_b64}" style="height: 50px;"><div style="text-align: right;"><h2 style="margin:0; font-size:22px;">GUARDIA DE MONITOREO</h2><p style="margin:0; font-size:14px;">SEMANA {int(num_sem)} ({rango_fechas})</p></div></div><div style="padding: 20px;"><table style="width:100%; border-collapse:collapse; font-size:14px;"><thead><tr style="background:{color_azul}; color:white;"><th style="padding:10px; border:1px solid #000; text-align:left;">PERSONAL (TURNO)</th><th style="padding:10px; border:1px solid #000; text-align:left;">HORARIO Y DÍAS</th></tr></thead><tbody>{filas_mon_html}</tbody></table>{box_ramon}</div></div><script>function capMon() {{ html2canvas(document.getElementById('piz-mon'), {{scale: 2}}).then(canvas => {{ var link = document.createElement('a'); link.download = 'Monitoreo_Semana_{int(num_sem)}.png'; link.href = canvas.toDataURL(); link.click(); }}); }}</script></body></html>"""
+
+                        html_piz_mon = f"""
+                        <html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head>
+                        <body style="font-family: Arial, sans-serif; background-color: #f0f2f6;">
+                        <div style="text-align: center; margin-bottom: 15px;">
+                            <button onclick="capMon()" style="background: {color_azul}; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR GUARDIA MONITOREO</button>
+                        </div>
+                        <div id="piz-mon" style="background:white; width:750px; margin:auto; border:2px solid {color_azul}; border-radius:12px; overflow:hidden;">
+                            <div style="background-color: {color_azul}; color: white; padding: 25px; display: flex; align-items: center; justify-content: space-between;">
+                                <img src="{logo_b64}" style="height: 50px;">
+                                <div style="text-align: right;"><h2 style="margin:0; font-size:22px;">GUARDIA DE MONITOREO</h2><p style="margin:0; font-size:14px;">SEMANA {int(num_sem)} ({rango_fechas})</p></div>
+                            </div>
+                            <div style="padding: 20px;">
+                                <table style="width:100%; border-collapse:collapse; font-size:14px;">
+                                    <thead><tr style="background:{color_azul}; color:white;"><th style="padding:10px; border:1px solid #000; text-align:left;">PERSONAL (TURNO)</th><th style="padding:10px; border:1px solid #000; text-align:left;">HORARIO Y DÍAS</th></tr></thead>
+                                    <tbody>{filas_mon_html}</tbody>
+                                </table>
+                                {box_ramon}
+                            </div>
+                        </div>
+                        <script>function capMon() {{ html2canvas(document.getElementById('piz-mon'), {{scale: 2}}).then(canvas => {{ var link = document.createElement('a'); link.download = 'Monitoreo_Semana_{int(num_sem)}.png'; link.href = canvas.toDataURL(); link.click(); }}); }}</script>
+                        </body></html>
+                        """
                         components.html(html_piz_mon, height=600, scrolling=True)
+
                         msg_mon = f"🖥️ *GUARDIA DE MONITOREO*\n📅 Semana: {int(num_sem)}\n\n🕒 *Guardias Programadas:*\n\n"
                         for _, r in df_mon.iterrows(): msg_mon += f"👤 *{r.get(c_nom, '')}*\n⏰ {r.get(c_hor, '')}\n\n"
                         if uni_ramon: msg_mon += f"🚛 *Unidades del Sr. Ramón*\nResponsable: {uni_ramon}"
