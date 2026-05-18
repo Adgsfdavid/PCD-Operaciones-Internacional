@@ -1091,12 +1091,7 @@ with t_surtido:
                     df_surt['COMBUSTIBLE'] = df_surt['COMBUSTIBLE'].astype(str).str.strip().str.upper()
                     df_surt['GRUPO'] = df_surt['GRUPO'].astype(str).str.strip().str.upper()
                     df_surt['TIPO_SURTIDO'] = df_surt['TIPO_SURTIDO'].astype(str).str.strip().str.upper()
-
-                    # Corrección solicitada: Homologar texto de Extracción
-                    df_surt['TIPO_SURTIDO'] = df_surt['TIPO_SURTIDO'].replace({
-                        'EXTRACCION': 'EXTRACCION DROTACA 2.0',
-                        'EXTRACCIÓN': 'EXTRACCION DROTACA 2.0'
-                    })
+                    df_surt['SITIO'] = df_surt['SITIO'].astype(str).str.strip().str.upper()
 
                     # --- PROCESAMIENTO ANALÍTICO ---
                     # Totales KPI Generales
@@ -1108,15 +1103,15 @@ with t_surtido:
                     fecha_inicio_surt = df_surt['Fecha_DT'].min().strftime('%d/%m/%Y')
                     fecha_fin_surt = df_surt['Fecha_DT'].max().strftime('%d/%m/%Y')
 
-                    # 1. TABLA: DISTRIBUCIÓN POR GRUPO DE RUTA
-                    df_grupo = df_surt.groupby('GRUPO')['LITROS'].sum().reset_index()
+                    # 1. TABLA: DISTRIBUCIÓN POR GRUPO DE RUTA (Excluyendo Extracciones Administrativas)
+                    df_rutas = df_surt[df_surt['GRUPO'] != 'EXTRACCION']
+                    df_grupo = df_rutas.groupby('GRUPO')['LITROS'].sum().reset_index()
+                    total_rutas = df_rutas['LITROS'].sum()
+                    
                     filas_grupo_html = ""
                     for _, r in df_grupo.iterrows():
-                        pct = (r['LITROS'] / gran_total_surtido * 100) if gran_total_surtido > 0 else 0
-                        # Identificar dinámicamente si es Oriente (Ruta Corta)
-                        nombre_mostrar = r['GRUPO']
-                        if "CORTA" in r['GRUPO']:
-                            nombre_mostrar = "ORIENTE (RUTA CORTA)"
+                        pct = (r['LITROS'] / total_rutas * 100) if total_rutas > 0 else 0
+                        nombre_mostrar = "ORIENTE (RUTA CORTA)" if "CORTA" in r['GRUPO'] else r['GRUPO']
                         filas_grupo_html += f"""
                         <tr style="background: white;">
                             <td style="padding: 10px; border: 2px solid #000; font-weight: bold; text-align: left;">{nombre_mostrar}</td>
@@ -1125,57 +1120,72 @@ with t_surtido:
                         </tr>
                         """
 
-                    # 2. TABLA: ORIGEN GENERAL DE SURTIDOS (Excluye Extracciones para separar Surtido Puro)
-                    df_surtidos_puros = df_surt[df_surt['TIPO_SURTIDO'] != 'EXTRACCION DROTACA 2.0']
-                    total_surtidos_puros = df_surtidos_puros['LITROS'].sum()
+                    # 2. TABLA: SURTIDOS COMERCIALES (Estaciones de Servicio)
+                    df_comercial = df_surt[df_surt['TIPO_SURTIDO'] == 'ESTACION DE SERVICIO']
+                    total_comercial = df_comercial['LITROS'].sum()
+                    df_comercial_g = df_comercial.groupby('COMBUSTIBLE')['LITROS'].sum().reset_index()
                     
-                    df_origen = df_surtidos_puros.groupby('TIPO_SURTIDO')['LITROS'].sum().reset_index()
                     filas_origen_html = ""
-                    for _, r in df_origen.iterrows():
-                        pct = (r['LITROS'] / total_surtidos_puros * 100) if total_surtidos_puros > 0 else 0
+                    for _, r in df_comercial_g.iterrows():
+                        pct = (r['LITROS'] / total_comercial * 100) if total_comercial > 0 else 0
                         filas_origen_html += f"""
                         <tr style="background: white;">
-                            <td style="padding: 10px; border: 2px solid #000; font-weight: bold; text-align: left;">{r['TIPO_SURTIDO']}</td>
+                            <td style="padding: 10px; border: 2px solid #000; font-weight: bold; text-align: left;">E/S COMERCIAL ({r['COMBUSTIBLE']})</td>
                             <td style="padding: 10px; border: 2px solid #000; font-weight: 900; text-align: center; color: #2e7d32;">{f_p(r['LITROS'])} L</td>
                             <td style="padding: 10px; border: 2px solid #000; text-align: center; font-weight: bold; color: #333;">{pct:.1f}%</td>
                         </tr>
                         """
 
-                    # 3. TABLA: DESGLOSE DE SURTIDOS EN BIDÓN (Gasolina vs Gasoil)
-                    df_bidon = df_surt[df_surt['TIPO_SURTIDO'] == 'BIDON']
-                    df_bidon_g = df_bidon.groupby('COMBUSTIBLE')['LITROS'].sum().reset_index()
-                    total_bidon = df_bidon['LITROS'].sum()
+                    # 3. TABLA: EXTRACCIONES INTERNAS DROTACA (Consumo en Base)
+                    # Identificamos las extracciones cuando el GRUPO es EXTRACCION o el SITIO es de las bases.
+                    filtro_extraccion = (df_surt['GRUPO'] == 'EXTRACCION') | (df_surt['SITIO'].isin(['DROTACA 2.0', 'CIUDAD DROTACA']))
+                    df_ext = df_surt[filtro_extraccion]
+                    total_ext = df_ext['LITROS'].sum()
+
+                    # Diferenciamos el Origen Físico (Gasolina de Drotaca 2.0 vs Gasoil de Ciudad Drotaca)
+                    ext_gasolina = df_ext[df_ext['COMBUSTIBLE'] == 'GASOLINA']['LITROS'].sum()
+                    ext_gasoil = df_ext[df_ext['COMBUSTIBLE'] == 'GASOIL']['LITROS'].sum()
+                    
+                    filas_ext_html = ""
+                    if ext_gasolina > 0:
+                        pct_g = (ext_gasolina / total_ext * 100) if total_ext > 0 else 0
+                        filas_ext_html += f"""
+                        <tr style="background: white;">
+                            <td style="padding: 10px; border: 2px solid #000; font-weight: bold; text-align: left;">BIDONES DROTACA 2.0 (GASOLINA)</td>
+                            <td style="padding: 10px; border: 2px solid #000; font-weight: 900; text-align: center; color: #c62828;">{f_p(ext_gasolina)} L</td>
+                            <td style="padding: 10px; border: 2px solid #000; text-align: center; font-weight: bold; color: #333;">{pct_g:.1f}%</td>
+                        </tr>
+                        """
+                    if ext_gasoil > 0:
+                        pct_d = (ext_gasoil / total_ext * 100) if total_ext > 0 else 0
+                        filas_ext_html += f"""
+                        <tr style="background: white;">
+                            <td style="padding: 10px; border: 2px solid #000; font-weight: bold; text-align: left;">TANQUE CIUDAD DROTACA (GASOIL)</td>
+                            <td style="padding: 10px; border: 2px solid #000; font-weight: 900; text-align: center; color: #c62828;">{f_p(ext_gasoil)} L</td>
+                            <td style="padding: 10px; border: 2px solid #000; text-align: center; font-weight: bold; color: #333;">{pct_d:.1f}%</td>
+                        </tr>
+                        """
+                    if filas_ext_html == "":
+                        filas_ext_html = "<tr><td colspan='3' style='padding:10px; border:2px solid #000; color:#666;'>No se registraron extracciones internas</td></tr>"
+
+                    # 4. TABLA: RESERVAS MÓVILES (Bidones Externos)
+                    # Surtidos en bidón que NO fueron dentro de las bases de Drotaca
+                    df_bidon_ext = df_surt[(df_surt['TIPO_SURTIDO'] == 'BIDON') & (~df_surt['SITIO'].isin(['DROTACA 2.0', 'CIUDAD DROTACA']))]
+                    total_bidon_ext = df_bidon_ext['LITROS'].sum()
+                    df_bidon_ext_g = df_bidon_ext.groupby('COMBUSTIBLE')['LITROS'].sum().reset_index()
                     
                     filas_bidon_html = ""
-                    for _, r in df_bidon_g.iterrows():
-                        pct = (r['LITROS'] / total_bidon * 100) if total_bidon > 0 else 0
+                    for _, r in df_bidon_ext_g.iterrows():
+                        pct = (r['LITROS'] / total_bidon_ext * 100) if total_bidon_ext > 0 else 0
                         filas_bidon_html += f"""
                         <tr style="background: white;">
-                            <td style="padding: 10px; border: 2px solid #000; font-weight: bold; text-align: left;">BIDÓN EN BASE ({r['COMBUSTIBLE']})</td>
+                            <td style="padding: 10px; border: 2px solid #000; font-weight: bold; text-align: left;">BIDÓN EXTERNO ({r['COMBUSTIBLE']})</td>
                             <td style="padding: 10px; border: 2px solid #000; font-weight: 900; text-align: center; color: #e65100;">{f_p(r['LITROS'])} L</td>
                             <td style="padding: 10px; border: 2px solid #000; text-align: center; font-weight: bold; color: #333;">{pct:.1f}%</td>
                         </tr>
                         """
                     if filas_bidon_html == "":
-                        filas_bidon_html = "<tr><td colspan='3' style='padding:10px; border:2px solid #000; color:#666;'>No se registraron movimientos en bidón</td></tr>"
-
-                    # 4. TABLA: DESGLOSE DE EXTRACCIÓN DROTACA 2.0
-                    df_ext = df_surt[df_surt['TIPO_SURTIDO'] == 'EXTRACCION DROTACA 2.0']
-                    df_ext_g = df_ext.groupby('COMBUSTIBLE')['LITROS'].sum().reset_index()
-                    total_ext = df_ext['LITROS'].sum()
-                    
-                    filas_ext_html = ""
-                    for _, r in df_ext_g.iterrows():
-                        pct = (r['LITROS'] / total_ext * 100) if total_ext > 0 else 0
-                        filas_ext_html += f"""
-                        <tr style="background: white;">
-                            <td style="padding: 10px; border: 2px solid #000; font-weight: bold; text-align: left;">AUTO-CONSUMO ({r['COMBUSTIBLE']})</td>
-                            <td style="padding: 10px; border: 2px solid #000; font-weight: 900; text-align: center; color: #c62828;">{f_p(r['LITROS'])} L</td>
-                            <td style="padding: 10px; border: 2px solid #000; text-align: center; font-weight: bold; color: #333;">{pct:.1f}%</td>
-                        </tr>
-                        """
-                    if filas_ext_html == "":
-                        filas_ext_html = "<tr><td colspan='3' style='padding:10px; border:2px solid #000; color:#666;'>No se registraron extracciones internas</td></tr>"
+                        filas_bidon_html = "<tr><td colspan='3' style='padding:10px; border:2px solid #000; color:#666;'>No se registraron movimientos en bidones externos</td></tr>"
 
 
                     # --- ESTRUCTURA DE LA PIZARRA VISUAL COMPLETA ---
@@ -1226,47 +1236,17 @@ with t_surtido:
                                         </thead>
                                         <tbody>
                                             {filas_grupo_html}
-                                        </tbody>
-                                    </table>
-                                </div>
-
-                                <div style="width: 48%;">
-                                    <h3 style="margin: 0 0 10px 0; font-size: 14px; color: #2e7d32; text-transform: uppercase; border-bottom: 2px solid #2e7d32; padding-bottom: 5px;">🏪 2. Distribución de Surtidos (Origen)</h3>
-                                    <table style="width: 100%; border-collapse: collapse; font-size: 13px; border: 2px solid #000;">
-                                        <thead>
-                                            <tr style="background: #2e7d32; color: white;">
-                                                <th style="padding: 10px; border: 2px solid #000; text-align: left;">PUNTO DE SURTIDO</th>
-                                                <th style="padding: 10px; border: 1px solid #000;">LITROS TOT.</th>
-                                                <th style="padding: 10px; border: 1px solid #000;">% REPARTO</th>
+                                            <tr style="background: #e0f2f1;">
+                                                <td style="padding: 8px; border: 2px solid #000; font-weight: bold; text-align: right;">TOTAL:</td>
+                                                <td style="padding: 8px; border: 2px solid #000; font-weight: 900; text-align: center; color: #006064;">{f_p(total_rutas)} L</td>
+                                                <td style="padding: 8px; border: 2px solid #000;"></td>
                                             </tr>
-                                        </thead>
-                                        <tbody>
-                                            {filas_origen_html}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-
-                            <div style="display: flex; justify-content: space-between;">
-                                
-                                <div style="width: 48%;">
-                                    <h3 style="margin: 0 0 10px 0; font-size: 14px; color: #e65100; text-transform: uppercase; border-bottom: 2px solid #e65100; padding-bottom: 5px;">🛢️ 3. Surtidos en Bidón (Reserva Base)</h3>
-                                    <table style="width: 100%; border-collapse: collapse; font-size: 13px; border: 2px solid #000;">
-                                        <thead>
-                                            <tr style="background: #e65100; color: white;">
-                                                <th style="padding: 10px; border: 2px solid #000; text-align: left;">CATEGORÍA DE MOVIMIENTO</th>
-                                                <th style="padding: 10px; border: 2px solid #000;">LITROS TOT.</th>
-                                                <th style="padding: 10px; border: 2px solid #000;">% REPARTO</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {filas_bidon_html}
                                         </tbody>
                                     </table>
                                 </div>
 
                                 <div style="width: 48%;">
-                                    <h3 style="margin: 0 0 10px 0; font-size: 14px; color: #c62828; text-transform: uppercase; border-bottom: 2px solid #c62828; padding-bottom: 5px;">🚫 4. Extracción Drotaca 2.0 (Consumo Interno)</h3>
+                                    <h3 style="margin: 0 0 10px 0; font-size: 14px; color: #c62828; text-transform: uppercase; border-bottom: 2px solid #c62828; padding-bottom: 5px;">🚫 2. Extracción Drotaca (Consumo en Base)</h3>
                                     <table style="width: 100%; border-collapse: collapse; font-size: 13px; border: 2px solid #000;">
                                         <thead>
                                             <tr style="background: #c62828; color: white;">
@@ -1277,6 +1257,56 @@ with t_surtido:
                                         </thead>
                                         <tbody>
                                             {filas_ext_html}
+                                            <tr style="background: #ffebee;">
+                                                <td style="padding: 8px; border: 2px solid #000; font-weight: bold; text-align: right;">TOTAL AUTO-CONSUMO:</td>
+                                                <td style="padding: 8px; border: 2px solid #000; font-weight: 900; text-align: center; color: #c62828;">{f_p(total_ext)} L</td>
+                                                <td style="padding: 8px; border: 2px solid #000;"></td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <div style="display: flex; justify-content: space-between;">
+                                
+                                <div style="width: 48%;">
+                                    <h3 style="margin: 0 0 10px 0; font-size: 14px; color: #2e7d32; text-transform: uppercase; border-bottom: 2px solid #2e7d32; padding-bottom: 5px;">🏪 3. Surtidos Comerciales (E/S)</h3>
+                                    <table style="width: 100%; border-collapse: collapse; font-size: 13px; border: 2px solid #000;">
+                                        <thead>
+                                            <tr style="background: #2e7d32; color: white;">
+                                                <th style="padding: 10px; border: 2px solid #000; text-align: left;">TIPO DE COMBUSTIBLE</th>
+                                                <th style="padding: 10px; border: 1px solid #000;">LITROS TOT.</th>
+                                                <th style="padding: 10px; border: 1px solid #000;">% REPARTO</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {filas_origen_html}
+                                            <tr style="background: #e8f5e9;">
+                                                <td style="padding: 8px; border: 2px solid #000; font-weight: bold; text-align: right;">TOTAL COMERCIAL:</td>
+                                                <td style="padding: 8px; border: 2px solid #000; font-weight: 900; text-align: center; color: #2e7d32;">{f_p(total_comercial)} L</td>
+                                                <td style="padding: 8px; border: 2px solid #000;"></td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                <div style="width: 48%;">
+                                    <h3 style="margin: 0 0 10px 0; font-size: 14px; color: #e65100; text-transform: uppercase; border-bottom: 2px solid #e65100; padding-bottom: 5px;">🛢️ 4. Reservas Móviles (Bidones Externos)</h3>
+                                    <table style="width: 100%; border-collapse: collapse; font-size: 13px; border: 2px solid #000;">
+                                        <thead>
+                                            <tr style="background: #e65100; color: white;">
+                                                <th style="padding: 10px; border: 2px solid #000; text-align: left;">TIPO DE COMBUSTIBLE</th>
+                                                <th style="padding: 10px; border: 2px solid #000;">LITROS TOT.</th>
+                                                <th style="padding: 10px; border: 2px solid #000;">% REPARTO</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {filas_bidon_html}
+                                            <tr style="background: #fff3e0;">
+                                                <td style="padding: 8px; border: 2px solid #000; font-weight: bold; text-align: right;">TOTAL BIDONES:</td>
+                                                <td style="padding: 8px; border: 2px solid #000; font-weight: 900; text-align: center; color: #e65100;">{f_p(total_bidon_ext)} L</td>
+                                                <td style="padding: 8px; border: 2px solid #000;"></td>
+                                            </tr>
                                         </tbody>
                                     </table>
                                 </div>
@@ -1299,34 +1329,32 @@ with t_surtido:
                     </script>
                     </body></html>
                     """
-                    components.html(html_pizarra_surtido, height=600, scrolling=True)
+                    components.html(html_pizarra_surtido, height=650, scrolling=True)
 
                     # --- BLOCK PARA WHATSAPP ---
                     st.markdown("---")
                     st.subheader("📱 Resumen Ejecutivo para WhatsApp")
                     
                     msg_surt = f"⛽ *REPORTE SEMANAL DE SURTIDO Y EXTRACCIÓN*\n📅 Semana: {int(num_sem)} ({fecha_inicio_surt} al {fecha_fin_surt})\n\n"
-                    msg_surt += f"*📍 VOLUMEN GLOBAL DESPACHADO:*\n"
+                    msg_surt += f"*📍 VOLUMEN GLOBAL MOVILIZADO:*\n"
                     msg_surt += f"🔹 Gasolina total: *{f_p(total_gasolina)} Litros*\n"
                     msg_surt += f"🔹 Gasoil total: *{f_p(total_gasoil)} Litros*\n"
                     msg_surt += f"📈 Gran Volumen Consolidado: *{f_p(gran_total_surtido)} Litros*\n\n"
                     
                     msg_surt += f"*📦 1. REPARTO POR GRUPO DE RUTA:*\n"
                     for _, r in df_grupo.iterrows():
-                        pct = (r['LITROS'] / gran_total_surtido * 100) if gran_total_surtido > 0 else 0
+                        pct = (r['LITROS'] / total_rutas * 100) if total_rutas > 0 else 0
                         nom = "Oriente (Ruta Corta)" if "CORTA" in r['GRUPO'] else r['GRUPO']
                         msg_surt += f"▪️ {nom}: {f_p(r['LITROS'])} L ({pct:.1f}%)\n"
                         
-                    msg_surt += f"\n*🏪 2. PUNTOS DE SURTIDO COMERCIALES:*\n"
-                    for _, r in df_origen.iterrows():
-                        pct = (r['LITROS'] / total_surtidos_puros * 100) if total_surtidos_puros > 0 else 0
-                        msg_surt += f"▪️ {r['TIPO_SURTIDO'].title()}: {f_p(r['LITROS'])} L ({pct:.1f}%)\n"
+                    msg_surt += f"\n*🚫 2. BALANCE EXTRACCION DROTACA (CONSUMO EN BASE):*\n"
+                    msg_surt += f"▪️ Volumen Total Auto-Consumo: *{f_p(total_ext)} Litros*\n"
                         
-                    msg_surt += f"\n*🛢️ 3. MOVIMIENTO EN BIDONES:*\n"
-                    msg_surt += f"▪️ Volumen Total en Bidón: {f_p(total_bidon)} Litros\n"
-                    
-                    msg_surt += f"\n*🚫 4. BALANCE EXTRACCION DROTACA 2.0:*\n"
-                    msg_surt += f"▪️ Volumen Total Auto-Consumo: {f_p(total_ext)} Litros\n\n"
+                    msg_surt += f"\n*🏪 3. PUNTOS DE SURTIDO COMERCIALES (E/S):*\n"
+                    msg_surt += f"▪️ Volumen Total Surtido: *{f_p(total_comercial)} Litros*\n"
+                        
+                    msg_surt += f"\n*🛢️ 4. MOVIMIENTO EN BIDONES EXTERNOS:*\n"
+                    msg_surt += f"▪️ Volumen Total en Bidón: *{f_p(total_bidon_ext)} Litros*\n\n"
                     
                     msg_surt += "✅ *Pizarra analítica y auditoría con bordes de control adjunta en imagen.*"
                     st.code(msg_surt, language="markdown")
