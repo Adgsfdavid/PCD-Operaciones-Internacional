@@ -211,13 +211,14 @@ rango_fechas_lv = calcular_rango_lunes_viernes(ano_sel, num_sem)
 color_azul = "#0d47a1"
 logo_b64 = obtener_logo_base64()
 
-t_trafico, t_cierres, t_comensales, t_guardias, t_despachos, t_combustible = st.tabs([
+t_trafico, t_cierres, t_comensales, t_guardias, t_despachos, t_combustible, t_surtido = st.tabs([
     "📈 Desempeño de Tráfico", 
     "⏱️ Cronometría de Cierres", 
     "🍽️ Pizarra Comensales",
     "🛡️ Guardias Semanales",
     "🚚 Resumen de Despachos",
-    "⛽ Reserva Combustible"
+    "⛽ Reserva Combustible",
+    "⛽ Resultados de Surtido"
 ])
 
 # (Las Pestañas 1, 2, 3 y 4 se mantienen exactamente iguales...)
@@ -1045,3 +1046,198 @@ with t_combustible:
                     msg_comb += "✅ *Dashboard visual adjunto.*"
                     
                     st.code(msg_comb, language="markdown")
+                    
+# ---------------------------------------------------------
+# PESTAÑA 7: PIZARRA DE RESULTADO DE SURTIDO Y EXTRACCIÓN
+# ---------------------------------------------------------
+with t_surtido:
+    st.info("Consolida el consumo, tipo de surtido y distribución de combustible por Ruta Larga y Corta de la semana.")
+    
+    if st.button("⛽ Calcular Resumen Semanal de Surtido", type="primary", use_container_width=True):
+        with st.spinner("Procesando transacciones de surtido desde la base de datos..."):
+            df_surt_raw = extraer_datos("SURTIDO_COMBUSTIBLE")
+            
+            if df_surt_raw.empty:
+                st.error("No se pudo acceder a la hoja 'SURTIDO_COMBUSTIBLE' o la tabla está vacía.")
+            else:
+                # Estandarizar nombres de columnas eliminando espacios ocultos
+                df_surt_raw.columns = df_surt_raw.columns.str.strip()
+                
+                # Conversión limpia de fechas y ordenamiento cronológico
+                df_surt_raw['Fecha_DT'] = pd.to_datetime(df_surt_raw['Fecha'], format='%d/%m/%Y', errors='coerce')
+                df_surt_raw = df_surt_raw.dropna(subset=['Fecha_DT'])
+                
+                # Extraer año y semana lógica
+                df_surt_raw['Num_Semana'] = df_surt_raw['Fecha_DT'].dt.isocalendar().week
+                df_surt_raw['Ano_Calc'] = df_surt_raw['Fecha_DT'].dt.isocalendar().year
+                
+                # Filtrar por la semana seleccionada
+                df_surt = df_surt_raw[(df_surt_raw['Num_Semana'] == num_sem) & (df_surt_raw['Ano_Calc'] == ano_sel)].sort_values('Fecha_DT').copy()
+                
+                if df_surt.empty:
+                    st.warning(f"No se encontraron transacciones de surtido para la Semana {int(num_sem)} del Año {ano_sel}.")
+                else:
+                    # Limpiador numérico antibasura para la columna de litros
+                    def limpiar_litros(l):
+                        if pd.isna(l) or str(l).strip() == "": return 0.0
+                        s = str(l).strip().replace(',', '.')
+                        if s.count('.') > 1:
+                            partes = s.split('.')
+                            s = "".join(partes[:-1]) + "." + partes[-1]
+                        try: return float(s)
+                        except: return 0.0
+
+                    df_surt['LITROS'] = df_surt['LITROS'].apply(limpiar_litros)
+                    df_surt['COMBUSTIBLE'] = df_surt['COMBUSTIBLE'].astype(str).str.strip().str.upper()
+                    df_surt['GRUPO'] = df_surt['GRUPO'].astype(str).str.strip().str.upper()
+                    df_surt['TIPO_SURTIDO'] = df_surt['TIPO_SURTIDO'].astype(str).str.strip().str.upper()
+
+                    # --- PROCESAMIENTO ANALÍTICO ---
+                    # 1. Totales Generales de Combustible
+                    total_gasolina = df_surt[df_surt['COMBUSTIBLE'] == 'GASOLINA']['LITROS'].sum()
+                    total_gasoil = df_surt[df_surt['COMBUSTIBLE'] == 'GASOIL']['LITROS'].sum()
+                    gran_total_surtido = total_gasolina + total_gasoil
+
+                    # 2. Resumen por Grupo de Ruta (Larga vs Corta)
+                    df_grupo = df_surt.groupby('GRUPO')['LITROS'].sum().reset_index()
+                    
+                    # 3. Resumen por Origen / Tipo de Surtido
+                    df_tipo = df_surt.groupby('TIPO_SURTIDO')['LITROS'].sum().reset_index()
+
+                    # Rango de fechas real procesado para el título
+                    fecha_inicio_surt = df_surt['Fecha_DT'].min().strftime('%d/%m/%Y')
+                    fecha_fin_surt = df_surt['Fecha_DT'].max().strftime('%d/%m/%Y')
+
+                    # --- GENERACIÓN DE FILAS HTML PARA LAS TABLAS ---
+                    filas_grupo_html = ""
+                    for _, r in df_grupo.iterrows():
+                        pct = (r['LITROS'] / gran_total_surtido * 100) if gran_total_surtido > 0 else 0
+                        filas_grupo_html += f"""
+                        <tr style="background: white;">
+                            <td style="padding: 10px; border: 1px solid #ccc; font-weight: bold; text-align: left;">{r['GRUPO']}</td>
+                            <td style="padding: 10px; border: 1px solid #ccc; font-weight: 900; text-align: center; color: #0d47a1;">{f_p(r['LITROS'])} L</td>
+                            <td style="padding: 10px; border: 1px solid #ccc; text-align: center; font-weight: bold; color: #555;">{pct:.1f}%</td>
+                        </tr>
+                        """
+
+                    filas_tipo_html = ""
+                    for _, r in df_tipo.iterrows():
+                        pct = (r['LITROS'] / gran_total_surtido * 100) if gran_total_surtido > 0 else 0
+                        filas_tipo_html += f"""
+                        <tr style="background: white;">
+                            <td style="padding: 10px; border: 1px solid #ccc; font-weight: bold; text-align: left;">{r['TIPO_SURTIDO']}</td>
+                            <td style="padding: 10px; border: 1px solid #ccc; font-weight: 900; text-align: center; color: #2e7d32;">{f_p(r['LITROS'])} L</td>
+                            <td style="padding: 10px; border: 1px solid #ccc; text-align: center; font-weight: bold; color: #555;">{pct:.1f}%</td>
+                        </tr>
+                        """
+
+                    # --- ESTRUCTURA DE LA PIZARRA VISUAL ---
+                    html_pizarra_surtido = f"""
+                    <html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head>
+                    <body style="font-family: Arial, sans-serif; background-color: #f0f2f6; padding: 20px;">
+                    <div style="text-align: center; margin-bottom: 15px;">
+                        <button onclick="capSurtido()" style="background: #006064; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR RESUMEN DE SURTIDO</button>
+                    </div>
+                    <div id="piz-surtido" style="background:white; width:950px; margin:auto; border:2px solid #006064; border-radius:12px; overflow:hidden;">
+                        
+                        <div style="background-color: #006064; color: white; padding: 25px 30px; display: flex; align-items: center; justify-content: space-between; border-bottom: 5px solid #d4af37;">
+                            <img src="{logo_b64}" style="height: 50px;">
+                            <div style="text-align: right;">
+                                <h2 style="margin:0; font-size:23px; font-weight: 900; letter-spacing: 0.5px;">RESULTADOS DE SURTIDO Y EXTRACCIÓN</h2>
+                                <p style="margin:5px 0 0 0; font-size:14px; font-weight:bold; color:#d4af37;">SEMANA {int(num_sem)} ({fecha_inicio_surt} AL {fecha_fin_surt})</p>
+                            </div>
+                        </div>
+
+                        <div style="padding: 25px;">
+                            
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 25px;">
+                                <div style="background: #e0f7fa; border-left: 6px solid #00bcd4; padding: 15px; width: 31%; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                                    <span style="font-size: 11px; font-weight: bold; color: #006064; text-transform: uppercase;">⛽ TOTAL GASOLINA</span>
+                                    <h2 style="margin: 5px 0 0 0; font-size: 24px; font-weight: 900; color: #006064;">{f_p(total_gasolina)} <span style="font-size:14px;">Litros</span></h2>
+                                </div>
+                                <div style="background: #efebe9; border-left: 6px solid #8d6e63; padding: 15px; width: 31%; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                                    <span style="font-size: 11px; font-weight: bold; color: #4e342e; text-transform: uppercase;">🛢️ TOTAL GASOIL</span>
+                                    <h2 style="margin: 5px 0 0 0; font-size: 24px; font-weight: 900; color: #4e342e;">{f_p(total_gasoil)} <span style="font-size:14px;">Litros</span></h2>
+                                </div>
+                                <div style="background: #e8f5e9; border-left: 6px solid #4caf50; padding: 15px; width: 31%; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                                    <span style="font-size: 11px; font-weight: bold; color: #1b5e20; text-transform: uppercase;">📊 VOLUMEN CONSOLIDADO</span>
+                                    <h2 style="margin: 5px 0 0 0; font-size: 24px; font-weight: 900; color: #1b5e20;">{f_p(gran_total_surtido)} <span style="font-size:14px;">Litros</span></h2>
+                                </div>
+                            </div>
+
+                            <div style="display: flex; justify-content: space-between;">
+                                
+                                <div style="width: 48%;">
+                                    <h3 style="margin: 0 0 10px 0; font-size: 15px; color: #006064; text-transform: uppercase; border-bottom: 2px solid #006064; padding-bottom: 5px;">📍 Distribución por Grupo de Ruta</h3>
+                                    <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                                        <thead>
+                                            <tr style="background: #f5f5f5; color: #333;">
+                                                <th style="padding: 10px; border: 1px solid #ccc; text-align: left;">GRUPO</th>
+                                                <th style="padding: 10px; border: 1px solid #ccc;">LITROS</th>
+                                                <th style="padding: 10px; border: 1px solid #ccc;">PORCENTAJE</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {filas_grupo_html}
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                <div style="width: 48%;">
+                                    <h3 style="margin: 0 0 10px 0; font-size: 15px; color: #006064; text-transform: uppercase; border-bottom: 2px solid #006064; padding-bottom: 5px;">📍 Consumo por Punto de Extracción / Sitio</h3>
+                                    <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                                        <thead>
+                                            <tr style="background: #f5f5f5; color: #333;">
+                                                <th style="padding: 10px; border: 1px solid #ccc; text-align: left;">TIPO SURTIDO / SITIO</th>
+                                                <th style="padding: 10px; border: 1px solid #ccc;">LITROS</th>
+                                                <th style="padding: 10px; border: 1px solid #ccc;">PORCENTAJE</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {filas_tipo_html}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <div style="margin-top: 40px; text-align: center; font-size: 11px; color: #777; border-top: 1px solid #eee; padding-top: 10px; font-weight: bold;">
+                                CONTROL TOWER LOGÍSTICA - DIRECCIÓN OPERATIVA DROTACA
+                            </div>
+                        </div>
+                    </div>
+                    <script>
+                    function capSurtido() {{ 
+                        html2canvas(document.getElementById('piz-surtido'), {{scale: 2}}).then(canvas => {{ 
+                            var link = document.createElement('a'); 
+                            link.download = 'Resumen_Surtido_Semana_{int(num_sem)}.png'; 
+                            link.href = canvas.toDataURL(); 
+                            link.click(); 
+                        }}); 
+                    }}
+                    </script>
+                    </body></html>
+                    """
+                    components.html(html_pizarra_surtido, height=550, scrolling=True)
+
+                    # --- BLOCK PARA WHATSAPP ---
+                    st.markdown("---")
+                    st.subheader("📱 Resumen Ejecutivo para WhatsApp")
+                    
+                    msg_surt = f"⛽ *REPORTE SEMANAL DE SURTIDO Y EXTRACCIÓN*\n📅 Semana: {int(num_sem)} ({fecha_inicio_surt} al {fecha_fin_surt})\n\n"
+                    msg_surt += f"*📍 VOLUMEN GLOBAL SURTIDO:*\n"
+                    msg_surt += f"🔹 Gasolina: *{f_p(total_gasolina)} Litros*\n"
+                    msg_surt += f"🔹 Gasoil: *{f_p(total_gasoil)} Litros*\n"
+                    msg_surt += f"📈 Gran Total Despachado: *{f_p(gran_total_surtido)} Litros*\n\n"
+                    
+                    msg_surt += f"*📍 REPARTO POR GRUPO DE RUTA:*\n"
+                    for _, r in df_grupo.iterrows():
+                        pct = (r['LITROS'] / gran_total_surtido * 100) if gran_total_surtido > 0 else 0
+                        msg_surt += f"▪️ {r['GRUPO']}: {f_p(r['LITROS'])} L ({pct:.1f}%)\n"
+                        
+                    msg_surt += f"\n*📍 ORIGEN DE LA EXTRACCIÓN:*\n"
+                    for _, r in df_tipo.iterrows():
+                        pct = (r['LITROS'] / gran_total_surtido * 100) if gran_total_surtido > 0 else 0
+                        msg_surt += f"▪️ {r['TIPO_SURTIDO'].title()}: {f_p(r['LITROS'])} L ({pct:.1f}%)\n"
+                        
+                    msg_surt += "\n✅ *Pizarra analítica consolidada adjunta en imagen.*"
+                    st.code(msg_surt, language="markdown")                    
