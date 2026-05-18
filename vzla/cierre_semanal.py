@@ -99,13 +99,11 @@ def calcular_promedio_horas(lista_horas):
     return temp_dt.strftime("%I:%M %p").upper()
 
 def calcular_rango_semana(ano, semana):
-    """Lunes a Domingo (Para Tráfico Operativo)"""
     lunes = datetime.strptime(f'{int(ano)}-W{int(semana)}-1', "%G-W%V-%u")
     domingo = lunes + timedelta(days=6)
     return f"{lunes.strftime('%d/%m/%Y')} al {domingo.strftime('%d/%m/%Y')}"
 
 def calcular_rango_lunes_viernes(ano, semana):
-    """Lunes a Viernes (Para Cierres y Comensales)"""
     lunes = datetime.strptime(f'{int(ano)}-W{int(semana)}-1', "%G-W%V-%u")
     viernes = lunes + timedelta(days=4)
     return f"{lunes.strftime('%d/%m/%Y')} al {viernes.strftime('%d/%m/%Y')}"
@@ -114,10 +112,30 @@ def extraer_fecha_limpia(fecha_str):
     if pd.isna(fecha_str): return pd.NaT
     match = re.search(r'(\d{2}/\d{2}/\d{4})', str(fecha_str))
     if match:
-        try:
-            return datetime.strptime(match.group(1), "%d/%m/%Y")
+        try: return datetime.strptime(match.group(1), "%d/%m/%Y")
         except: return pd.NaT
     return pd.NaT
+
+def filtrar_ultima_carga_semana(df, num_sem):
+    """Extrae la semana y si hay varios reportes guardados en esa semana, toma el último."""
+    if df.empty: return df
+    
+    c_sem = buscar_columna_estricta(df, ['semana'])
+    if c_sem:
+        df['Num_Semana'] = df[c_sem].astype(str).str.extract(r'(\d+)').astype(float)
+        df_sem = df[df['Num_Semana'] == num_sem]
+        return df_sem.copy()
+        
+    c_f = buscar_columna_estricta(df, ['fecha'])
+    if not c_f: return pd.DataFrame()
+    
+    df['F_DT'] = pd.to_datetime(df[c_f], dayfirst=True, errors='coerce')
+    df['Num_Semana'] = df['F_DT'].dt.isocalendar().week
+    df_sem = df[df['Num_Semana'] == num_sem].copy()
+    
+    if df_sem.empty: return df_sem
+    max_dt = df_sem['F_DT'].max()
+    return df_sem[df_sem['F_DT'] == max_dt].copy()
 
 # ==========================================
 # INTERFAZ PRINCIPAL
@@ -134,9 +152,16 @@ with c2:
 
 rango_fechas = calcular_rango_semana(ano_sel, num_sem)
 rango_fechas_lv = calcular_rango_lunes_viernes(ano_sel, num_sem)
+color_azul = "#0d47a1"
+logo_b64 = obtener_logo_base64()
 
-# CREAMOS LAS 3 PESTAÑAS
-t_trafico, t_cierres, t_comensales = st.tabs(["📈 Desempeño de Tráfico", "⏱️ Cronometría de Cierres", "🍽️ Pizarra Comensales"])
+# CREAMOS LAS 4 PESTAÑAS
+t_trafico, t_cierres, t_comensales, t_guardias = st.tabs([
+    "📈 Desempeño de Tráfico", 
+    "⏱️ Cronometría de Cierres", 
+    "🍽️ Pizarra Comensales",
+    "🛡️ Guardias Semanales"
+])
 
 # ---------------------------------------------------------
 # PESTAÑA 1: DESEMPEÑO DE TRÁFICO
@@ -188,8 +213,6 @@ with t_trafico:
                     df_zonas['%_Far'] = (df_zonas[c_farma] / total_f * 100).round(1).fillna(0)
                     df_zonas['%_Bul'] = (df_zonas[c_bultos] / total_b * 100).round(1).fillna(0)
 
-                    logo = obtener_logo_base64()
-                    color_azul = "#0d47a1"
                     color_dorado = "#d4af37"
 
                     filas_t = "".join([f"<tr><td>{r[c_fecha]}</td><td>{r[c_dia]}</td><td>{a_12h(r[c_h1])}</td><td>{a_12h(r[c_hu])}</td><td>{a_12h(r[c_it])}</td><td>{a_12h(r[c_ct])}</td></tr>" for _,r in df_t.iterrows()])
@@ -219,7 +242,7 @@ with t_trafico:
                         </div>
                         <div class="page" id="pizarra-trafico">
                             <div class="header-master">
-                                <img src="{logo}" style="height: 55px;">
+                                <img src="{logo_b64}" style="height: 55px;">
                                 <div class="header-info">
                                     <h2>AUDITORÍA SEMANAL DE TRÁFICO</h2>
                                     <h3 style="margin: 5px 0 0 0; color: #fff; font-size: 14px;">DEPARTAMENTO DE TRÁFICO</h3>
@@ -269,7 +292,6 @@ with t_cierres:
     st.info("Análisis de Apertura y Cierres Drotaca 2.0 (Lunes a Viernes).")
     if st.button("🕒 Procesar Cronometría de Cierres", type="primary", use_container_width=True):
         with st.spinner("Extrayendo y estructurando bases de datos..."):
-            
             df_a_raw = extraer_datos("SEG_APERTURA")
             df_j_raw = extraer_datos("SEG_CIERRE_JUANITA")
             df_d_raw = extraer_datos("SEG_CIERRE_DROTACA")
@@ -350,8 +372,6 @@ with t_cierres:
 
                 prom_juanita = calcular_promedio_horas(df_resumen['Juanita'].tolist())
                 prom_drotaca = calcular_promedio_horas(df_resumen['Drotaca'].tolist())
-                logo_b64 = obtener_logo_base64()
-                color_azul = "#0d47a1"
                 
                 filas_gral_html = ""
                 for _, r in df_resumen.iterrows():
@@ -419,11 +439,7 @@ with t_cierres:
                 if not pivot_deps.empty:
                     filas_deps_html = ""
                     for dep_nombre, row in pivot_deps.iterrows():
-                        tds = ""
-                        for dia in dias_base:
-                            val = a_12h(row[dia])
-                            tds += f"<td style='padding: 10px; border: 1px solid #000; font-weight: bold; font-size: 13px;'>{val}</td>"
-                        
+                        tds = "".join([f"<td style='padding: 10px; border: 1px solid #000; font-weight: bold; font-size: 13px;'>{a_12h(row[dia])}</td>" for dia in dias_base])
                         prom = row['Promedio']
                         filas_deps_html += f"""
                         <tr style="text-align: center;">
@@ -478,7 +494,6 @@ with t_cierres:
 
                 components.html(html_pizarra_general + html_pizarra_deps, height=1600, scrolling=True)
 
-                # --- WHATSAPP CIERRES ---
                 st.markdown("---")
                 st.subheader("📱 Resumen para WhatsApp (Cierres y Departamentos)")
                 msg_w = f"⏱️ *Reporte de Cierres Semanal - Drotaca 2.0*\n📅 Semana: {int(num_sem)} ({rango_fechas_lv})\n\n"
@@ -524,7 +539,6 @@ with t_comensales:
                 if df_com.empty:
                     st.warning(f"No hay registros de comensales para la Semana {int(num_sem)}.")
                 else:
-                    # Filtramos rigurosamente para ignorar sábados (5) y domingos (6)
                     if c_fecha_c:
                         df_com = df_com.dropna(subset=['Fecha_DT'])
                         df_com = df_com[df_com['Fecha_DT'].dt.weekday < 5].copy()
@@ -557,12 +571,6 @@ with t_comensales:
                     tot_alm = df_grp[c_alm].sum() if c_alm else 0
                     tot_cen = df_grp[c_cen].sum() if c_cen else 0
 
-                    # ==========================================
-                    # GENERACIÓN HTML - PIZARRA COMENSALES (DISEÑO AZUL CON BORDES NEGROS)
-                    # ==========================================
-                    color_azul = "#0d47a1"
-                    logo_b64 = obtener_logo_base64()
-                    
                     filas_com_html = ""
                     for _, r in df_grp.iterrows():
                         filas_com_html += f"""
@@ -635,7 +643,6 @@ with t_comensales:
                     """
                     components.html(html_pizarra_comensales, height=1200, scrolling=True)
 
-                    # --- WHATSAPP COMENSALES ---
                     st.markdown("---")
                     st.subheader("📱 Resumen para WhatsApp (Comedor)")
                     msg_c = f"🍽️ *Reporte Semanal de Comensales - Drotaca*\n📅 Semana: {int(num_sem)} ({rango_fechas_lv})\n\n"
@@ -651,3 +658,170 @@ with t_comensales:
                         
                     msg_c += f"\n✅ Pizarra detallada de comedor adjunta."
                     st.code(msg_c, language="markdown")
+
+# ---------------------------------------------------------
+# PESTAÑA 4: GUARDIAS SEMANALES (SEGURIDAD, FLOTA, MONITOREO)
+# ---------------------------------------------------------
+with t_guardias:
+    st.info("Genera las pizarras de Guardia (Seguridad, Flota y Monitoreo) correspondientes a la semana seleccionada.")
+    if st.button("🛡️ Generar Pizarras de Guardias", type="primary", use_container_width=True):
+        with st.spinner("Extrayendo bases de datos de Guardias..."):
+            
+            # --- GUARDIA DE SEGURIDAD ---
+            df_seg_raw = extraer_datos("SEG_ROL_GUARDIA")
+            if df_seg_raw.empty:
+                st.error("No se encontraron registros en SEG_ROL_GUARDIA.")
+            else:
+                df_seg = filtrar_ultima_carga_semana(df_seg_raw, num_sem)
+                if df_seg.empty:
+                    st.warning(f"No hay registros de Seguridad para la semana {int(num_sem)}.")
+                else:
+                    c_fecha = buscar_columna_estricta(df_seg, ['fecha'])
+                    c_area = buscar_columna_estricta(df_seg, ['area', 'área'])
+                    c_cant = buscar_columna_estricta(df_seg, ['cantidad', 'cant'])
+                    c_diu = buscar_columna_estricta(df_seg, ['diurno'])
+                    c_noc = buscar_columna_estricta(df_seg, ['nocturno'])
+                    
+                    if c_fecha and c_area:
+                        filas_seg_html = ""
+                        for f_titulo in df_seg[c_fecha].unique():
+                            f_dia = df_seg[df_seg[c_fecha] == f_titulo]
+                            filas_seg_html += f"<tr><td colspan='4' style='background-color:#1565c0; color:white; font-weight:bold; padding:10px; text-align:center;'>OFICIALES DE SEGURIDAD - {str(f_titulo).upper()}</td></tr>"
+                            for _, r in f_dia.iterrows():
+                                d_list = [f"✓ {x.strip()}" for x in str(r.get(c_diu, '')).split('\n') if x.strip()]
+                                n_list = [f"✓ {x.strip()}" for x in str(r.get(c_noc, '')).split('\n') if x.strip()]
+                                d_html = "<br>".join(d_list)
+                                n_html = "<br>".join(n_list)
+                                cant = str(r.get(c_cant, '')) if pd.notna(r.get(c_cant, '')) else ""
+                                filas_seg_html += f"<tr><td style='padding:10px; border:1px solid #000; font-weight:bold;'>{r.get(c_area, '')}</td><td style='padding:10px; border:1px solid #000; text-align:center;'>{cant}</td><td style='padding:10px; border:1px solid #000;'>{d_html}</td><td style='padding:10px; border:1px solid #000;'>{n_html}</td></tr>"
+
+                        html_piz_seg = f"""
+                        <html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head>
+                        <body style="font-family: Arial, sans-serif; background-color: #f0f2f6;">
+                        <div style="text-align: center; margin-bottom: 15px;">
+                            <button onclick="capSeg()" style="background: {color_azul}; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR ROL SEGURIDAD</button>
+                        </div>
+                        <div id="piz-seg" style="background:white; width:800px; margin:auto; border:2px solid {color_azul}; border-radius:12px; overflow:hidden;">
+                            <div style="background-color: {color_azul}; color: white; padding: 25px; display: flex; align-items: center; justify-content: space-between;">
+                                <img src="{logo_b64}" style="height: 50px;">
+                                <div style="text-align: right;"><h2 style="margin:0; font-size:22px;">ROL DE GUARDIA SEMANAL</h2><p style="margin:0; font-size:14px;">SEGURIDAD INTEGRAL - SEMANA {int(num_sem)}</p></div>
+                            </div>
+                            <div style="padding: 20px;">
+                                <table style="width:100%; border-collapse:collapse; font-size:14px;">
+                                    <thead><tr style="background:#e8eaf6; color:{color_azul};"><th style="padding:10px; border:1px solid #000; text-align:left;">ÁREA ASIGNADA</th><th style="padding:10px; border:1px solid #000; text-align:center;">CANT.</th><th style="padding:10px; border:1px solid #000; text-align:left;">TURNO DIURNO</th><th style="padding:10px; border:1px solid #000; text-align:left;">TURNO NOCTURNO</th></tr></thead>
+                                    <tbody>{filas_seg_html}</tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <script>function capSeg() {{ html2canvas(document.getElementById('piz-seg'), {{scale: 2}}).then(canvas => {{ var link = document.createElement('a'); link.download = 'Seguridad_Semana_{int(num_sem)}.png'; link.href = canvas.toDataURL(); link.click(); }}); }}</script>
+                        </body></html>
+                        """
+                        components.html(html_piz_seg, height=900, scrolling=True)
+
+                        msg_seg = f"🛡️ *ROL DE GUARDIA DE SEGURIDAD*\n📅 Semana: {int(num_sem)}\n\n✅ Guardias asignadas y programadas exitosamente.\n📸 Ver distribución detallada en la imagen adjunta."
+                        st.code(msg_seg, language="markdown")
+            
+            st.markdown("---")
+
+            # --- GUARDIA DE FLOTA ---
+            df_flo_raw = extraer_datos("GUARDIA_FLOTA")
+            if df_flo_raw.empty:
+                st.error("No se encontraron registros en GUARDIA_FLOTA.")
+            else:
+                df_flo = filtrar_ultima_carga_semana(df_flo_raw, num_sem)
+                if df_flo.empty:
+                    st.warning(f"No hay registros de Flota para la semana {int(num_sem)}.")
+                else:
+                    c_nom = buscar_columna_estricta(df_flo, ['nombre', 'personal'])
+                    c_car = buscar_columna_estricta(df_flo, ['cargo'])
+                    c_dia = buscar_columna_estricta(df_flo, ['dia', 'día'], evitar=['horario'])
+                    c_hor = buscar_columna_estricta(df_flo, ['horario'])
+
+                    if c_nom and c_car:
+                        filas_flo_html = ""
+                        for _, r in df_flo.iterrows():
+                            filas_flo_html += f"<tr><td style='padding:12px; border:1px solid #000; font-weight:bold; font-size:15px;'>{r.get(c_nom, '')}</td><td style='padding:12px; border:1px solid #000; font-size:14px;'>{r.get(c_car, '')}</td><td style='padding:12px; border:1px solid #000; text-align:center; font-size:14px; font-weight:bold; color:{color_azul};'>{r.get(c_dia, '')}</td><td style='padding:12px; border:1px solid #000; text-align:center; font-size:14px; font-weight:bold; color:#000000;'>{r.get(c_hor, '')}</td></tr>"
+
+                        html_piz_flo = f"""
+                        <html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head>
+                        <body style="font-family: Arial, sans-serif; background-color: #f0f2f6;">
+                        <div style="text-align: center; margin-bottom: 15px;">
+                            <button onclick="capFlo()" style="background: {color_azul}; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR GUARDIA FLOTA</button>
+                        </div>
+                        <div id="piz-flo" style="background:white; width:800px; margin:auto; border:2px solid {color_azul}; border-radius:12px; overflow:hidden;">
+                            <div style="background-color: {color_azul}; color: white; padding: 25px; display: flex; align-items: center; justify-content: space-between;">
+                                <img src="{logo_b64}" style="height: 50px;">
+                                <div style="text-align: right;"><h2 style="margin:0; font-size:22px;">GUARDIA DE FLOTA</h2><p style="margin:0; font-size:14px;">SEMANA {int(num_sem)} ({rango_fechas})</p></div>
+                            </div>
+                            <div style="padding: 20px;">
+                                <table style="width:100%; border-collapse:collapse; font-size:14px;">
+                                    <thead><tr style="background:{color_azul}; color:white;"><th style="padding:10px; border:1px solid #000; text-align:left;">PERSONAL</th><th style="padding:10px; border:1px solid #000; text-align:left;">CARGO Y TURNO</th><th style="padding:10px; border:1px solid #000; text-align:center;">DÍAS</th><th style="padding:10px; border:1px solid #000; text-align:center;">HORARIO</th></tr></thead>
+                                    <tbody>{filas_flo_html}</tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <script>function capFlo() {{ html2canvas(document.getElementById('piz-flo'), {{scale: 2}}).then(canvas => {{ var link = document.createElement('a'); link.download = 'Flota_Semana_{int(num_sem)}.png'; link.href = canvas.toDataURL(); link.click(); }}); }}</script>
+                        </body></html>
+                        """
+                        components.html(html_piz_flo, height=600, scrolling=True)
+
+                        msg_flo = f"🚛 *GUARDIA DE FLOTA*\n📅 Semana: {int(num_sem)}\n\n"
+                        for _, r in df_flo.iterrows():
+                            msg_flo += f"👤 *{r.get(c_nom, '')}*\n🔹 Rol: {r.get(c_car, '')}\n🗓️ Días: {r.get(c_dia, '')}\n⏰ Horario: {r.get(c_hor, '')}\n\n"
+                        st.code(msg_flo, language="markdown")
+
+            st.markdown("---")
+
+            # --- GUARDIA DE MONITOREO ---
+            df_mon_raw = extraer_datos("GUARDIA_MONITOREO")
+            if df_mon_raw.empty:
+                st.error("No se encontraron registros en GUARDIA_MONITOREO.")
+            else:
+                df_mon = filtrar_ultima_carga_semana(df_mon_raw, num_sem)
+                if df_mon.empty:
+                    st.warning(f"No hay registros de Monitoreo para la semana {int(num_sem)}.")
+                else:
+                    c_nom = buscar_columna_estricta(df_mon, ['nombre', 'turno'])
+                    c_hor = buscar_columna_estricta(df_mon, ['horario', 'dia', 'día'])
+                    c_ram = buscar_columna_estricta(df_mon, ['ramon', 'ramón', 'responsable'])
+
+                    if c_nom and c_hor:
+                        filas_mon_html = ""
+                        uni_ramon = ""
+                        for _, r in df_mon.iterrows():
+                            filas_mon_html += f"<tr><td style='padding:12px; border:1px solid #000; font-weight:bold; font-size:15px; color:{color_azul};'>{r.get(c_nom, '')}</td><td style='padding:12px; border:1px solid #000; font-size:14px; font-weight:bold;'>{r.get(c_hor, '')}</td></tr>"
+                            if c_ram and not uni_ramon and pd.notna(r.get(c_ram, '')):
+                                uni_ramon = str(r.get(c_ram, ''))
+
+                        box_ramon = f"<div style='background-color:#f8f9fa; padding:15px; border-left:5px solid #e65100; margin-top:20px; border-radius:5px;'><h4 style='margin:0 0 5px 0; color:#333;'>🚛 Unidades del Sr. Ramón</h4><span style='font-size:15px; font-weight:bold; color:{color_azul};'>Responsable: {uni_ramon}</span></div>" if uni_ramon else ""
+
+                        html_piz_mon = f"""
+                        <html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head>
+                        <body style="font-family: Arial, sans-serif; background-color: #f0f2f6;">
+                        <div style="text-align: center; margin-bottom: 15px;">
+                            <button onclick="capMon()" style="background: {color_azul}; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR GUARDIA MONITOREO</button>
+                        </div>
+                        <div id="piz-mon" style="background:white; width:750px; margin:auto; border:2px solid {color_azul}; border-radius:12px; overflow:hidden;">
+                            <div style="background-color: {color_azul}; color: white; padding: 25px; display: flex; align-items: center; justify-content: space-between;">
+                                <img src="{logo_b64}" style="height: 50px;">
+                                <div style="text-align: right;"><h2 style="margin:0; font-size:22px;">GUARDIA DE MONITOREO</h2><p style="margin:0; font-size:14px;">SEMANA {int(num_sem)} ({rango_fechas})</p></div>
+                            </div>
+                            <div style="padding: 20px;">
+                                <table style="width:100%; border-collapse:collapse; font-size:14px;">
+                                    <thead><tr style="background:{color_azul}; color:white;"><th style="padding:10px; border:1px solid #000; text-align:left;">PERSONAL (TURNO)</th><th style="padding:10px; border:1px solid #000; text-align:left;">HORARIO Y DÍAS</th></tr></thead>
+                                    <tbody>{filas_mon_html}</tbody>
+                                </table>
+                                {box_ramon}
+                            </div>
+                        </div>
+                        <script>function capMon() {{ html2canvas(document.getElementById('piz-mon'), {{scale: 2}}).then(canvas => {{ var link = document.createElement('a'); link.download = 'Monitoreo_Semana_{int(num_sem)}.png'; link.href = canvas.toDataURL(); link.click(); }}); }}</script>
+                        </body></html>
+                        """
+                        components.html(html_piz_mon, height=600, scrolling=True)
+
+                        msg_mon = f"🖥️ *GUARDIA DE MONITOREO*\n📅 Semana: {int(num_sem)}\n\n🕒 *Guardias Programadas:*\n\n"
+                        for _, r in df_mon.iterrows():
+                            msg_mon += f"👤 *{r.get(c_nom, '')}*\n⏰ {r.get(c_hor, '')}\n\n"
+                        if uni_ramon:
+                            msg_mon += f"🚛 *Unidades del Sr. Ramón*\nResponsable: {uni_ramon}"
+                        st.code(msg_mon, language="markdown")
