@@ -425,15 +425,22 @@ with t_guardias:
             if df_seg_raw.empty: st.error("No se encontraron registros en SEG_ROL_GUARDIA.")
             else:
                 # [CORRECCIÓN ULTRA BLINDADA PARA LA CANTIDAD]
-                c_cant_temp = buscar_columna_estricta(df_seg_raw, ['cant', 'cantidad', 'oficiales'])
-                if c_cant_temp:
-                    # Forzamos la columna a valores numéricos. Esto convierte automáticamente los vacíos "" en NaN.
-                    # Luego usamos ffill() para arrastrar el número hacia abajo a las celdas combinadas.
-                    df_seg_raw[c_cant_temp] = pd.to_numeric(df_seg_raw[c_cant_temp], errors='coerce').ffill()
-                    # Renombramos la columna a 'cant' para que la función agrupador la encuentre sin fallar
-                    df_seg_raw.rename(columns={c_cant_temp: 'cant'}, inplace=True)
+                # 1. Buscamos cualquier columna que se parezca a Cantidad
+                col_cant_encontrada = None
+                for col in df_seg_raw.columns:
+                    if any(x in str(col).lower() for x in ['cant', 'oficial', 'num']):
+                        col_cant_encontrada = col
+                        break
+                
+                # 2. Arrastramos como Texto Puro para evitar que "to_numeric" destruya los datos
+                if col_cant_encontrada:
+                    df_seg_raw[col_cant_encontrada] = df_seg_raw[col_cant_encontrada].astype(str).str.strip()
+                    df_seg_raw[col_cant_encontrada] = df_seg_raw[col_cant_encontrada].replace(['', 'nan', 'None', '<NA>'], pd.NA)
+                    df_seg_raw['CANT_LIMPIA'] = df_seg_raw[col_cant_encontrada].ffill()
+                else:
+                    df_seg_raw['CANT_LIMPIA'] = "1" # Salvavidas en caso de que borren el título
 
-                grupos_seg, c_area, c_diu, c_noc, c_cant = agrupar_rol_compacto(df_seg_raw, num_sem)
+                grupos_seg, c_area, c_diu, c_noc, _ = agrupar_rol_compacto(df_seg_raw, num_sem)
                 
                 if not grupos_seg: st.warning(f"No hay registros de Seguridad para la semana {int(num_sem)}.")
                 else:
@@ -445,12 +452,9 @@ with t_guardias:
                             d_html = "<br>".join(d_list)
                             n_html = "<br>".join(n_list)
                             
-                            # Extraer la cantidad limpia
-                            val_cant = str(r.get(c_cant, '')).strip()
-                            if val_cant.lower() in ['nan', 'none', '<na>', '']:
-                                cant = ""
-                            else:
-                                cant = val_cant.replace(".0", "") # Quitamos los decimales si los trae
+                            # Obtenemos la cantidad de la columna blindada que acabamos de crear
+                            cant = str(r.get('CANT_LIMPIA', '1')).replace(".0", "")
+                            if cant.lower() in ['nan', 'none', '<na>', '']: cant = "1"
                                 
                             filas_seg_html += f"<tr><td style='padding:10px; border:1px solid #000; font-weight:bold; color:{color_azul}; vertical-align:top;'>{r.get(c_area, '')}</td><td style='padding:10px; border:1px solid #000; text-align:center; font-weight:900; color:#d32f2f; font-size:16px; vertical-align:top;'>{cant}</td><td style='padding:10px; border:1px solid #000; vertical-align:top;'>{d_html}</td><td style='padding:10px; border:1px solid #000; vertical-align:top;'>{n_html}</td></tr>"
 
