@@ -211,14 +211,15 @@ rango_fechas_lv = calcular_rango_lunes_viernes(ano_sel, num_sem)
 color_azul = "#0d47a1"
 logo_b64 = obtener_logo_base64()
 
-t_trafico, t_cierres, t_comensales, t_guardias, t_despachos, t_combustible, t_surtido = st.tabs([
+t_trafico, t_cierres, t_comensales, t_guardias, t_despachos, t_combustible, t_surtido, t_pdf = st.tabs([
     "📈 Desempeño de Tráfico", 
     "⏱️ Cronometría de Cierres", 
     "🍽️ Pizarra Comensales",
     "🛡️ Guardias Semanales",
     "🚚 Resumen de Despachos",
     "⛽ Reserva Combustible",
-    "⛽ Resultados de Surtido"
+    "⛽ Resultados de Surtido",
+    "📄 PDF Master Semanal"
 ])
 
 # (Las Pestañas 1, 2, 3 y 4 se mantienen exactamente iguales...)
@@ -1216,3 +1217,190 @@ with t_surtido:
                     
                     msg_surt += "\n✅ *Pizarra detallada en imagen adjunta.*"
                     st.code(msg_surt, language="markdown")
+                    
+# ---------------------------------------------------------
+# PESTAÑA 8: GENERADOR DEL MASTER REPORTE SEMANAL (PDF)
+# ---------------------------------------------------------
+with t_pdf:
+    st.info("Ensamblador Final: Sube la foto de portada, llena los datos clave y carga las imágenes en el orden establecido para generar el Reporte Master PDF.")
+
+    col_p1, col_p2 = st.columns([1, 1])
+
+    with col_p1:
+        st.markdown("### 📸 1. Portada y Highlights")
+        img_portada = st.file_uploader("Sube la Foto de Portada (Ej. Camión en Ruta)", type=["jpg", "png", "jpeg"])
+        
+        st.markdown("#### 📝 Resumen Ejecutivo (Portada)")
+        hl_seguridad = st.text_input("Personal de Seguridad:", "10 Oficiales")
+        hl_flota = st.text_input("Supervisores de Flota:", "5 Supervisores")
+        hl_comidas = st.text_input("Comidas Servidas:", "2.100 Platos")
+        hl_pedidos = st.text_input("Pedidos Entregados:", "2.355 Pedidos")
+        hl_bultos = st.text_input("Bultos Entregados:", "5.000 Bultos")
+        hl_kms = st.text_input("Kilómetros Recorridos:", "31.000 Kms")
+
+    with col_p2:
+        st.markdown("### 📎 2. Pizarras de Auditoría (Orden del PDF)")
+        st.markdown("Carga las imágenes descargadas de cada pestaña:")
+        
+        img_seguridad = st.file_uploader("1. Guardias de Seguridad (Puedes seleccionar varias)", type=["png", "jpg"], accept_multiple_files=True)
+        img_flota = st.file_uploader("2. Guardia Flota", type=["png", "jpg"])
+        img_monitoreo = st.file_uploader("3. Guardia Monitoreo", type=["png", "jpg"])
+        img_comedor = st.file_uploader("4. Pizarra Comensales", type=["png", "jpg"])
+        img_trafico = st.file_uploader("5. Desempeño de Tráfico", type=["png", "jpg"])
+        img_cierres = st.file_uploader("6. Cronometría de Cierres", type=["png", "jpg"])
+        img_despachos = st.file_uploader("7. Resumen de Despachos", type=["png", "jpg"])
+        img_combustible = st.file_uploader("8. Reserva de Combustible", type=["png", "jpg"])
+        img_surtido = st.file_uploader("9. Resultados de Surtido", type=["png", "jpg"])
+
+    if st.button("📄 GENERAR MASTER REPORTE SEMANAL", type="primary", use_container_width=True):
+        if not img_portada:
+            st.warning("⚠️ Debes subir al menos la foto de portada para generar el PDF.")
+        else:
+            with st.spinner("Ensamblando PDF Corporativo..."):
+                b64_portada = base64.b64encode(img_portada.read()).decode()
+
+                # Construir lista de secciones dinámicamente en el ORDEN ESTRICTO solicitado
+                secciones = []
+                
+                if img_seguridad:
+                    for idx, img in enumerate(img_seguridad):
+                        titulo = "GUARDIAS DE SEGURIDAD" if len(img_seguridad) == 1 else f"GUARDIAS DE SEGURIDAD (PARTE {idx+1})"
+                        secciones.append((titulo, img))
+                
+                if img_flota: secciones.append(("GUARDIA DE FLOTA", img_flota))
+                if img_monitoreo: secciones.append(("GUARDIA DE MONITOREO", img_monitoreo))
+                if img_comedor: secciones.append(("AUDITORÍA DE COMENSALES", img_comedor))
+                if img_trafico: secciones.append(("DESEMPEÑO DE TRÁFICO", img_trafico))
+                if img_cierres: secciones.append(("CRONOMETRÍA DE CIERRES", img_cierres))
+                if img_despachos: secciones.append(("RESUMEN DE DESPACHOS", img_despachos))
+                if img_combustible: secciones.append(("RESERVA DE COMBUSTIBLE", img_combustible))
+                if img_surtido: secciones.append(("RESULTADOS DE SURTIDO", img_surtido))
+
+                html_indice = ""
+                html_paginas = ""
+                pagina_actual = 3  # Pág 1 es Portada, Pág 2 es Índice
+
+                for titulo, img_file in secciones:
+                    # Añadir al Índice
+                    html_indice += f"""
+                    <tr style="background: #fff;">
+                        <td style="padding: 15px; border-bottom: 2px solid #ccc; font-weight: bold; color: #333; font-size: 16px;">{titulo}</td>
+                        <td style="padding: 15px; border-bottom: 2px solid #ccc; text-align: right; color: #d32f2f; font-weight: 900; font-size: 16px;">Pág. {pagina_actual}</td>
+                    </tr>
+                    """
+                    
+                    # Generar Página de Contenido
+                    img_file.seek(0)
+                    b64_img = base64.b64encode(img_file.read()).decode()
+                    html_paginas += f"""
+                    <div class="page">
+                        <div style="background-color: #000; color: white; padding: 20px 40px; display: flex; justify-content: space-between; align-items: center; border-bottom: 6px solid #d4af37;">
+                            <div style="font-size: 22px; font-weight: 900; text-transform: uppercase;">{titulo}</div>
+                            <div style="font-size: 16px; font-weight: bold; color: #d4af37;">SEMANA {int(num_sem)}</div>
+                        </div>
+                        <div style="padding: 20px; text-align: center; height: 850px; display: flex; align-items: center; justify-content: center; background: #fafafa;">
+                            <img src="data:image/png;base64,{b64_img}" style="max-width: 95%; max-height: 100%; object-fit: contain; border: 3px solid #ccc; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+                        </div>
+                        <div style="position: absolute; bottom: 0; width: 100%; background: #111; padding: 15px 40px; font-size: 13px; font-weight: bold; color: #fff; display: flex; justify-content: space-between; border-top: 4px solid #d4af37; box-sizing: border-box;">
+                            <span>Control Tower Logística - Dirección Operativa Drotaca</span>
+                            <span style="color: #d4af37;">Página {pagina_actual}</span>
+                        </div>
+                    </div>
+                    """
+                    pagina_actual += 1
+
+                html_pdf_master = f"""
+                <!DOCTYPE html><html><head>
+                    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+                    <style>
+                        @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&display=swap');
+                        body {{ font-family: 'Montserrat', sans-serif; background: #525659; margin: 0; padding: 20px; }}
+                        .page {{ width: 210mm; height: 297mm; background: white; margin: 0 auto 20px auto; position: relative; box-shadow: 0 0 10px rgba(0,0,0,0.5); overflow: hidden; page-break-after: always; }}
+                        
+                        /* Estilos de la Portada */
+                        .portada-bg {{ background-image: url('data:image/png;base64,{b64_portada}'); background-size: cover; background-position: center; height: 60%; position: relative; }}
+                        .overlay {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(135deg, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.4) 100%); }}
+                        .portada-content {{ position: absolute; bottom: 50px; left: 50px; color: white; z-index: 2; width: 85%; }}
+                        .portada-title {{ font-size: 48px; font-weight: 900; margin: 0; text-transform: uppercase; line-height: 1.1; letter-spacing: -1px; }}
+                        .portada-subtitle {{ font-size: 24px; font-weight: bold; color: #d4af37; margin-top: 15px; letter-spacing: 2px; text-transform: uppercase; }}
+                        
+                        /* Estilos del Resumen Ejecutivo */
+                        .highlights-container {{ display: flex; flex-wrap: wrap; padding: 40px 50px; justify-content: space-between; background: white; height: 40%; box-sizing: border-box; }}
+                        .hl-box {{ width: 31%; background: #f8f9fa; border-left: 6px solid #d32f2f; padding: 20px; margin-bottom: 25px; border-radius: 6px; box-sizing: border-box; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }}
+                        .hl-label {{ font-size: 12px; font-weight: bold; color: #777; text-transform: uppercase; letter-spacing: 1px; }}
+                        .hl-value {{ font-size: 20px; font-weight: 900; color: #000; margin-top: 8px; }}
+                    </style>
+                </head><body>
+                    <div style="text-align:center; margin-bottom:20px;">
+                        <button onclick="descargarPDF()" style="background:#0d47a1; color:white; border:none; padding:15px 40px; font-size: 16px; font-weight:bold; cursor:pointer; border-radius:8px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">📥 DESCARGAR MASTER PDF</button>
+                    </div>
+                    
+                    <div id="master-pdf">
+                        <div class="page">
+                            <div class="portada-bg">
+                                <div class="overlay"></div>
+                                <div class="portada-content">
+                                    <img src="{logo_b64}" style="height: 80px; margin-bottom: 25px;">
+                                    <h1 class="portada-title">MASTER REPORTE<br>DE OPERACIONES</h1>
+                                    <div class="portada-subtitle">SEMANA {int(num_sem)} | {ano_sel}</div>
+                                    <div style="margin-top: 20px; font-size: 15px; font-weight: bold; background: #d32f2f; color: white; display: inline-block; padding: 10px 20px; border-radius: 4px; text-transform: uppercase;">
+                                        {rango_fechas}
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="highlights-container">
+                                <div style="width: 100%; margin-bottom: 20px; border-bottom: 3px solid #eee; padding-bottom: 10px;">
+                                    <h2 style="margin: 0; font-size: 20px; color: #000; font-weight: 900; text-transform: uppercase;">RESUMEN EJECUTIVO (KPIs)</h2>
+                                </div>
+                                <div class="hl-box"><div class="hl-label">🛡️ SEGURIDAD EN BASE</div><div class="hl-value">{hl_seguridad}</div></div>
+                                <div class="hl-box"><div class="hl-label">🚛 SUPERVISIÓN FLOTA</div><div class="hl-value">{hl_flota}</div></div>
+                                <div class="hl-box"><div class="hl-label">🍽️ COMEDOR / PLATOS</div><div class="hl-value">{hl_comidas}</div></div>
+                                <div class="hl-box"><div class="hl-label">📦 PEDIDOS ENTREGADOS</div><div class="hl-value">{hl_pedidos}</div></div>
+                                <div class="hl-box"><div class="hl-label">📦 BULTOS ENTREGADOS</div><div class="hl-value">{hl_bultos}</div></div>
+                                <div class="hl-box"><div class="hl-label">🛣️ RECORRIDO FLOTA</div><div class="hl-value">{hl_kms}</div></div>
+                            </div>
+                        </div>
+
+                        <div class="page">
+                            <div style="padding: 60px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 5px solid #000; padding-bottom: 25px; margin-bottom: 40px;">
+                                    <div>
+                                        <h1 style="margin: 0; font-size: 38px; color: #000; font-weight: 900; text-transform: uppercase;">ÍNDICE DE AUDITORÍA</h1>
+                                        <p style="margin: 5px 0 0 0; font-size: 16px; color: #666; font-weight: bold;">Contenido del Master Reporte</p>
+                                    </div>
+                                    <img src="{logo_b64}" style="height: 60px;">
+                                </div>
+                                <table style="width: 100%; border-collapse: collapse;">
+                                    <tr style="background: #111;">
+                                        <th style="padding: 15px; text-align: left; color: #d4af37; font-size: 14px; text-transform: uppercase;">PROCESO AUDITADO</th>
+                                        <th style="padding: 15px; text-align: right; color: #d4af37; font-size: 14px; text-transform: uppercase;">PÁGINA</th>
+                                    </tr>
+                                    {html_indice}
+                                </table>
+                            </div>
+                            <div style="position: absolute; bottom: 0; width: 100%; background: #111; padding: 15px 40px; font-size: 13px; font-weight: bold; color: #fff; display: flex; justify-content: space-between; border-top: 4px solid #d4af37; box-sizing: border-box;">
+                                <span>Control Tower Logística - Drotaca</span>
+                                <span style="color: #d4af37;">Página 2</span>
+                            </div>
+                        </div>
+
+                        {html_paginas}
+                    </div>
+
+                    <script>
+                    function descargarPDF() {{
+                        var element = document.getElementById('master-pdf');
+                        var opt = {{
+                            margin:       0,
+                            filename:     'Master_Reporte_Semanal_{int(num_sem)}.pdf',
+                            image:        {{ type: 'jpeg', quality: 0.98 }},
+                            html2canvas:  {{ scale: 2, useCORS: true }},
+                            jsPDF:        {{ unit: 'mm', format: 'a4', orientation: 'portrait' }}
+                        }};
+                        html2pdf().set(opt).from(element).save();
+                    }}
+                    </script>
+                </body></html>
+                """
+                components.html(html_pdf_master, height=1200, scrolling=True)
+                st.toast("✅ Master PDF generado exitosamente.")                    
