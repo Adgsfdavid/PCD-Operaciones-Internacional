@@ -805,70 +805,81 @@ with t_despachos:
             st.warning("⚠️ Debes cargar al menos un archivo de despacho y el archivo de flota para generar el reporte.")
         else:
             with st.spinner("Procesando histórico de Excels..."):
-                # Lista para acumular mensajes de log en pantalla
                 registros_log = []
                 registros_log.append(f"ℹ️ Iniciando auditoría para el Año {ano_sel} - Semana {int(num_sem)}.")
                 
-                # --- 1. PROCESAR DESPACHOS ---
+                # --- 1. PROCESAR DESPACHOS (ESCANEO DINÁMICO) ---
                 dfs_despacho = []
                 for file in archivos_despacho:
                     filename = file.name.upper()
                     try:
-                        if 'ORIENTE' in filename:
-                            df = pd.read_excel(file, sheet_name="FARMACIAS", header=6)
-                            # Convertimos todos los nombres de columnas a texto antes de limpiar (Evita errores con columnas numéricas/nulas)
-                            df.columns = df.columns.astype(str).str.strip().str.upper() 
-                            cols_map = {'FECHA DE ENTREGA': 'Fecha', 'BULTOS': 'Bultos', 'TIPO DE ENTREGA': 'Status', 'RUTAS': 'SubRegion', 'DISTRIBUCION': 'Region'}
-                            df_renamed = df.rename(columns=cols_map)
-                            df_renamed['Region_Macro'] = 'ORIENTE'
-                            
-                        elif 'CENTRO' in filename:
-                            df = pd.read_excel(file, sheet_name="FARMACIAS", header=5)
-                            df.columns = df.columns.astype(str).str.strip().str.upper() 
-                            cols_map = {'FECHA DE ENTREGA': 'Fecha', 'BULTOS': 'Bultos', 'TIPO DE ENTREGA': 'Status', 'DESPACHO': 'SubRegion', 'DISTRIBUCION': 'Region'}
-                            df_renamed = df.rename(columns=cols_map)
-                            df_renamed['Region_Macro'] = 'CENTRO'
-                            
-                        elif 'OCCIDENTE' in filename:
-                            df = pd.read_excel(file, sheet_name="FARMACIAS", header=5)
-                            df.columns = df.columns.astype(str).str.strip().str.upper() 
-                            cols_map = {'FECHA DE ENTREGA': 'Fecha', 'BULTOS': 'Bultos', 'TIPO DE ENTREGA': 'Status', 'RUTAS': 'SubRegion', 'ZONA': 'Region'}
-                            df_renamed = df.rename(columns=cols_map)
-                            df_renamed['Region_Macro'] = 'OCCIDENTE'
+                        if 'ORIENTE' in filename: region_macro = 'ORIENTE'
+                        elif 'CENTRO' in filename: region_macro = 'CENTRO'
+                        elif 'OCCIDENTE' in filename: region_macro = 'OCCIDENTE'
                         else:
                             registros_log.append(f"⚠️ Archivo omitido (no se identificó región en el nombre): {file.name}")
                             continue
+
+                        # Leemos sin cabeceras al principio para buscar la fila exacta donde inician los títulos
+                        df_raw = pd.read_excel(file, sheet_name="FARMACIAS", header=None)
+                        header_idx = 0
+                        for i, row in df_raw.head(20).iterrows():
+                            # Buscamos dos palabras clave inconfundibles para saber qué fila es la cabecera
+                            row_vals = [str(val).upper().strip() for val in row.values]
+                            if 'BULTOS' in row_vals and 'FECHA DE ENTREGA' in row_vals:
+                                header_idx = i
+                                break
                         
+                        # Reconstruimos el DataFrame con la fila de cabecera correcta
+                        df = df_raw.iloc[header_idx+1:].copy()
+                        df.columns = [str(c).upper().strip() for c in df_raw.iloc[header_idx].values]
+                        
+                        # Mapeo Inteligente basado en los títulos exactos que me diste
+                        col_fecha = 'FECHA DE ENTREGA'
+                        col_bultos = 'BULTOS'
+                        col_status = 'TIPO DE ENTREGA'
+                        col_subregion = 'RUTAS' if 'RUTAS' in df.columns else 'DESPACHO'
+                        col_region = 'DISTRIBUCION' if 'DISTRIBUCION' in df.columns else 'ZONA'
+                        
+                        missing = [c for c in [col_fecha, col_bultos, col_status, col_subregion, col_region] if c not in df.columns]
+                        if missing:
+                            registros_log.append(f"⚠️ {file.name}: Falló la lectura. Faltan las columnas: {missing}.")
+                            continue
+                        
+                        # Renombramos a formato estándar del código
+                        df = df.rename(columns={
+                            col_fecha: 'Fecha', col_bultos: 'Bultos', col_status: 'Status',
+                            col_subregion: 'SubRegion', col_region: 'Region'
+                        })
+                        
+                        df['Region_Macro'] = region_macro
                         cols_to_keep = ['Fecha', 'Bultos', 'Status', 'SubRegion', 'Region', 'Region_Macro']
+                        df = df[cols_to_keep]
+                        filas_brutas = len(df)
                         
-                        # Validar si las columnas realmente existen (para que lo veas en el log si algo falla)
-                        columnas_faltantes = [c for c in cols_to_keep if c not in df_renamed.columns and c != 'Region_Macro']
-                        if columnas_faltantes:
-                            registros_log.append(f"⚠️ {file.name} no tiene las columnas mapeadas: {columnas_faltantes}. Asegúrate que la hoja sea 'FARMACIAS' y la cabecera esté en la fila correcta.")
+                        # [LA MAGIA DEL ARRASTRE DE FECHAS]
+                        # 1. Convertimos cualquier celda vacía o de puros espacios a Nulo
+                        df['Fecha'] = df['Fecha'].replace(r'^\s*$', pd.NA, regex=True)
+                        # 2. Forzamos a formato de fecha (lo inválido se vuelve Nulo)
+                        df['Fecha'] = pd.to_datetime(df['Fecha'], errors='coerce')
+                        # 3. Arrastramos la última fecha válida hacia abajo (arregla las celdas en blanco o combinadas)
+                        df['Fecha'] = df['Fecha'].ffill()
                         
-                        df_renamed = df_renamed[[c for c in cols_to_keep if c in df_renamed.columns]]
+                        # Ya rellenadas las fechas, borramos lo que quede sin fecha (filas vacías al fondo)
+                        df = df.dropna(subset=['Fecha'])
                         
-                        # Guardar total de filas brutas leídas
-                        filas_brutas = len(df_renamed)
-                        
-                        # [CORRECCIÓN CRÍTICA] Rellenar fechas hacia abajo (efecto de celdas combinadas o vacías del martes en adelante)
-                        df_renamed['Fecha'] = pd.to_datetime(df_renamed['Fecha'], dayfirst=True, errors='coerce')
-                        df_renamed['Fecha'] = df_renamed['Fecha'].ffill() 
-                        df_renamed = df_renamed.dropna(subset=['Fecha'])
-                        
-                        registros_log.append(f"✅ Archivo leído: {file.name} | Filas brutas: {filas_brutas} -> Con Fecha válida: {len(df_renamed)}")
-                        dfs_despacho.append(df_renamed)
+                        registros_log.append(f"✅ Archivo leído: {file.name} | Filas procesadas: {filas_brutas} -> Con Fecha Válida: {len(df)}")
+                        dfs_despacho.append(df)
                     except Exception as e:
                         registros_log.append(f"❌ Error procesando el archivo de despacho {file.name}: {str(e)}")
                 
                 if not dfs_despacho:
-                    st.error("No se pudo extraer información válida de los archivos de despacho cargados.")
+                    st.error("No se pudo extraer información válida de los archivos de despacho cargados. Revisa el log abajo.")
                     for log_msg in registros_log: st.write(log_msg)
                     st.stop()
 
                 df_desp = pd.concat(dfs_despacho, ignore_index=True)
                 
-                # Filtrar semana y status
                 df_desp['Num_Semana'] = df_desp['Fecha'].dt.isocalendar().week
                 df_desp['Ano_Calc'] = df_desp['Fecha'].dt.isocalendar().year
                 
@@ -886,12 +897,13 @@ with t_despachos:
 
                 # --- 2. PROCESAR FLOTA (KILOMETRAJE) ---
                 try:
-                    df_flota_raw = pd.read_excel(archivo_flota, sheet_name="BASE DE DATOS", usecols=lambda x: 'Unnamed' not in x)
-                    # Convertimos todos los nombres de columnas a texto antes de limpiar
+                    df_flota_raw = pd.read_excel(archivo_flota, sheet_name="BASE DE DATOS")
                     df_flota_raw.columns = df_flota_raw.columns.astype(str).str.strip().str.upper() 
                     
-                    df_flota_raw['FECHAS'] = pd.to_datetime(df_flota_raw['FECHAS'], dayfirst=True, errors='coerce')
-                    # [CORRECCIÓN CRÍTICA] Rellenar fechas hacia abajo por si hay vacíos
+                    # Descartamos columnas sin nombre real si las hay
+                    df_flota_raw = df_flota_raw.loc[:, ~df_flota_raw.columns.str.contains('^UNNAMED')]
+                    
+                    df_flota_raw['FECHAS'] = pd.to_datetime(df_flota_raw['FECHAS'], errors='coerce')
                     df_flota_raw['FECHAS'] = df_flota_raw['FECHAS'].ffill() 
                     df_flota_raw = df_flota_raw.dropna(subset=['FECHAS'])
                     
