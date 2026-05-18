@@ -1048,10 +1048,10 @@ with t_combustible:
                     st.code(msg_comb, language="markdown")
                     
 # ---------------------------------------------------------
-# PESTAÑA 7: PIZARRA DE RESULTADO DE SURTIDO Y EXTRACCIÓN (VERSIÓN 4 CUADRANTES)
+# PESTAÑA 7: PIZARRA DE RESULTADO DE SURTIDO Y EXTRACCIÓN (LAS 5 CATEGORÍAS MAESTRAS)
 # ---------------------------------------------------------
 with t_surtido:
-    st.info("Resumen simplificado del consumo de combustible por Rutas, Método de Surtido, Extracción Interna y Planta Eléctrica.")
+    st.info("Resumen directo del consumo dividido en las 5 categorías maestras de la operación.")
     
     if st.button("⛽ Calcular Resumen Semanal de Surtido", type="primary", use_container_width=True):
         with st.spinner("Procesando transacciones de surtido desde la base de datos..."):
@@ -1073,7 +1073,7 @@ with t_surtido:
                 if df_surt.empty:
                     st.warning(f"No se encontraron transacciones de surtido para la Semana {int(num_sem)} del Año {ano_sel}.")
                 else:
-                    # Limpiador numérico
+                    # Limpiador numérico antibasura
                     def limpiar_litros(l):
                         if pd.isna(l) or str(l).strip() == "": return 0.0
                         s = str(l).strip().replace(',', '.')
@@ -1087,18 +1087,7 @@ with t_surtido:
                     df_surt['COMBUSTIBLE'] = df_surt['COMBUSTIBLE'].astype(str).str.strip().str.upper()
                     df_surt['GRUPO'] = df_surt['GRUPO'].astype(str).str.strip().str.upper()
                     df_surt['TIPO_SURTIDO'] = df_surt['TIPO_SURTIDO'].astype(str).str.strip().str.upper()
-                    df_surt['UNIDAD'] = df_surt['UNIDAD'].astype(str).str.strip().str.upper()
                     df_surt['SITIO'] = df_surt['SITIO'].astype(str).str.strip().str.upper()
-
-                    # --- EXTRACCIÓN DE LA PLANTA ELÉCTRICA A SU PROPIO GRUPO ---
-                    df_surt.loc[df_surt['UNIDAD'] == 'PLANTA ELECTRICA', 'GRUPO'] = 'PLANTA ELECTRICA'
-
-                    # Renombrar grupos para mayor claridad
-                    df_surt['GRUPO'] = df_surt['GRUPO'].replace({
-                        'RUTA CORTA': 'ORIENTE (RUTA CORTA)',
-                        'RUTA CENTRO': 'CENTRO',
-                        'RUTA OCCIDENTE': 'OCCIDENTE'
-                    })
 
                     # --- KPIs GENERALES ---
                     total_gasolina = df_surt[df_surt['COMBUSTIBLE'] == 'GASOLINA']['LITROS'].sum()
@@ -1108,196 +1097,130 @@ with t_surtido:
                     fecha_inicio_surt = df_surt['Fecha_DT'].min().strftime('%d/%m/%Y')
                     fecha_fin_surt = df_surt['Fecha_DT'].max().strftime('%d/%m/%Y')
 
-                    # --- SEPARAR LOS 3 BLOQUES OPERATIVOS ---
-                    df_operativo = df_surt[~df_surt['GRUPO'].isin(['EXTRACCION', 'PLANTA ELECTRICA'])]
-                    df_extraccion = df_surt[df_surt['GRUPO'] == 'EXTRACCION']
-                    df_planta = df_surt[df_surt['GRUPO'] == 'PLANTA ELECTRICA']
+                    # =========================================================
+                    # ALGORITMO DE LAS 5 CATEGORÍAS MAESTRAS
+                    # =========================================================
+                    df_surt['CATEGORIA'] = '6. OTROS / PLANTA ELÉCTRICA' # Todo lo que no encaje cae aquí
+                    
+                    # 4. SURTIDO CENTRO
+                    cond_centro = df_surt['GRUPO'].str.contains('CENTRO')
+                    df_surt.loc[cond_centro, 'CATEGORIA'] = '4. SURTIDOS CENTRO'
 
-                    total_operativo = df_operativo['LITROS'].sum()
-                    total_extraccion = df_extraccion['LITROS'].sum()
-                    total_planta = df_planta['LITROS'].sum()
+                    # 5. SURTIDO OCCIDENTE
+                    cond_occ = df_surt['GRUPO'].str.contains('OCCIDENTE')
+                    df_surt.loc[cond_occ, 'CATEGORIA'] = '5. SURTIDOS OCCIDENTE'
 
-                    # 1. TABLA: RUTAS (Operativo)
-                    df_rutas = df_operativo.groupby('GRUPO')['LITROS'].sum().reset_index()
-                    filas_rutas_html = ""
-                    for _, r in df_rutas.iterrows():
-                        pct = (r['LITROS'] / total_operativo * 100) if total_operativo > 0 else 0
-                        filas_rutas_html += f"""
-                        <tr style="background: white;">
-                            <td style="padding: 10px; border: 2px solid #000; font-weight: bold;">{r['GRUPO']}</td>
-                            <td style="padding: 10px; border: 2px solid #000; font-weight: 900; text-align: center; color: #0d47a1;">{f_p(r['LITROS'])} L</td>
-                            <td style="padding: 10px; border: 2px solid #000; text-align: center; font-weight: bold;">{pct:.1f}%</td>
-                        </tr>
+                    # 2. BIDONES DROTACA 2.0 (Todo lo que sale del sitio Drotaca 2.0)
+                    cond_drotaca2 = df_surt['SITIO'] == 'DROTACA 2.0'
+                    df_surt.loc[cond_drotaca2, 'CATEGORIA'] = '2. BIDONES DROTACA 2.0'
+
+                    # 3. EXTRACCION CIUDAD DROTACA (Todo lo que sale del Tanque en base)
+                    cond_ciudad = df_surt['SITIO'] == 'CIUDAD DROTACA'
+                    df_surt.loc[cond_ciudad, 'CATEGORIA'] = '3. EXTRACCIÓN CIUDAD DROTACA'
+
+                    # 1. ESTACION DE SERVICIO ORIENTE (Ruta Corta en E/S)
+                    cond_es_oriente = (df_surt['GRUPO'].isin(['RUTA CORTA', 'ORIENTE'])) & (df_surt['TIPO_SURTIDO'] == 'ESTACION DE SERVICIO')
+                    df_surt.loc[cond_es_oriente, 'CATEGORIA'] = '1. ESTACIÓN DE SERVICIO ORIENTE'
+
+                    # Generador automático de bloques HTML
+                    def generar_bloque_html(df_cat, titulo, color_fondo):
+                        total_cat = df_cat['LITROS'].sum()
+                        if total_cat == 0: return "" # Si no hay nada, no se muestra
+                        
+                        df_g = df_cat.groupby('COMBUSTIBLE')['LITROS'].sum().reset_index()
+                        filas = ""
+                        for _, r in df_g.iterrows():
+                            pct = (r['LITROS'] / total_cat * 100) if total_cat > 0 else 0
+                            filas += f"""
+                            <tr style="background: white;">
+                                <td style="padding: 8px; border: 2px solid #000; font-weight: bold;">{r['COMBUSTIBLE']}</td>
+                                <td style="padding: 8px; border: 2px solid #000; font-weight: 900; text-align: center; color: #333;">{f_p(r['LITROS'])} L</td>
+                                <td style="padding: 8px; border: 2px solid #000; text-align: center; font-weight: bold;">{pct:.1f}%</td>
+                            </tr>
+                            """
+                        return f"""
+                        <div style="width: 48%; margin-bottom: 20px;">
+                            <h3 style="margin: 0; font-size: 14px; background: {color_fondo}; color: white; padding: 10px; text-align: center; border: 2px solid #000; text-transform: uppercase;">{titulo}</h3>
+                            <table style="width: 100%; border-collapse: collapse; font-size: 13px; border: 2px solid #000;">
+                                <thead>
+                                    <tr style="background: #eee;">
+                                        <th style="padding: 8px; border: 2px solid #000; text-align: left;">COMBUSTIBLE</th>
+                                        <th style="padding: 8px; border: 2px solid #000;">LITROS</th>
+                                        <th style="padding: 8px; border: 2px solid #000;">%</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {filas}
+                                    <tr style="background: #e0e0e0;">
+                                        <td style="padding: 8px; border: 2px solid #000; font-weight: bold; text-align: right;">TOTAL:</td>
+                                        <td style="padding: 8px; border: 2px solid #000; font-weight: 900; text-align: center; color: {color_fondo}; font-size: 14px;">{f_p(total_cat)} L</td>
+                                        <td style="padding: 8px; border: 2px solid #000;">100%</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
                         """
 
-                    # 2. TABLA: ORIGEN DEL SURTIDO (Operativo)
-                    df_origen = df_operativo.groupby('TIPO_SURTIDO')['LITROS'].sum().reset_index()
-                    filas_origen_html = ""
-                    for _, r in df_origen.iterrows():
-                        pct = (r['LITROS'] / total_operativo * 100) if total_operativo > 0 else 0
-                        filas_origen_html += f"""
-                        <tr style="background: white;">
-                            <td style="padding: 10px; border: 2px solid #000; font-weight: bold;">{r['TIPO_SURTIDO']}</td>
-                            <td style="padding: 10px; border: 2px solid #000; font-weight: 900; text-align: center; color: #2e7d32;">{f_p(r['LITROS'])} L</td>
-                            <td style="padding: 10px; border: 2px solid #000; text-align: center; font-weight: bold;">{pct:.1f}%</td>
-                        </tr>
-                        """
+                    # Construir los bloques visuales
+                    bloque_1 = generar_bloque_html(df_surt[df_surt['CATEGORIA'] == '1. ESTACIÓN DE SERVICIO ORIENTE'], "1. E/S ORIENTE (RUTA CORTA)", "#006064")
+                    bloque_2 = generar_bloque_html(df_surt[df_surt['CATEGORIA'] == '2. BIDONES DROTACA 2.0'], "2. BIDONES DROTACA 2.0", "#e65100")
+                    bloque_3 = generar_bloque_html(df_surt[df_surt['CATEGORIA'] == '3. EXTRACCIÓN CIUDAD DROTACA'], "3. EXTRACCIÓN CIUDAD DROTACA", "#c62828")
+                    bloque_4 = generar_bloque_html(df_surt[df_surt['CATEGORIA'] == '4. SURTIDOS CENTRO'], "4. SURTIDOS CENTRO", "#2e7d32")
+                    bloque_5 = generar_bloque_html(df_surt[df_surt['CATEGORIA'] == '5. SURTIDOS OCCIDENTE'], "5. SURTIDOS OCCIDENTE", "#4a148c")
+                    bloque_6 = generar_bloque_html(df_surt[df_surt['CATEGORIA'] == '6. OTROS / PLANTA ELÉCTRICA'], "6. OTROS / PLANTA ELÉCTRICA", "#555555")
 
-                    # 3. TABLA: EXTRACCIONES INTERNAS (Consumo de vehículos en la Base)
-                    df_ext_g = df_extraccion.groupby(['TIPO_SURTIDO', 'COMBUSTIBLE'])['LITROS'].sum().reset_index()
-                    filas_ext_html = ""
-                    for _, r in df_ext_g.iterrows():
-                        pct = (r['LITROS'] / total_extraccion * 100) if total_extraccion > 0 else 0
-                        nombre_ext = f"CIUDAD DROTACA ({r['COMBUSTIBLE']})" if r['TIPO_SURTIDO'] == 'TANQUE RESERVA' else f"BIDÓN 2.0 ({r['COMBUSTIBLE']})"
-                        filas_ext_html += f"""
-                        <tr style="background: white;">
-                            <td style="padding: 10px; border: 2px solid #000; font-weight: bold;">{nombre_ext}</td>
-                            <td style="padding: 10px; border: 2px solid #000; font-weight: 900; text-align: center; color: #c62828;">{f_p(r['LITROS'])} L</td>
-                            <td style="padding: 10px; border: 2px solid #000; text-align: center; font-weight: bold;">{pct:.1f}%</td>
-                        </tr>
-                        """
-                    if filas_ext_html == "":
-                        filas_ext_html = "<tr><td colspan='3' style='padding:10px; border:2px solid #000; text-align:center;'>Sin extracciones en la semana</td></tr>"
+                    # Extraer subtotales para WhatsApp
+                    def get_sum(cat): return df_surt[df_surt['CATEGORIA'] == cat]['LITROS'].sum()
+                    t1 = get_sum('1. ESTACIÓN DE SERVICIO ORIENTE')
+                    t2 = get_sum('2. BIDONES DROTACA 2.0')
+                    t3 = get_sum('3. EXTRACCIÓN CIUDAD DROTACA')
+                    t4 = get_sum('4. SURTIDOS CENTRO')
+                    t5 = get_sum('5. SURTIDOS OCCIDENTE')
+                    t6 = get_sum('6. OTROS / PLANTA ELÉCTRICA')
 
-                    # 4. TABLA: PLANTA ELÉCTRICA (Proveedores / Sitios)
-                    df_planta_g = df_planta.groupby(['SITIO', 'COMBUSTIBLE'])['LITROS'].sum().reset_index()
-                    filas_planta_html = ""
-                    for _, r in df_planta_g.iterrows():
-                        pct = (r['LITROS'] / total_planta * 100) if total_planta > 0 else 0
-                        filas_planta_html += f"""
-                        <tr style="background: white;">
-                            <td style="padding: 10px; border: 2px solid #000; font-weight: bold;">{r['SITIO']} ({r['COMBUSTIBLE']})</td>
-                            <td style="padding: 10px; border: 2px solid #000; font-weight: 900; text-align: center; color: #ef6c00;">{f_p(r['LITROS'])} L</td>
-                            <td style="padding: 10px; border: 2px solid #000; text-align: center; font-weight: bold;">{pct:.1f}%</td>
-                        </tr>
-                        """
-                    if filas_planta_html == "":
-                        filas_planta_html = "<tr><td colspan='3' style='padding:10px; border:2px solid #000; text-align:center;'>Sin consumo de planta eléctrica</td></tr>"
-
-                    # --- ESTRUCTURA HTML (4 CUADRANTES) ---
+                    # --- ESTRUCTURA HTML (SIMPLE Y DIRECTA) ---
                     html_pizarra_surtido = f"""
                     <html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head>
                     <body style="font-family: Arial, sans-serif; background-color: #f0f2f6; padding: 20px;">
                     <div style="text-align: center; margin-bottom: 15px;">
                         <button onclick="capSurtido()" style="background: #000; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR REPORTE</button>
                     </div>
-                    <div id="piz-surtido" style="background:white; width:1050px; margin:auto; border:3px solid #000; overflow:hidden;">
+                    <div id="piz-surtido" style="background:white; width:1000px; margin:auto; border:4px solid #000; overflow:hidden;">
                         
                         <div style="background-color: #000; color: white; padding: 25px 30px; display: flex; align-items: center; justify-content: space-between; border-bottom: 5px solid #d4af37;">
                             <img src="{logo_b64}" style="height: 50px;">
                             <div style="text-align: right;">
-                                <h2 style="margin:0; font-size:24px; font-weight: 900; text-transform: uppercase;">REPORTE DE SURTIDO Y EXTRACCIÓN</h2>
+                                <h2 style="margin:0; font-size:24px; font-weight: 900; text-transform: uppercase;">REPORTE OFICIAL DE SURTIDO Y EXTRACCIÓN</h2>
                                 <p style="margin:5px 0 0 0; font-size:14px; font-weight:bold; color:#d4af37;">SEMANA {int(num_sem)} ({fecha_inicio_surt} AL {fecha_fin_surt})</p>
                             </div>
                         </div>
 
                         <div style="padding: 20px;">
-                            <div style="display: flex; justify-content: space-between; border: 2px solid #000; background: #eee; margin-bottom: 25px;">
-                                <div style="padding: 15px; width: 33%; text-align: center; border-right: 2px solid #000;">
+                            <div style="display: flex; justify-content: space-between; border: 3px solid #000; background: #eee; margin-bottom: 25px;">
+                                <div style="padding: 15px; width: 33%; text-align: center; border-right: 3px solid #000;">
                                     <span style="font-size: 13px; font-weight: bold; color: #333;">⛽ TOTAL GASOLINA</span>
                                     <h2 style="margin: 5px 0 0 0; font-size: 26px; font-weight: 900; color: #000;">{f_p(total_gasolina)} L</h2>
                                 </div>
-                                <div style="padding: 15px; width: 33%; text-align: center; border-right: 2px solid #000;">
+                                <div style="padding: 15px; width: 33%; text-align: center; border-right: 3px solid #000;">
                                     <span style="font-size: 13px; font-weight: bold; color: #333;">🛢️ TOTAL GASOIL</span>
                                     <h2 style="margin: 5px 0 0 0; font-size: 26px; font-weight: 900; color: #000;">{f_p(total_gasoil)} L</h2>
                                 </div>
-                                <div style="padding: 15px; width: 33%; text-align: center; background: #e0f2f1;">
-                                    <span style="font-size: 13px; font-weight: bold; color: #004d40;">📊 GRAN TOTAL MOVILIZADO</span>
-                                    <h2 style="margin: 5px 0 0 0; font-size: 26px; font-weight: 900; color: #004d40;">{f_p(gran_total_surtido)} L</h2>
+                                <div style="padding: 15px; width: 33%; text-align: center; background: #d4af37;">
+                                    <span style="font-size: 13px; font-weight: bold; color: #000;">📊 GRAN TOTAL MOVILIZADO</span>
+                                    <h2 style="margin: 5px 0 0 0; font-size: 26px; font-weight: 900; color: #000;">{f_p(gran_total_surtido)} L</h2>
                                 </div>
                             </div>
 
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 25px;">
-                                
-                                <div style="width: 48%;">
-                                    <h3 style="margin: 0 0 10px 0; font-size: 14px; background: #006064; color: white; padding: 8px; text-align: center; border: 2px solid #000; text-transform: uppercase;">1. DESPACHO POR RUTAS (FLOTA)</h3>
-                                    <table style="width: 100%; border-collapse: collapse; font-size: 12px; border: 2px solid #000;">
-                                        <thead>
-                                            <tr style="background: #e0f7fa;">
-                                                <th style="padding: 8px; border: 2px solid #000; text-align: left;">RUTAS</th>
-                                                <th style="padding: 8px; border: 2px solid #000;">LITROS</th>
-                                                <th style="padding: 8px; border: 2px solid #000;">%</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {filas_rutas_html}
-                                            <tr style="background: #b2ebf2;">
-                                                <td style="padding: 8px; border: 2px solid #000; font-weight: bold; text-align: right;">TOTAL:</td>
-                                                <td style="padding: 8px; border: 2px solid #000; font-weight: 900; text-align: center;">{f_p(total_operativo)} L</td>
-                                                <td style="padding: 8px; border: 2px solid #000;">100%</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
-
-                                <div style="width: 48%;">
-                                    <h3 style="margin: 0 0 10px 0; font-size: 14px; background: #2e7d32; color: white; padding: 8px; text-align: center; border: 2px solid #000; text-transform: uppercase;">2. TIPO DE SURTIDO (FLOTA)</h3>
-                                    <table style="width: 100%; border-collapse: collapse; font-size: 12px; border: 2px solid #000;">
-                                        <thead>
-                                            <tr style="background: #e8f5e9;">
-                                                <th style="padding: 8px; border: 2px solid #000; text-align: left;">MÉTODO / ORIGEN</th>
-                                                <th style="padding: 8px; border: 2px solid #000;">LITROS</th>
-                                                <th style="padding: 8px; border: 2px solid #000;">%</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {filas_origen_html}
-                                            <tr style="background: #c8e6c9;">
-                                                <td style="padding: 8px; border: 2px solid #000; font-weight: bold; text-align: right;">TOTAL:</td>
-                                                <td style="padding: 8px; border: 2px solid #000; font-weight: 900; text-align: center;">{f_p(total_operativo)} L</td>
-                                                <td style="padding: 8px; border: 2px solid #000;">100%</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
+                            <div style="display: flex; justify-content: space-between; flex-wrap: wrap;">
+                                {bloque_1}
+                                {bloque_2}
+                                {bloque_3}
+                                {bloque_4}
+                                {bloque_5}
+                                {bloque_6}
                             </div>
-
-                            <div style="display: flex; justify-content: space-between;">
-
-                                <div style="width: 48%;">
-                                    <h3 style="margin: 0 0 10px 0; font-size: 14px; background: #c62828; color: white; padding: 8px; text-align: center; border: 2px solid #000; text-transform: uppercase;">3. EXTRACCIÓN (AUTOCONSUMO VEHÍCULOS)</h3>
-                                    <table style="width: 100%; border-collapse: collapse; font-size: 12px; border: 2px solid #000;">
-                                        <thead>
-                                            <tr style="background: #ffebee;">
-                                                <th style="padding: 8px; border: 2px solid #000; text-align: left;">ORIGEN EN BASE</th>
-                                                <th style="padding: 8px; border: 2px solid #000;">LITROS</th>
-                                                <th style="padding: 8px; border: 2px solid #000;">%</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {filas_ext_html}
-                                            <tr style="background: #ffcdd2;">
-                                                <td style="padding: 8px; border: 2px solid #000; font-weight: bold; text-align: right;">TOTAL:</td>
-                                                <td style="padding: 8px; border: 2px solid #000; font-weight: 900; text-align: center;">{f_p(total_extraccion)} L</td>
-                                                <td style="padding: 8px; border: 2px solid #000;">100%</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
-
-                                <div style="width: 48%;">
-                                    <h3 style="margin: 0 0 10px 0; font-size: 14px; background: #f57f17; color: white; padding: 8px; text-align: center; border: 2px solid #000; text-transform: uppercase;">4. CONSUMO PLANTA ELÉCTRICA</h3>
-                                    <table style="width: 100%; border-collapse: collapse; font-size: 12px; border: 2px solid #000;">
-                                        <thead>
-                                            <tr style="background: #fff8e1;">
-                                                <th style="padding: 8px; border: 2px solid #000; text-align: left;">PROVEEDOR / SITIO</th>
-                                                <th style="padding: 8px; border: 2px solid #000;">LITROS</th>
-                                                <th style="padding: 8px; border: 2px solid #000;">%</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {filas_planta_html}
-                                            <tr style="background: #ffecb3;">
-                                                <td style="padding: 8px; border: 2px solid #000; font-weight: bold; text-align: right;">TOTAL:</td>
-                                                <td style="padding: 8px; border: 2px solid #000; font-weight: 900; text-align: center;">{f_p(total_planta)} L</td>
-                                                <td style="padding: 8px; border: 2px solid #000;">100%</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
-
-                            </div>
-                            <div style="margin-top: 30px; text-align: center; font-size: 11px; color: #555; border-top: 2px solid #000; padding-top: 10px; font-weight: bold;">
+                            
+                            <div style="margin-top: 15px; text-align: center; font-size: 11px; color: #333; border-top: 2px solid #000; padding-top: 10px; font-weight: bold;">
                                 CONTROL TOWER LOGÍSTICA - DIRECCIÓN OPERATIVA DROTACA
                             </div>
                         </div>
@@ -1314,30 +1237,25 @@ with t_surtido:
                     </script>
                     </body></html>
                     """
-                    components.html(html_pizarra_surtido, height=650, scrolling=True)
+                    components.html(html_pizarra_surtido, height=680, scrolling=True)
 
-                    # --- WHATSAPP (CORTO Y DIRECTO) ---
+                    # --- WHATSAPP (CORTO Y AL PUNTO) ---
                     st.markdown("---")
                     st.subheader("📱 Resumen Ejecutivo para WhatsApp")
                     
-                    msg_surt = f"⛽ *RESULTADOS DE SURTIDO Y EXTRACCIÓN*\n📅 Semana: {int(num_sem)} ({fecha_inicio_surt} al {fecha_fin_surt})\n\n"
-                    msg_surt += f"📊 *Total General Movilizado:* {f_p(gran_total_surtido)} Litros\n"
+                    msg_surt = f"⛽ *REPORTE OFICIAL DE SURTIDO*\n📅 Semana: {int(num_sem)}\n\n"
+                    msg_surt += f"📊 *GRAN TOTAL:* {f_p(gran_total_surtido)} L\n"
                     msg_surt += f"   ⛽ Gasolina: {f_p(total_gasolina)} L\n"
                     msg_surt += f"   🛢️ Gasoil: {f_p(total_gasoil)} L\n\n"
                     
-                    msg_surt += f"*📍 1. DESPACHO POR RUTAS (Flota)*\n"
-                    for _, r in df_rutas.iterrows():
-                        msg_surt += f"▪️ {r['GRUPO']}: *{f_p(r['LITROS'])} L*\n"
-                        
-                    msg_surt += f"\n*🏪 2. MÉTODO DE SURTIDO (Flota)*\n"
-                    for _, r in df_origen.iterrows():
-                        msg_surt += f"▪️ {r['TIPO_SURTIDO'].title()}: *{f_p(r['LITROS'])} L*\n"
-                        
-                    msg_surt += f"\n*🚫 3. EXTRACCIÓN INTERNA (Auto-consumo)*\n"
-                    msg_surt += f"▪️ Total extraído en base: *{f_p(total_extraccion)} L*\n"
-
-                    msg_surt += f"\n*⚡ 4. PLANTA ELÉCTRICA (Generación)*\n"
-                    msg_surt += f"▪️ Total Gasoil Planta: *{f_p(total_planta)} L*\n\n"
+                    msg_surt += f"*1️⃣ E/S ORIENTE:* {f_p(t1)} L\n"
+                    msg_surt += f"*2️⃣ BIDONES DROTACA 2.0:* {f_p(t2)} L\n"
+                    msg_surt += f"*3️⃣ EXTRACCIÓN C. DROTACA:* {f_p(t3)} L\n"
+                    msg_surt += f"*4️⃣ SURTIDOS CENTRO:* {f_p(t4)} L\n"
+                    msg_surt += f"*5️⃣ SURTIDOS OCCIDENTE:* {f_p(t5)} L\n"
                     
-                    msg_surt += "✅ *Pizarra simplificada de 4 cuadrantes adjunta.*"
+                    if t6 > 0:
+                        msg_surt += f"*(Planta Eléctrica/Otros: {f_p(t6)} L)*\n"
+                    
+                    msg_surt += "\n✅ *Pizarra detallada en imagen.*"
                     st.code(msg_surt, language="markdown")
