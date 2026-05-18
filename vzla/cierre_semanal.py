@@ -116,26 +116,68 @@ def extraer_fecha_limpia(fecha_str):
         except: return pd.NaT
     return pd.NaT
 
-def filtrar_ultima_carga_semana(df, num_sem):
-    """Extrae la semana y si hay varios reportes guardados en esa semana, toma el último."""
+def filtrar_ultima_carga(df, num_sem):
+    """Filtro inteligente para hojas que solo tienen Timestamp en vez de Semana"""
     if df.empty: return df
-    
     c_sem = buscar_columna_estricta(df, ['semana'])
     if c_sem:
         df['Num_Semana'] = df[c_sem].astype(str).str.extract(r'(\d+)').astype(float)
-        df_sem = df[df['Num_Semana'] == num_sem]
-        return df_sem.copy()
+        df_sem = df[df['Num_Semana'] == num_sem].copy()
+        if not df_sem.empty: return df_sem
         
-    c_f = buscar_columna_estricta(df, ['fecha'])
+    c_f = buscar_columna_estricta(df, ['fecha', 'timestamp'])
     if not c_f: return pd.DataFrame()
     
     df['F_DT'] = pd.to_datetime(df[c_f], dayfirst=True, errors='coerce')
-    df['Num_Semana'] = df['F_DT'].dt.isocalendar().week
-    df_sem = df[df['Num_Semana'] == num_sem].copy()
+    df['Sem_Calc'] = df['F_DT'].dt.isocalendar().week
+    df_sem = df[df['Sem_Calc'] == num_sem].copy()
     
     if df_sem.empty: return df_sem
-    max_dt = df_sem['F_DT'].max()
+    max_dt = df_sem['F_DT'].max() # Extrae solo el último lote guardado (evita duplicados)
     return df_sem[df_sem['F_DT'] == max_dt].copy()
+
+def agrupar_rol_compacto(df_seg, num_sem):
+    """Comprime el Rol de Guardia expandido en bloques visuales compactos"""
+    c_fecha = buscar_columna_estricta(df_seg, ['fecha'])
+    c_area = buscar_columna_estricta(df_seg, ['area', 'área'])
+    c_diu = buscar_columna_estricta(df_seg, ['diurno'])
+    c_noc = buscar_columna_estricta(df_seg, ['nocturno'])
+    c_cant = buscar_columna_estricta(df_seg, ['cant'])
+    
+    if not c_fecha or not c_area: return []
+    
+    df_seg['DT'] = df_seg[c_fecha].apply(extraer_fecha_limpia)
+    df_sem = df_seg[df_seg['DT'].dt.isocalendar().week == num_sem].copy()
+    df_sem = df_sem.dropna(subset=['DT']).sort_values('DT')
+    if df_sem.empty: return []
+    
+    grupos = []
+    
+    # 1. SÁBADO
+    df_sat = df_sem[df_sem['DT'].dt.weekday == 5]
+    if not df_sat.empty:
+        fecha_str = f"SÁBADO {df_sat['DT'].iloc[0].strftime('%d/%m/%Y')}"
+        grupos.append((fecha_str, df_sat.drop_duplicates(subset=[c_area, c_diu, c_noc])))
+        
+    # 2. DOMINGO
+    df_sun = df_sem[df_sem['DT'].dt.weekday == 6]
+    if not df_sun.empty:
+        fecha_str = f"DOMINGO {df_sun['DT'].iloc[0].strftime('%d/%m/%Y')}"
+        grupos.append((fecha_str, df_sun.drop_duplicates(subset=[c_area, c_diu, c_noc])))
+        
+    # 3. LUNES A VIERNES (COMPACTADO)
+    df_lv = df_sem[df_sem['DT'].dt.weekday < 5]
+    if not df_lv.empty:
+        min_dt = df_lv['DT'].min()
+        max_dt = df_lv['DT'].max()
+        if min_dt != max_dt:
+            fecha_str = f"LUNES {min_dt.strftime('%d/%m/%Y')} AL VIERNES {max_dt.strftime('%d/%m/%Y')}"
+        else:
+            dias_es = ["LUNES", "MARTES", "MIÉRCOLES", "JUEVES", "VIERNES"]
+            fecha_str = f"{dias_es[min_dt.weekday()]} {min_dt.strftime('%d/%m/%Y')}"
+        grupos.append((fecha_str, df_lv.drop_duplicates(subset=[c_area, c_diu, c_noc])))
+        
+    return grupos, c_area, c_diu, c_noc, c_cant
 
 # ==========================================
 # INTERFAZ PRINCIPAL
@@ -378,10 +420,8 @@ with t_cierres:
                     hora_ap = a_12h(r['Apertura'])
                     hora_ju = a_12h(r['Juanita'])
                     hora_dr = a_12h(r['Drotaca'])
-                    
                     color_ap = "#2e7d32" if "06:" in hora_ap or "07:00" in hora_ap else "#000"
                     color_ju = "#e65100" if hora_ju != "N/R" else "#777"
-                    
                     filas_gral_html += f"""
                     <tr style="text-align: center;">
                         <td style="padding: 15px; font-weight: bold; background-color: #f8f9fa; border: 1px solid #000;">{r['Día'].upper()}<br><small style="color:#666;">{r['Fecha']}</small></td>
@@ -402,9 +442,6 @@ with t_cierres:
                         table {{ width: 100%; border-collapse: collapse; }}
                         th {{ background: #f1f4f9; color: {color_azul}; padding: 15px; text-transform: uppercase; font-size: 12px; border: 1px solid #000; }}
                         .footer-promedios {{ background: #f1f4f9; padding: 20px; display: flex; justify-content: space-around; border-top: 2px solid {color_azul}; }}
-                        .promedio-box {{ text-align: center; }}
-                        .promedio-label {{ font-size: 12px; font-weight: bold; color: #555; text-transform: uppercase; }}
-                        .promedio-val {{ font-size: 20px; font-weight: 900; color: {color_azul}; }}
                     </style>
                 </head><body>
                     <div style="text-align: center; margin-bottom: 15px;">
@@ -423,14 +460,8 @@ with t_cierres:
                             <tbody>{filas_gral_html}</tbody>
                         </table>
                         <div class="footer-promedios">
-                            <div class="promedio-box">
-                                <div class="promedio-label">📊 Promedio Cierre Drotaca</div>
-                                <div class="promedio-val" style="color: #2e7d32;">{prom_drotaca}</div>
-                            </div>
-                            <div class="promedio-box">
-                                <div class="promedio-label">📊 Promedio Cierre Juanita</div>
-                                <div class="promedio-val" style="color: #e65100;">{prom_juanita}</div>
-                            </div>
+                            <div style="text-align: center;"><div style="font-size: 12px; font-weight: bold; color: #555; text-transform: uppercase;">📊 Promedio Cierre Drotaca</div><div style="font-size: 20px; font-weight: 900; color: #2e7d32;">{prom_drotaca}</div></div>
+                            <div style="text-align: center;"><div style="font-size: 12px; font-weight: bold; color: #555; text-transform: uppercase;">📊 Promedio Cierre Juanita</div><div style="font-size: 20px; font-weight: 900; color: #e65100;">{prom_juanita}</div></div>
                         </div>
                     </div>
                 """
@@ -480,14 +511,7 @@ with t_cierres:
                             </div>
                         </div>
                         <script>
-                            function capturar(id, filename) {{
-                                html2canvas(document.getElementById(id), {{ scale: 2 }}).then(canvas => {{
-                                    var link = document.createElement('a');
-                                    link.download = filename;
-                                    link.href = canvas.toDataURL();
-                                    link.click();
-                                }});
-                            }}
+                            function capturar(id, filename) {{ html2canvas(document.getElementById(id), {{ scale: 2 }}).then(canvas => {{ var link = document.createElement('a'); link.download = filename; link.href = canvas.toDataURL(); link.click(); }}); }}
                         </script>
                     </body></html>
                     """
@@ -496,21 +520,15 @@ with t_cierres:
 
                 st.markdown("---")
                 st.subheader("📱 Resumen para WhatsApp (Cierres y Departamentos)")
-                msg_w = f"⏱️ *Reporte de Cierres Semanal - Drotaca 2.0*\n📅 Semana: {int(num_sem)} ({rango_fechas_lv})\n\n"
-                msg_w += f"📍 *Cronometría de la Droguería:*\n"
-                msg_w += f"🔹 Promedio Cierre General: *{prom_drotaca}*\n"
-                msg_w += f"🔹 Promedio Cierre Juanita: *{prom_juanita}*\n\n"
-                
+                msg_w = f"⏱️ *Reporte de Cierres Semanal - Drotaca 2.0*\n📅 Semana: {int(num_sem)} ({rango_fechas_lv})\n\n📍 *Cronometría de la Droguería:*\n🔹 Promedio Cierre General: *{prom_drotaca}*\n🔹 Promedio Cierre Juanita: *{prom_juanita}*\n\n"
                 if not pivot_deps.empty:
                     msg_w += f"📍 *Top 10 Áreas que salieron más tarde (Promedio):*\n"
                     try:
                         pivot_deps['Para_Ordenar'] = pd.to_datetime(pivot_deps['Promedio'], format="%I:%M %p", errors='coerce')
                         top_10 = pivot_deps.sort_values(by='Para_Ordenar', ascending=False).head(10)
                         for dep, row in top_10.iterrows():
-                            if pd.notna(row['Para_Ordenar']):
-                                msg_w += f"🔹 {str(dep).title()}: *{row['Promedio']}*\n"
+                            if pd.notna(row['Para_Ordenar']): msg_w += f"🔹 {str(dep).title()}: *{row['Promedio']}*\n"
                     except: pass
-                        
                 msg_w += f"\n✅ Tablas de auditoría detalladas adjuntas en imagen."
                 st.code(msg_w, language="markdown")
 
@@ -522,8 +540,7 @@ with t_comensales:
     if st.button("🍽️ Generar Auditoría de Comensales", type="primary", use_container_width=True):
         with st.spinner("Procesando datos de comedor..."):
             df_com_raw = extraer_datos("PIZARRA_COMENSALES")
-            if df_com_raw.empty:
-                st.error("No se pudo acceder a la hoja PIZARRA_COMENSALES o está vacía.")
+            if df_com_raw.empty: st.error("No se pudo acceder a la hoja PIZARRA_COMENSALES.")
             else:
                 c_fecha_c = buscar_columna_estricta(df_com_raw, ['fecha', 'timestamp'])
                 if c_fecha_c:
@@ -535,9 +552,7 @@ with t_comensales:
                     else: df_com_raw['Num_Semana'] = num_sem
                 
                 df_com = df_com_raw[df_com_raw['Num_Semana'] == num_sem].copy()
-                
-                if df_com.empty:
-                    st.warning(f"No hay registros de comensales para la Semana {int(num_sem)}.")
+                if df_com.empty: st.warning(f"No hay registros de comensales para la Semana {int(num_sem)}.")
                 else:
                     if c_fecha_c:
                         df_com = df_com.dropna(subset=['Fecha_DT'])
@@ -554,108 +569,46 @@ with t_comensales:
                     for c in [c_des, c_alm, c_cen]:
                         if c: df_com[c] = pd.to_numeric(df_com[c], errors='coerce').fillna(0)
                     
-                    df_grp = df_com.groupby(c_dep).agg({
-                        c_des: 'sum' if c_des else lambda x: 0,
-                        c_alm: 'sum' if c_alm else lambda x: 0,
-                        c_cen: 'sum' if c_cen else lambda x: 0
-                    }).reset_index()
-                    
+                    df_grp = df_com.groupby(c_dep).agg({c_des: 'sum' if c_des else lambda x: 0, c_alm: 'sum' if c_alm else lambda x: 0, c_cen: 'sum' if c_cen else lambda x: 0}).reset_index()
                     df_grp['Total_Servicios'] = df_grp[c_des] + df_grp[c_alm] + df_grp[c_cen]
-                    df_grp = df_grp[df_grp['Total_Servicios'] > 0]
-                    df_grp = df_grp.sort_values('Total_Servicios', ascending=False)
-                    
+                    df_grp = df_grp[df_grp['Total_Servicios'] > 0].sort_values('Total_Servicios', ascending=False)
                     gran_total = df_grp['Total_Servicios'].sum()
                     df_grp['%'] = (df_grp['Total_Servicios'] / gran_total * 100).fillna(0)
                     
-                    tot_des = df_grp[c_des].sum() if c_des else 0
-                    tot_alm = df_grp[c_alm].sum() if c_alm else 0
-                    tot_cen = df_grp[c_cen].sum() if c_cen else 0
+                    tot_des = df_grp[c_des].sum() if c_des else 0; tot_alm = df_grp[c_alm].sum() if c_alm else 0; tot_cen = df_grp[c_cen].sum() if c_cen else 0
 
                     filas_com_html = ""
                     for _, r in df_grp.iterrows():
-                        filas_com_html += f"""
-                        <tr style="text-align: center;">
-                            <td style="padding: 12px; font-weight: bold; text-align: left; background-color: #e3f2fd; color: #333; border: 1px solid #000;">{r[c_dep]}</td>
-                            <td style="padding: 12px; color: #555; border: 1px solid #000;">{f_p(r[c_des]) if c_des else '0'}</td>
-                            <td style="padding: 12px; color: #555; border: 1px solid #000;">{f_p(r[c_alm]) if c_alm else '0'}</td>
-                            <td style="padding: 12px; color: #555; border: 1px solid #000;">{f_p(r[c_cen]) if c_cen else '0'}</td>
-                            <td style="padding: 12px; font-weight: 900; font-size: 15px; color: #000; border: 1px solid #000;">{f_p(r['Total_Servicios'])}</td>
-                            <td style="padding: 12px; font-weight: bold; color: #555; border: 1px solid #000;">{r['%']:.1f}%</td>
-                        </tr>
-                        """
+                        filas_com_html += f"<tr style='text-align: center;'><td style='padding: 12px; font-weight: bold; text-align: left; background-color: #e3f2fd; color: #333; border: 1px solid #000;'>{r[c_dep]}</td><td style='padding: 12px; color: #555; border: 1px solid #000;'>{f_p(r[c_des]) if c_des else '0'}</td><td style='padding: 12px; color: #555; border: 1px solid #000;'>{f_p(r[c_alm]) if c_alm else '0'}</td><td style='padding: 12px; color: #555; border: 1px solid #000;'>{f_p(r[c_cen]) if c_cen else '0'}</td><td style='padding: 12px; font-weight: 900; font-size: 15px; color: #000; border: 1px solid #000;'>{f_p(r['Total_Servicios'])}</td><td style='padding: 12px; font-weight: bold; color: #555; border: 1px solid #000;'>{r['%']:.1f}%</td></tr>"
                         
                     html_pizarra_comensales = f"""
-                    <html><head>
-                        <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-                        <style>
-                            @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&display=swap');
-                            body {{ font-family: 'Montserrat', sans-serif; padding: 20px; background-color: #f0f2f6; }}
-                            .pizarra {{ background: white; width: 900px; margin: auto; border-radius: 15px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid {color_azul}; }}
-                            .header {{ background: {color_azul}; color: white; padding: 30px; display: flex; justify-content: space-between; align-items: center; }}
-                            table {{ width: 100%; border-collapse: collapse; }}
-                            th {{ background: #e3f2fd; color: {color_azul}; padding: 15px; text-transform: uppercase; font-size: 12px; border: 1px solid #000; }}
-                            .footer-totales {{ background: #bbdefb; padding: 15px; display: flex; justify-content: space-around; border-top: 3px solid {color_azul}; font-weight: 900; color: #0d47a1; }}
-                            .total-box {{ text-align: center; }}
-                        </style>
-                    </head><body>
-                        <div style="text-align: center; margin-bottom: 15px;">
-                            <button onclick="capturarComensales()" style="background: {color_azul}; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR PIZARRA COMENSALES</button>
-                        </div>
-                        <div class="pizarra" id="pizarra-comensales">
-                            <div class="header">
+                    <html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head><body>
+                        <div style="text-align: center; margin-bottom: 15px;"><button onclick="capturarComensales()" style="background: {color_azul}; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR PIZARRA COMENSALES</button></div>
+                        <div id="pizarra-comensales" style="background: white; width: 900px; margin: auto; border-radius: 15px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid {color_azul}; font-family: 'Montserrat', sans-serif;">
+                            <div style="background: {color_azul}; color: white; padding: 30px; display: flex; justify-content: space-between; align-items: center;">
                                 <img src="{logo_b64}" style="height: 50px;">
-                                <div style="text-align: right;">
-                                    <div style="font-size: 22px; font-weight: 900; letter-spacing: 1px;">AUDITORÍA DE COMENSALES</div>
-                                    <div style="font-size: 14px; font-weight: bold; opacity: 0.9;">SEMANA {int(num_sem)} ({rango_fechas_lv})</div>
-                                </div>
+                                <div style="text-align: right;"><div style="font-size: 22px; font-weight: 900; letter-spacing: 1px;">AUDITORÍA DE COMENSALES</div><div style="font-size: 14px; font-weight: bold; opacity: 0.9;">SEMANA {int(num_sem)} ({rango_fechas_lv})</div></div>
                             </div>
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th style="text-align: left;">DEPARTAMENTO</th>
-                                        <th>DESAYUNOS</th>
-                                        <th>ALMUERZOS</th>
-                                        <th>CENAS</th>
-                                        <th style="background: #bbdefb;">TOTAL PLATOS</th>
-                                        <th>% CONSUMO</th>
-                                    </tr>
-                                </thead>
+                            <table style="width: 100%; border-collapse: collapse;">
+                                <thead><tr><th style="background: #e3f2fd; color: {color_azul}; padding: 15px; text-align: left; border: 1px solid #000;">DEPARTAMENTO</th><th style="background: #e3f2fd; color: {color_azul}; padding: 15px; border: 1px solid #000;">DESAYUNOS</th><th style="background: #e3f2fd; color: {color_azul}; padding: 15px; border: 1px solid #000;">ALMUERZOS</th><th style="background: #e3f2fd; color: {color_azul}; padding: 15px; border: 1px solid #000;">CENAS</th><th style="background: #bbdefb; color: {color_azul}; padding: 15px; border: 1px solid #000;">TOTAL PLATOS</th><th style="background: #e3f2fd; color: {color_azul}; padding: 15px; border: 1px solid #000;">% CONSUMO</th></tr></thead>
                                 <tbody>{filas_com_html}</tbody>
                             </table>
-                            <div class="footer-totales">
-                                <div class="total-box"><span style="font-size:12px; color:#555;">TOT. DESAYUNOS</span><br><span style="font-size:20px;">{f_p(tot_des)}</span></div>
-                                <div class="total-box"><span style="font-size:12px; color:#555;">TOT. ALMUERZOS</span><br><span style="font-size:20px;">{f_p(tot_alm)}</span></div>
-                                <div class="total-box"><span style="font-size:12px; color:#555;">TOT. CENAS</span><br><span style="font-size:20px;">{f_p(tot_cen)}</span></div>
-                                <div class="total-box" style="color:{color_azul};"><span style="font-size:12px;">GRAN TOTAL</span><br><span style="font-size:24px;">{f_p(gran_total)}</span></div>
+                            <div style="background: #bbdefb; padding: 15px; display: flex; justify-content: space-around; border-top: 3px solid {color_azul}; font-weight: 900; color: #0d47a1;">
+                                <div style="text-align: center;"><span style="font-size:12px; color:#555;">TOT. DESAYUNOS</span><br><span style="font-size:20px;">{f_p(tot_des)}</span></div>
+                                <div style="text-align: center;"><span style="font-size:12px; color:#555;">TOT. ALMUERZOS</span><br><span style="font-size:20px;">{f_p(tot_alm)}</span></div>
+                                <div style="text-align: center;"><span style="font-size:12px; color:#555;">TOT. CENAS</span><br><span style="font-size:20px;">{f_p(tot_cen)}</span></div>
+                                <div style="text-align: center; color:{color_azul};"><span style="font-size:12px;">GRAN TOTAL</span><br><span style="font-size:24px; color:#000;">{f_p(gran_total)}</span></div>
                             </div>
                         </div>
-                        <script>
-                            function capturarComensales() {{
-                                html2canvas(document.getElementById('pizarra-comensales'), {{ scale: 2 }}).then(canvas => {{
-                                    var link = document.createElement('a');
-                                    link.download = 'Comensales_Semana_{int(num_sem)}.png';
-                                    link.href = canvas.toDataURL();
-                                    link.click();
-                                }});
-                            }}
-                        </script>
+                        <script>function capturarComensales() {{ html2canvas(document.getElementById('pizarra-comensales'), {{ scale: 2 }}).then(canvas => {{ var link = document.createElement('a'); link.download = 'Comensales_Semana_{int(num_sem)}.png'; link.href = canvas.toDataURL(); link.click(); }}); }}</script>
                     </body></html>
                     """
                     components.html(html_pizarra_comensales, height=1200, scrolling=True)
 
                     st.markdown("---")
                     st.subheader("📱 Resumen para WhatsApp (Comedor)")
-                    msg_c = f"🍽️ *Reporte Semanal de Comensales - Drotaca*\n📅 Semana: {int(num_sem)} ({rango_fechas_lv})\n\n"
-                    msg_c += f"*RESUMEN GENERAL:*\n"
-                    msg_c += f"🍳 Desayunos Servidos: *{f_p(tot_des)}*\n"
-                    msg_c += f"🍲 Almuerzos Servidos: *{f_p(tot_alm)}*\n"
-                    msg_c += f"🍝 Cenas Servidas: *{f_p(tot_cen)}*\n"
-                    msg_c += f"📊 Gran Total de Platos: *{f_p(gran_total)}*\n\n"
-                    
-                    msg_c += f"*TOP 5 DEPARTAMENTOS DE MAYOR CONSUMO:*\n"
-                    for idx, r in df_grp.head(5).reset_index().iterrows():
-                        msg_c += f"{idx+1}. {r[c_dep].title()} - {f_p(r['Total_Servicios'])} Platos ({r['%']:.1f}%)\n"
-                        
+                    msg_c = f"🍽️ *Reporte Semanal de Comensales - Drotaca*\n📅 Semana: {int(num_sem)} ({rango_fechas_lv})\n\n*RESUMEN GENERAL:*\n🍳 Desayunos Servidos: *{f_p(tot_des)}*\n🍲 Almuerzos Servidos: *{f_p(tot_alm)}*\n🍝 Cenas Servidas: *{f_p(tot_cen)}*\n📊 Gran Total de Platos: *{f_p(gran_total)}*\n\n*TOP 5 DEPARTAMENTOS DE MAYOR CONSUMO:*\n"
+                    for idx, r in df_grp.head(5).reset_index().iterrows(): msg_c += f"{idx+1}. {r[c_dep].title()} - {f_p(r['Total_Servicios'])} Platos ({r['%']:.1f}%)\n"
                     msg_c += f"\n✅ Pizarra detallada de comedor adjunta."
                     st.code(msg_c, language="markdown")
 
@@ -669,73 +622,63 @@ with t_guardias:
             
             # --- GUARDIA DE SEGURIDAD ---
             df_seg_raw = extraer_datos("SEG_ROL_GUARDIA")
-            if df_seg_raw.empty:
-                st.error("No se encontraron registros en SEG_ROL_GUARDIA.")
+            if df_seg_raw.empty: st.error("No se encontraron registros en SEG_ROL_GUARDIA.")
             else:
-                df_seg = filtrar_ultima_carga_semana(df_seg_raw, num_sem)
-                if df_seg.empty:
-                    st.warning(f"No hay registros de Seguridad para la semana {int(num_sem)}.")
+                grupos_seg, c_area, c_diu, c_noc, c_cant = agrupar_rol_compacto(df_seg_raw, num_sem)
+                if not grupos_seg: st.warning(f"No hay registros de Seguridad para la semana {int(num_sem)}.")
                 else:
-                    c_fecha = buscar_columna_estricta(df_seg, ['fecha'])
-                    c_area = buscar_columna_estricta(df_seg, ['area', 'área'])
-                    c_cant = buscar_columna_estricta(df_seg, ['cantidad', 'cant'])
-                    c_diu = buscar_columna_estricta(df_seg, ['diurno'])
-                    c_noc = buscar_columna_estricta(df_seg, ['nocturno'])
-                    
-                    if c_fecha and c_area:
+                    for fecha_str, df_grupo in grupos_seg:
                         filas_seg_html = ""
-                        for f_titulo in df_seg[c_fecha].unique():
-                            f_dia = df_seg[df_seg[c_fecha] == f_titulo]
-                            filas_seg_html += f"<tr><td colspan='4' style='background-color:#1565c0; color:white; font-weight:bold; padding:10px; text-align:center;'>OFICIALES DE SEGURIDAD - {str(f_titulo).upper()}</td></tr>"
-                            for _, r in f_dia.iterrows():
-                                d_list = [f"✓ {x.strip()}" for x in str(r.get(c_diu, '')).split('\n') if x.strip()]
-                                n_list = [f"✓ {x.strip()}" for x in str(r.get(c_noc, '')).split('\n') if x.strip()]
-                                d_html = "<br>".join(d_list)
-                                n_html = "<br>".join(n_list)
-                                cant = str(r.get(c_cant, '')) if pd.notna(r.get(c_cant, '')) else ""
-                                filas_seg_html += f"<tr><td style='padding:10px; border:1px solid #000; font-weight:bold;'>{r.get(c_area, '')}</td><td style='padding:10px; border:1px solid #000; text-align:center;'>{cant}</td><td style='padding:10px; border:1px solid #000;'>{d_html}</td><td style='padding:10px; border:1px solid #000;'>{n_html}</td></tr>"
+                        for _, r in df_grupo.iterrows():
+                            d_list = [f"✓ {x.strip()}" for x in str(r.get(c_diu, '')).split('\n') if x.strip()]
+                            n_list = [f"✓ {x.strip()}" for x in str(r.get(c_noc, '')).split('\n') if x.strip()]
+                            d_html = "<br>".join(d_list)
+                            n_html = "<br>".join(n_list)
+                            cant = str(r.get(c_cant, '')) if c_cant and pd.notna(r.get(c_cant, '')) else ""
+                            filas_seg_html += f"<tr><td style='padding:10px; border:1px solid #000; font-weight:bold; color:{color_azul}; vertical-align:top;'>{r.get(c_area, '')}</td><td style='padding:10px; border:1px solid #000; text-align:center; font-weight:bold; vertical-align:top;'>{cant}</td><td style='padding:10px; border:1px solid #000; vertical-align:top;'>{d_html}</td><td style='padding:10px; border:1px solid #000; vertical-align:top;'>{n_html}</td></tr>"
 
                         html_piz_seg = f"""
                         <html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head>
-                        <body style="font-family: Arial, sans-serif; background-color: #f0f2f6;">
+                        <body style="font-family: Arial, sans-serif; background-color: #f0f2f6; padding: 20px;">
                         <div style="text-align: center; margin-bottom: 15px;">
-                            <button onclick="capSeg()" style="background: {color_azul}; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR ROL SEGURIDAD</button>
+                            <button onclick="capSeg('{fecha_str.split()[0]}')" style="background: {color_azul}; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR {fecha_str.split()[0]}</button>
                         </div>
-                        <div id="piz-seg" style="background:white; width:800px; margin:auto; border:2px solid {color_azul}; border-radius:12px; overflow:hidden;">
+                        <div id="piz-seg-{fecha_str.split()[0]}" style="background:white; width:800px; margin:auto; border:2px solid {color_azul}; border-radius:12px; overflow:hidden; margin-bottom: 40px;">
                             <div style="background-color: {color_azul}; color: white; padding: 25px; display: flex; align-items: center; justify-content: space-between;">
                                 <img src="{logo_b64}" style="height: 50px;">
-                                <div style="text-align: right;"><h2 style="margin:0; font-size:22px;">ROL DE GUARDIA SEMANAL</h2><p style="margin:0; font-size:14px;">SEGURIDAD INTEGRAL - SEMANA {int(num_sem)}</p></div>
+                                <div style="text-align: right;"><h2 style="margin:0; font-size:22px;">ROL GUARDIA SEMANAL</h2><p style="margin:0; font-size:14px;">SEGURIDAD INTEGRAL - SEMANA {int(num_sem)}</p></div>
                             </div>
-                            <div style="padding: 20px;">
+                            <div style="padding: 0;">
                                 <table style="width:100%; border-collapse:collapse; font-size:14px;">
-                                    <thead><tr style="background:#e8eaf6; color:{color_azul};"><th style="padding:10px; border:1px solid #000; text-align:left;">ÁREA ASIGNADA</th><th style="padding:10px; border:1px solid #000; text-align:center;">CANT.</th><th style="padding:10px; border:1px solid #000; text-align:left;">TURNO DIURNO</th><th style="padding:10px; border:1px solid #000; text-align:left;">TURNO NOCTURNO</th></tr></thead>
+                                    <thead>
+                                        <tr><th colspan="4" style="background:#e3f2fd; color:{color_azul}; padding:10px; border:1px solid #000; font-size:15px;">OFICIALES DE SEGURIDAD - {fecha_str}</th></tr>
+                                        <tr style="background:#e8eaf6; color:{color_azul};"><th style="padding:10px; border:1px solid #000; text-align:left; width:25%;">ÁREA ASIGNADA</th><th style="padding:10px; border:1px solid #000; text-align:center; width:10%;">CANT.</th><th style="padding:10px; border:1px solid #000; text-align:left; width:32%;">TURNO DIURNO</th><th style="padding:10px; border:1px solid #000; text-align:left; width:33%;">TURNO NOCTURNO</th></tr>
+                                    </thead>
                                     <tbody>{filas_seg_html}</tbody>
                                 </table>
                             </div>
                         </div>
-                        <script>function capSeg() {{ html2canvas(document.getElementById('piz-seg'), {{scale: 2}}).then(canvas => {{ var link = document.createElement('a'); link.download = 'Seguridad_Semana_{int(num_sem)}.png'; link.href = canvas.toDataURL(); link.click(); }}); }}</script>
+                        <script>function capSeg(id) {{ html2canvas(document.getElementById('piz-seg-'+id), {{scale: 2}}).then(canvas => {{ var link = document.createElement('a'); link.download = 'Seguridad_'+id+'.png'; link.href = canvas.toDataURL(); link.click(); }}); }}</script>
                         </body></html>
                         """
-                        components.html(html_piz_seg, height=900, scrolling=True)
+                        components.html(html_piz_seg, height=450 + (len(df_grupo)*45), scrolling=True)
 
-                        msg_seg = f"🛡️ *ROL DE GUARDIA DE SEGURIDAD*\n📅 Semana: {int(num_sem)}\n\n✅ Guardias asignadas y programadas exitosamente.\n📸 Ver distribución detallada en la imagen adjunta."
-                        st.code(msg_seg, language="markdown")
+                    msg_seg = f"🛡️ *ROL DE GUARDIA DE SEGURIDAD*\n📅 Semana: {int(num_sem)}\n\n✅ Guardias asignadas y compactadas exitosamente.\n📸 Ver distribución detallada en las imágenes adjuntas."
+                    st.code(msg_seg, language="markdown")
             
             st.markdown("---")
 
             # --- GUARDIA DE FLOTA ---
             df_flo_raw = extraer_datos("GUARDIA_FLOTA")
-            if df_flo_raw.empty:
-                st.error("No se encontraron registros en GUARDIA_FLOTA.")
+            if df_flo_raw.empty: st.error("No se encontraron registros en GUARDIA_FLOTA.")
             else:
-                df_flo = filtrar_ultima_carga_semana(df_flo_raw, num_sem)
-                if df_flo.empty:
-                    st.warning(f"No hay registros de Flota para la semana {int(num_sem)}.")
+                df_flo = filtrar_ultima_carga(df_flo_raw, num_sem)
+                if df_flo.empty: st.warning(f"No hay registros de Flota para la semana {int(num_sem)}.")
                 else:
-                    c_nom = buscar_columna_estricta(df_flo, ['nombre', 'personal'])
-                    c_car = buscar_columna_estricta(df_flo, ['cargo'])
-                    c_dia = buscar_columna_estricta(df_flo, ['dia', 'día'], evitar=['horario'])
-                    c_hor = buscar_columna_estricta(df_flo, ['horario'])
+                    c_nom = buscar_columna_estricta(df_flo, ['supervisor', 'nombre', 'personal'])
+                    c_car = buscar_columna_estricta(df_flo, ['turno', 'cargo'])
+                    c_dia = buscar_columna_estricta(df_flo, ['dia', 'dias', 'día', 'días'], evitar=['hora', 'horario'])
+                    c_hor = buscar_columna_estricta(df_flo, ['hora', 'horario', 'horas'])
 
                     if c_nom and c_car:
                         filas_flo_html = ""
@@ -774,24 +717,21 @@ with t_guardias:
 
             # --- GUARDIA DE MONITOREO ---
             df_mon_raw = extraer_datos("GUARDIA_MONITOREO")
-            if df_mon_raw.empty:
-                st.error("No se encontraron registros en GUARDIA_MONITOREO.")
+            if df_mon_raw.empty: st.error("No se encontraron registros en GUARDIA_MONITOREO.")
             else:
-                df_mon = filtrar_ultima_carga_semana(df_mon_raw, num_sem)
-                if df_mon.empty:
-                    st.warning(f"No hay registros de Monitoreo para la semana {int(num_sem)}.")
+                df_mon = filtrar_ultima_carga(df_mon_raw, num_sem)
+                if df_mon.empty: st.warning(f"No hay registros de Monitoreo para la semana {int(num_sem)}.")
                 else:
-                    c_nom = buscar_columna_estricta(df_mon, ['nombre', 'turno'])
-                    c_hor = buscar_columna_estricta(df_mon, ['horario', 'dia', 'día'])
-                    c_ram = buscar_columna_estricta(df_mon, ['ramon', 'ramón', 'responsable'])
+                    c_nom = buscar_columna_estricta(df_mon, ['analista', 'nombre', 'turno'])
+                    c_hor = buscar_columna_estricta(df_mon, ['horario', 'hora'])
+                    c_ram = buscar_columna_estricta(df_mon, ['unidades señor ramon', 'ramon', 'ramón', 'responsable', 'unidades'])
 
                     if c_nom and c_hor:
                         filas_mon_html = ""
                         uni_ramon = ""
                         for _, r in df_mon.iterrows():
                             filas_mon_html += f"<tr><td style='padding:12px; border:1px solid #000; font-weight:bold; font-size:15px; color:{color_azul};'>{r.get(c_nom, '')}</td><td style='padding:12px; border:1px solid #000; font-size:14px; font-weight:bold;'>{r.get(c_hor, '')}</td></tr>"
-                            if c_ram and not uni_ramon and pd.notna(r.get(c_ram, '')):
-                                uni_ramon = str(r.get(c_ram, ''))
+                            if c_ram and not uni_ramon and pd.notna(r.get(c_ram, '')): uni_ramon = str(r.get(c_ram, ''))
 
                         box_ramon = f"<div style='background-color:#f8f9fa; padding:15px; border-left:5px solid #e65100; margin-top:20px; border-radius:5px;'><h4 style='margin:0 0 5px 0; color:#333;'>🚛 Unidades del Sr. Ramón</h4><span style='font-size:15px; font-weight:bold; color:{color_azul};'>Responsable: {uni_ramon}</span></div>" if uni_ramon else ""
 
@@ -822,6 +762,5 @@ with t_guardias:
                         msg_mon = f"🖥️ *GUARDIA DE MONITOREO*\n📅 Semana: {int(num_sem)}\n\n🕒 *Guardias Programadas:*\n\n"
                         for _, r in df_mon.iterrows():
                             msg_mon += f"👤 *{r.get(c_nom, '')}*\n⏰ {r.get(c_hor, '')}\n\n"
-                        if uni_ramon:
-                            msg_mon += f"🚛 *Unidades del Sr. Ramón*\nResponsable: {uni_ramon}"
+                        if uni_ramon: msg_mon += f"🚛 *Unidades del Sr. Ramón*\nResponsable: {uni_ramon}"
                         st.code(msg_mon, language="markdown")
