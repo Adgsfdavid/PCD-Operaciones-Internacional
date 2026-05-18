@@ -1048,10 +1048,10 @@ with t_combustible:
                     st.code(msg_comb, language="markdown")
                     
 # ---------------------------------------------------------
-# PESTAÑA 7: PIZARRA DE RESULTADO DE SURTIDO Y EXTRACCIÓN (LAS 5 CATEGORÍAS MAESTRAS)
+# PESTAÑA 7: PIZARRA DE RESULTADO DE SURTIDO Y EXTRACCIÓN (VERSIÓN ULTRA SIMPLE)
 # ---------------------------------------------------------
 with t_surtido:
-    st.info("Resumen directo del consumo dividido en las 5 categorías maestras de la operación.")
+    st.info("Resumen directo y simplificado del consumo de combustible agrupado por TIPO DE SURTIDO.")
     
     if st.button("⛽ Calcular Resumen Semanal de Surtido", type="primary", use_container_width=True):
         with st.spinner("Procesando transacciones de surtido desde la base de datos..."):
@@ -1068,6 +1068,7 @@ with t_surtido:
                 df_surt_raw['Num_Semana'] = df_surt_raw['Fecha_DT'].dt.isocalendar().week
                 df_surt_raw['Ano_Calc'] = df_surt_raw['Fecha_DT'].dt.isocalendar().year
                 
+                # Filtrar semana y año
                 df_surt = df_surt_raw[(df_surt_raw['Num_Semana'] == num_sem) & (df_surt_raw['Ano_Calc'] == ano_sel)].sort_values('Fecha_DT').copy()
                 
                 if df_surt.empty:
@@ -1085,9 +1086,7 @@ with t_surtido:
 
                     df_surt['LITROS'] = df_surt['LITROS'].apply(limpiar_litros)
                     df_surt['COMBUSTIBLE'] = df_surt['COMBUSTIBLE'].astype(str).str.strip().str.upper()
-                    df_surt['GRUPO'] = df_surt['GRUPO'].astype(str).str.strip().str.upper()
                     df_surt['TIPO_SURTIDO'] = df_surt['TIPO_SURTIDO'].astype(str).str.strip().str.upper()
-                    df_surt['SITIO'] = df_surt['SITIO'].astype(str).str.strip().str.upper()
 
                     # --- KPIs GENERALES ---
                     total_gasolina = df_surt[df_surt['COMBUSTIBLE'] == 'GASOLINA']['LITROS'].sum()
@@ -1097,86 +1096,36 @@ with t_surtido:
                     fecha_inicio_surt = df_surt['Fecha_DT'].min().strftime('%d/%m/%Y')
                     fecha_fin_surt = df_surt['Fecha_DT'].max().strftime('%d/%m/%Y')
 
-                    # =========================================================
-                    # ALGORITMO DE LAS 5 CATEGORÍAS MAESTRAS
-                    # =========================================================
-                    df_surt['CATEGORIA'] = '6. OTROS / PLANTA ELÉCTRICA' # Todo lo que no encaje cae aquí
+                    # --- CREACIÓN DINÁMICA DE BLOQUES POR TIPO DE SURTIDO ---
+                    tipos_surtido = sorted(df_surt['TIPO_SURTIDO'].unique())
+                    bloques_html = ""
                     
-                    # 4. SURTIDO CENTRO
-                    cond_centro = df_surt['GRUPO'].str.contains('CENTRO')
-                    df_surt.loc[cond_centro, 'CATEGORIA'] = '4. SURTIDOS CENTRO'
-
-                    # 5. SURTIDO OCCIDENTE
-                    cond_occ = df_surt['GRUPO'].str.contains('OCCIDENTE')
-                    df_surt.loc[cond_occ, 'CATEGORIA'] = '5. SURTIDOS OCCIDENTE'
-
-                    # 2. BIDONES DROTACA 2.0 (Todo lo que sale del sitio Drotaca 2.0)
-                    cond_drotaca2 = df_surt['SITIO'] == 'DROTACA 2.0'
-                    df_surt.loc[cond_drotaca2, 'CATEGORIA'] = '2. BIDONES DROTACA 2.0'
-
-                    # 3. EXTRACCION CIUDAD DROTACA (Todo lo que sale del Tanque en base)
-                    cond_ciudad = df_surt['SITIO'] == 'CIUDAD DROTACA'
-                    df_surt.loc[cond_ciudad, 'CATEGORIA'] = '3. EXTRACCIÓN CIUDAD DROTACA'
-
-                    # 1. ESTACION DE SERVICIO ORIENTE (Ruta Corta en E/S)
-                    cond_es_oriente = (df_surt['GRUPO'].isin(['RUTA CORTA', 'ORIENTE'])) & (df_surt['TIPO_SURTIDO'] == 'ESTACION DE SERVICIO')
-                    df_surt.loc[cond_es_oriente, 'CATEGORIA'] = '1. ESTACIÓN DE SERVICIO ORIENTE'
-
-                    # Generador automático de bloques HTML
-                    def generar_bloque_html(df_cat, titulo, color_fondo):
-                        total_cat = df_cat['LITROS'].sum()
-                        if total_cat == 0: return "" # Si no hay nada, no se muestra
+                    for tipo in tipos_surtido:
+                        df_tipo = df_surt[df_surt['TIPO_SURTIDO'] == tipo]
                         
-                        df_g = df_cat.groupby('COMBUSTIBLE')['LITROS'].sum().reset_index()
-                        filas = ""
-                        for _, r in df_g.iterrows():
-                            pct = (r['LITROS'] / total_cat * 100) if total_cat > 0 else 0
-                            filas += f"""
-                            <tr style="background: white;">
-                                <td style="padding: 8px; border: 2px solid #000; font-weight: bold;">{r['COMBUSTIBLE']}</td>
-                                <td style="padding: 8px; border: 2px solid #000; font-weight: 900; text-align: center; color: #333;">{f_p(r['LITROS'])} L</td>
-                                <td style="padding: 8px; border: 2px solid #000; text-align: center; font-weight: bold;">{pct:.1f}%</td>
-                            </tr>
-                            """
-                        return f"""
-                        <div style="width: 48%; margin-bottom: 20px;">
-                            <h3 style="margin: 0; font-size: 14px; background: {color_fondo}; color: white; padding: 10px; text-align: center; border: 2px solid #000; text-transform: uppercase;">{titulo}</h3>
-                            <table style="width: 100%; border-collapse: collapse; font-size: 13px; border: 2px solid #000;">
-                                <thead>
-                                    <tr style="background: #eee;">
-                                        <th style="padding: 8px; border: 2px solid #000; text-align: left;">COMBUSTIBLE</th>
-                                        <th style="padding: 8px; border: 2px solid #000;">LITROS</th>
-                                        <th style="padding: 8px; border: 2px solid #000;">%</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {filas}
-                                    <tr style="background: #e0e0e0;">
-                                        <td style="padding: 8px; border: 2px solid #000; font-weight: bold; text-align: right;">TOTAL:</td>
-                                        <td style="padding: 8px; border: 2px solid #000; font-weight: 900; text-align: center; color: {color_fondo}; font-size: 14px;">{f_p(total_cat)} L</td>
-                                        <td style="padding: 8px; border: 2px solid #000;">100%</td>
-                                    </tr>
-                                </tbody>
+                        tot_gasolina_tipo = df_tipo[df_tipo['COMBUSTIBLE'] == 'GASOLINA']['LITROS'].sum()
+                        tot_gasoil_tipo = df_tipo[df_tipo['COMBUSTIBLE'] == 'GASOIL']['LITROS'].sum()
+                        tot_ambos = df_tipo['LITROS'].sum()
+                        
+                        bloques_html += f"""
+                        <div style="width: 32%; margin-bottom: 20px; box-sizing: border-box;">
+                            <h3 style="margin: 0; font-size: 16px; background: #000; color: white; padding: 12px; text-align: center; border: 2px solid #000; text-transform: uppercase; border-bottom: none;">{tipo}</h3>
+                            <table style="width: 100%; border-collapse: collapse; font-size: 15px; border: 2px solid #000;">
+                                <tr style="background: white;">
+                                    <td style="padding: 12px; border: 2px solid #000; font-weight: bold; color: #d32f2f;">⛽ GASOLINA</td>
+                                    <td style="padding: 12px; border: 2px solid #000; font-weight: 900; text-align: right; color: #000;">{f_p(tot_gasolina_tipo)} L</td>
+                                </tr>
+                                <tr style="background: #f5f5f5;">
+                                    <td style="padding: 12px; border: 2px solid #000; font-weight: bold; color: #424242;">🛢️ GASOIL</td>
+                                    <td style="padding: 12px; border: 2px solid #000; font-weight: 900; text-align: right; color: #000;">{f_p(tot_gasoil_tipo)} L</td>
+                                </tr>
+                                <tr style="background: #e3f2fd;">
+                                    <td style="padding: 12px; border: 2px solid #000; font-weight: 900; text-align: right;">TOTAL:</td>
+                                    <td style="padding: 12px; border: 2px solid #000; font-weight: 900; text-align: right; color: #1565c0; font-size: 18px;">{f_p(tot_ambos)} L</td>
+                                </tr>
                             </table>
                         </div>
                         """
-
-                    # Construir los bloques visuales
-                    bloque_1 = generar_bloque_html(df_surt[df_surt['CATEGORIA'] == '1. ESTACIÓN DE SERVICIO ORIENTE'], "1. E/S ORIENTE (RUTA CORTA)", "#006064")
-                    bloque_2 = generar_bloque_html(df_surt[df_surt['CATEGORIA'] == '2. BIDONES DROTACA 2.0'], "2. BIDONES DROTACA 2.0", "#e65100")
-                    bloque_3 = generar_bloque_html(df_surt[df_surt['CATEGORIA'] == '3. EXTRACCIÓN CIUDAD DROTACA'], "3. EXTRACCIÓN CIUDAD DROTACA", "#c62828")
-                    bloque_4 = generar_bloque_html(df_surt[df_surt['CATEGORIA'] == '4. SURTIDOS CENTRO'], "4. SURTIDOS CENTRO", "#2e7d32")
-                    bloque_5 = generar_bloque_html(df_surt[df_surt['CATEGORIA'] == '5. SURTIDOS OCCIDENTE'], "5. SURTIDOS OCCIDENTE", "#4a148c")
-                    bloque_6 = generar_bloque_html(df_surt[df_surt['CATEGORIA'] == '6. OTROS / PLANTA ELÉCTRICA'], "6. OTROS / PLANTA ELÉCTRICA", "#555555")
-
-                    # Extraer subtotales para WhatsApp
-                    def get_sum(cat): return df_surt[df_surt['CATEGORIA'] == cat]['LITROS'].sum()
-                    t1 = get_sum('1. ESTACIÓN DE SERVICIO ORIENTE')
-                    t2 = get_sum('2. BIDONES DROTACA 2.0')
-                    t3 = get_sum('3. EXTRACCIÓN CIUDAD DROTACA')
-                    t4 = get_sum('4. SURTIDOS CENTRO')
-                    t5 = get_sum('5. SURTIDOS OCCIDENTE')
-                    t6 = get_sum('6. OTROS / PLANTA ELÉCTRICA')
 
                     # --- ESTRUCTURA HTML (SIMPLE Y DIRECTA) ---
                     html_pizarra_surtido = f"""
@@ -1190,37 +1139,32 @@ with t_surtido:
                         <div style="background-color: #000; color: white; padding: 25px 30px; display: flex; align-items: center; justify-content: space-between; border-bottom: 5px solid #d4af37;">
                             <img src="{logo_b64}" style="height: 50px;">
                             <div style="text-align: right;">
-                                <h2 style="margin:0; font-size:24px; font-weight: 900; text-transform: uppercase;">REPORTE OFICIAL DE SURTIDO Y EXTRACCIÓN</h2>
+                                <h2 style="margin:0; font-size:24px; font-weight: 900; text-transform: uppercase;">REPORTE DE SURTIDO POR TIPO</h2>
                                 <p style="margin:5px 0 0 0; font-size:14px; font-weight:bold; color:#d4af37;">SEMANA {int(num_sem)} ({fecha_inicio_surt} AL {fecha_fin_surt})</p>
                             </div>
                         </div>
 
-                        <div style="padding: 20px;">
-                            <div style="display: flex; justify-content: space-between; border: 3px solid #000; background: #eee; margin-bottom: 25px;">
-                                <div style="padding: 15px; width: 33%; text-align: center; border-right: 3px solid #000;">
-                                    <span style="font-size: 13px; font-weight: bold; color: #333;">⛽ TOTAL GASOLINA</span>
-                                    <h2 style="margin: 5px 0 0 0; font-size: 26px; font-weight: 900; color: #000;">{f_p(total_gasolina)} L</h2>
+                        <div style="padding: 30px;">
+                            <div style="display: flex; justify-content: space-between; border: 3px solid #000; background: #eee; margin-bottom: 35px;">
+                                <div style="padding: 20px; width: 33%; text-align: center; border-right: 3px solid #000;">
+                                    <span style="font-size: 14px; font-weight: bold; color: #d32f2f;">⛽ TOTAL GASOLINA</span>
+                                    <h2 style="margin: 5px 0 0 0; font-size: 28px; font-weight: 900; color: #000;">{f_p(total_gasolina)} L</h2>
                                 </div>
-                                <div style="padding: 15px; width: 33%; text-align: center; border-right: 3px solid #000;">
-                                    <span style="font-size: 13px; font-weight: bold; color: #333;">🛢️ TOTAL GASOIL</span>
-                                    <h2 style="margin: 5px 0 0 0; font-size: 26px; font-weight: 900; color: #000;">{f_p(total_gasoil)} L</h2>
+                                <div style="padding: 20px; width: 33%; text-align: center; border-right: 3px solid #000;">
+                                    <span style="font-size: 14px; font-weight: bold; color: #424242;">🛢️ TOTAL GASOIL</span>
+                                    <h2 style="margin: 5px 0 0 0; font-size: 28px; font-weight: 900; color: #000;">{f_p(total_gasoil)} L</h2>
                                 </div>
-                                <div style="padding: 15px; width: 33%; text-align: center; background: #d4af37;">
-                                    <span style="font-size: 13px; font-weight: bold; color: #000;">📊 GRAN TOTAL MOVILIZADO</span>
-                                    <h2 style="margin: 5px 0 0 0; font-size: 26px; font-weight: 900; color: #000;">{f_p(gran_total_surtido)} L</h2>
+                                <div style="padding: 20px; width: 33%; text-align: center; background: #d4af37;">
+                                    <span style="font-size: 14px; font-weight: bold; color: #000;">📊 GRAN TOTAL MOVILIZADO</span>
+                                    <h2 style="margin: 5px 0 0 0; font-size: 28px; font-weight: 900; color: #000;">{f_p(gran_total_surtido)} L</h2>
                                 </div>
                             </div>
 
-                            <div style="display: flex; justify-content: space-between; flex-wrap: wrap;">
-                                {bloque_1}
-                                {bloque_2}
-                                {bloque_3}
-                                {bloque_4}
-                                {bloque_5}
-                                {bloque_6}
+                            <div style="display: flex; flex-wrap: wrap; justify-content: space-between;">
+                                {bloques_html}
                             </div>
                             
-                            <div style="margin-top: 15px; text-align: center; font-size: 11px; color: #333; border-top: 2px solid #000; padding-top: 10px; font-weight: bold;">
+                            <div style="margin-top: 20px; text-align: center; font-size: 12px; color: #333; border-top: 2px solid #000; padding-top: 15px; font-weight: bold;">
                                 CONTROL TOWER LOGÍSTICA - DIRECCIÓN OPERATIVA DROTACA
                             </div>
                         </div>
@@ -1237,25 +1181,25 @@ with t_surtido:
                     </script>
                     </body></html>
                     """
-                    components.html(html_pizarra_surtido, height=680, scrolling=True)
+                    components.html(html_pizarra_surtido, height=650, scrolling=True)
 
                     # --- WHATSAPP (CORTO Y AL PUNTO) ---
                     st.markdown("---")
                     st.subheader("📱 Resumen Ejecutivo para WhatsApp")
                     
-                    msg_surt = f"⛽ *REPORTE OFICIAL DE SURTIDO*\n📅 Semana: {int(num_sem)}\n\n"
+                    msg_surt = f"⛽ *REPORTE DE SURTIDO POR TIPO*\n📅 Semana: {int(num_sem)}\n\n"
                     msg_surt += f"📊 *GRAN TOTAL:* {f_p(gran_total_surtido)} L\n"
                     msg_surt += f"   ⛽ Gasolina: {f_p(total_gasolina)} L\n"
                     msg_surt += f"   🛢️ Gasoil: {f_p(total_gasoil)} L\n\n"
                     
-                    msg_surt += f"*1️⃣ E/S ORIENTE:* {f_p(t1)} L\n"
-                    msg_surt += f"*2️⃣ BIDONES DROTACA 2.0:* {f_p(t2)} L\n"
-                    msg_surt += f"*3️⃣ EXTRACCIÓN C. DROTACA:* {f_p(t3)} L\n"
-                    msg_surt += f"*4️⃣ SURTIDOS CENTRO:* {f_p(t4)} L\n"
-                    msg_surt += f"*5️⃣ SURTIDOS OCCIDENTE:* {f_p(t5)} L\n"
-                    
-                    if t6 > 0:
-                        msg_surt += f"*(Planta Eléctrica/Otros: {f_p(t6)} L)*\n"
+                    msg_surt += "*DESGLOSE POR ORIGEN:*\n"
+                    for tipo in tipos_surtido:
+                        df_tipo = df_surt[df_surt['TIPO_SURTIDO'] == tipo]
+                        tot_g = df_tipo[df_tipo['COMBUSTIBLE'] == 'GASOLINA']['LITROS'].sum()
+                        tot_d = df_tipo[df_tipo['COMBUSTIBLE'] == 'GASOIL']['LITROS'].sum()
+                        msg_surt += f"▪️ *{tipo}:*\n"
+                        if tot_g > 0: msg_surt += f"   - Gasolina: {f_p(tot_g)} L\n"
+                        if tot_d > 0: msg_surt += f"   - Gasoil: {f_p(tot_d)} L\n"
                     
                     msg_surt += "\n✅ *Pizarra detallada en imagen.*"
                     st.code(msg_surt, language="markdown")
