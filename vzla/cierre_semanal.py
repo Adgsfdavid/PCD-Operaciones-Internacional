@@ -178,14 +178,14 @@ def agrupar_rol_compacto(df_seg, num_sem):
 # Función Mapeo de Subregiones para Despachos
 def asignar_subregion(ruta, macro_default):
     r = str(ruta).upper()
-    if any(x in r for x in ["ANACO", "CANTAURA", "CARUPANO", "GUIRIA", "CUMANA", "MATURIN", "PUNTA DE MATA", "ESPARTA", "ARAGUA DE BARCELONA"]): return "ORIENTE NORTE"
-    if any(x in r for x in ["BARCELONA", "CLARINES", "BOLIVAR", "DELTA", "TUMEREMO", "GUARICO", "PARIAGUAN", "ORDAZ", "FELIX", "UPATA", "PIAR", "PARAGUA"]): return "ORIENTE SUR"
+    if any(x in r for x in ["ANACO", "CANTAURA", "CARUPANO", "GUIRIA", "CUMANA", "MATURIN", "PUNTA DE MATA", "ESPARTA", "ARAGUA DE BARCELONA", "CARIPITO", "EL TIGRE"]): return "ORIENTE NORTE"
+    if any(x in r for x in ["BARCELONA", "CLARINES", "BOLIVAR", "DELTA", "TUMEREMO", "GUARICO", "PARIAGUAN", "ORDAZ", "FELIX", "UPATA", "PIAR", "PARAGUA", "VALLE LA PASCUA", "ZARAZA", "MERCEDES"]): return "ORIENTE SUR"
     
     if any(x in r for x in ["CARACAS", "ARAGUA", "SAN JUAN"]): return "CENTRO"
     if any(x in r for x in ["CARABOBO", "COJEDES"]): return "CENTRO OCCIDENTE"
     
     if any(x in r for x in ["LARA 1", "LARA 01", "PORTUGUESA 1", "PORTUGUESA 01", "LARA 2", "LARA 02", "YARACUY"]): return "OCCIDENTE SUR"
-    if any(x in r for x in ["PORTUGUESA 2", "PORTUGUESA 02", "BARINAS"]): return "LOS LLANOS"
+    if any(x in r for x in ["PORTUGUESA 2", "PORTUGUESA 02", "BARINAS", "APURE"]): return "LOS LLANOS"
     if any(x in r for x in ["CORO", "PUNTO FIJO", "MARACAIBO", "CABIMAS", "OJEDA"]): return "OCCIDENTE NORTE"
     if any(x in r for x in ["MERIDA", "TRUJILLO", "PORTUGUESA 3", "PORTUGUESA 03", "TACHIRA"]): return "LOS ANDES / TACHIRA"
     
@@ -300,7 +300,7 @@ with t_trafico:
                         </div>
                         <div class="page" id="pizarra-trafico">
                             <div class="header-master">
-                                <img src="{logo}" style="height: 55px;">
+                                <img src="{logo_b64}" style="height: 55px;">
                                 <div class="header-info">
                                     <h2>AUDITORÍA SEMANAL DE TRÁFICO</h2>
                                     <h3 style="margin: 5px 0 0 0; color: #fff; font-size: 14px;">DEPARTAMENTO DE TRÁFICO</h3>
@@ -791,57 +791,110 @@ with t_guardias:
                         st.code(msg_mon, language="markdown")
 
 # ---------------------------------------------------------
-# PESTAÑA 5: RESUMEN DE DESPACHOS (NUEVO)
+# PESTAÑA 5: RESUMEN DE DESPACHOS (NUEVA LÓGICA DE EXCEL)
 # ---------------------------------------------------------
 with t_despachos:
-    st.info("Genera el Resumen de Desempeño Logístico (Pedidos, Bultos y KMs) por semana.")
+    st.info("Genera el Resumen Logístico de Lunes a Domingo leyendo directamente de los Excels.")
+    
+    col_up1, col_up2 = st.columns(2)
+    with col_up1:
+        archivos_despacho = st.file_uploader("📂 Cargar Excels de Despacho (Oriente, Centro, Occidente)", type=["xlsx", "xlsm"], accept_multiple_files=True)
+    with col_up2:
+        archivo_flota = st.file_uploader("🚛 Cargar Excel de Kilometraje (Flota)", type=["xlsx", "xlsm"])
+
     if st.button("🚚 Generar Pizarra de Despachos", type="primary", use_container_width=True):
-        with st.spinner("Procesando histórico de despachos..."):
-            df_mon_raw = extraer_datos("MONITOREO_DESPACHOS")
-            
-            if df_mon_raw.empty:
-                st.error("No se pudo acceder a la hoja MONITOREO_DESPACHOS o está vacía.")
-            else:
-                c_fecha = buscar_columna_estricta(df_mon_raw, ['fecha'])
-                if not c_fecha: st.error("No se encontró columna de Fecha en MONITOREO_DESPACHOS."); st.stop()
+        if not archivos_despacho or not archivo_flota:
+            st.warning("⚠️ Debes cargar al menos un archivo de despacho y el archivo de flota para generar el reporte.")
+        else:
+            with st.spinner("Procesando histórico de Excels..."):
                 
-                df_mon_raw['Fecha_DT'] = df_mon_raw[c_fecha].apply(extraer_fecha_limpia)
-                df_mon_raw['Num_Semana'] = df_mon_raw['Fecha_DT'].dt.isocalendar().week
-                df_sem = df_mon_raw[df_mon_raw['Num_Semana'] == num_sem].copy()
+                # --- 1. PROCESAR DESPACHOS ---
+                dfs_despacho = []
+                for file in archivos_despacho:
+                    filename = file.name.upper()
+                    try:
+                        if 'ORIENTE' in filename:
+                            df = pd.read_excel(file, sheet_name="FARMACIAS", header=6)
+                            cols_map = {'FECHA DE ENTREGA': 'Fecha', 'BULTOS': 'Bultos', 'TIPO DE ENTREGA': 'Status', 'RUTAS': 'SubRegion', 'DISTRIBUCION': 'Region'}
+                            df_renamed = df.rename(columns=cols_map)
+                            df_renamed['Region'] = 'ORIENTE'
+                        elif 'CENTRO' in filename:
+                            df = pd.read_excel(file, sheet_name="FARMACIAS", header=5)
+                            cols_map = {'FECHA DE ENTREGA': 'Fecha', 'BULTOS': 'Bultos', 'TIPO DE ENTREGA': 'Status', 'DESPACHO': 'SubRegion', 'DISTRIBUCION': 'Region'}
+                            df_renamed = df.rename(columns=cols_map)
+                            df_renamed['Region'] = 'CENTRO'
+                        elif 'OCCIDENTE' in filename:
+                            df = pd.read_excel(file, sheet_name="FARMACIAS", header=5)
+                            cols_map = {'FECHA DE ENTREGA': 'Fecha', 'BULTOS': 'Bultos', 'TIPO DE ENTREGA': 'Status', 'RUTAS': 'SubRegion', 'ZONA': 'Region'}
+                            df_renamed = df.rename(columns=cols_map)
+                            df_renamed['Region'] = 'OCCIDENTE'
+                        else:
+                            continue
+                        
+                        cols_to_keep = ['Fecha', 'Bultos', 'Status', 'SubRegion', 'Region']
+                        df_renamed = df_renamed[[c for c in cols_to_keep if c in df_renamed.columns]]
+                        dfs_despacho.append(df_renamed)
+                    except Exception as e:
+                        st.error(f"Error procesando el archivo de despacho {file.name}: {e}")
                 
+                if not dfs_despacho:
+                    st.error("No se pudo extraer información válida de los archivos de despacho cargados.")
+                    st.stop()
+
+                df_desp = pd.concat(dfs_despacho, ignore_index=True)
+                df_desp['Fecha'] = pd.to_datetime(df_desp['Fecha'], errors='coerce')
+                df_desp = df_desp.dropna(subset=['Fecha'])
+                
+                # Filtrar semana y status
+                df_desp['Num_Semana'] = df_desp['Fecha'].dt.isocalendar().week
+                df_sem = df_desp[df_desp['Num_Semana'] == num_sem].copy()
+                df_sem['Status'] = df_sem['Status'].astype(str).str.upper().str.strip()
+                df_sem = df_sem[df_sem['Status'] == 'ENTREGADO']
+                
+                df_sem['Bultos'] = pd.to_numeric(df_sem['Bultos'], errors='coerce').fillna(0)
+                df_sem['Pedidos'] = 1 # Cada fila es un pedido
+                df_sem['SubRegion_Clean'] = df_sem.apply(lambda x: asignar_subregion(x['SubRegion'], x['Region']), axis=1)
+
+                # --- 2. PROCESAR FLOTA (KILOMETRAJE) ---
+                try:
+                    df_flota_raw = pd.read_excel(archivo_flota, sheet_name="BASE DE DATOS", usecols=lambda x: 'Unnamed' not in x)
+                    df_flota_raw['FECHAS'] = pd.to_datetime(df_flota_raw['FECHAS'], errors='coerce')
+                    df_flota_raw = df_flota_raw.dropna(subset=['FECHAS'])
+                    
+                    columnas_id = ['FECHAS', 'DIA', 'MES']
+                    columnas_id_existentes = [col for col in columnas_id if col in df_flota_raw.columns]
+                    columnas_placas = [col for col in df_flota_raw.columns if col not in columnas_id_existentes]
+                    
+                    df_flota = df_flota_raw.melt(id_vars=columnas_id_existentes, value_vars=columnas_placas, var_name='PLACA', value_name='KILOMETROS')
+                    df_flota['KILOMETROS'] = pd.to_numeric(df_flota['KILOMETROS'], errors='coerce').fillna(0)
+                    df_flota['Num_Semana'] = df_flota['FECHAS'].dt.isocalendar().week
+                    df_km_sem = df_flota[df_flota['Num_Semana'] == num_sem].copy()
+                except Exception as e:
+                    st.error(f"Error procesando el archivo de Kilometraje: {e}")
+                    st.stop()
+
                 if df_sem.empty:
-                    st.warning(f"No hay registros de despachos para la Semana {int(num_sem)}.")
+                    st.warning(f"No hay registros de despachos ('ENTREGADO') para la Semana {int(num_sem)} en los Excel cargados.")
                 else:
-                    c_cub = buscar_columna_estricta(df_sem, ['cubiertos', 'entregados'])
-                    c_bul = buscar_columna_estricta(df_sem, ['bultos'])
-                    c_kms = buscar_columna_estricta(df_sem, ['kilometros', 'kms', 'recorrido'])
-                    c_desp = buscar_columna_estricta(df_sem, ['despachos', 'ruta', 'rutas'])
-                    c_reg = buscar_columna_estricta(df_sem, ['region', 'macro'])
+                    # --- 3. CONSOLIDACIÓN DE DATOS DIARIOS ---
+                    df_diario_desp = df_sem.groupby(df_sem['Fecha'].dt.date).agg({'Pedidos': 'sum', 'Bultos': 'sum'}).reset_index()
+                    df_diario_desp.rename(columns={'Fecha': 'Date'}, inplace=True)
                     
-                    if not all([c_cub, c_bul, c_kms]):
-                        st.error("Faltan columnas clave (Cubiertos, Bultos o Kms) en la hoja.")
-                        st.stop()
+                    df_diario_km = df_km_sem.groupby(df_km_sem['FECHAS'].dt.date).agg({'KILOMETROS': 'sum'}).reset_index()
+                    df_diario_km.rename(columns={'FECHAS': 'Date'}, inplace=True)
 
-                    df_sem[c_cub] = pd.to_numeric(df_sem[c_cub], errors='coerce').fillna(0)
-                    df_sem[c_bul] = pd.to_numeric(df_sem[c_bul], errors='coerce').fillna(0)
-                    df_sem[c_kms] = pd.to_numeric(df_sem[c_kms], errors='coerce').fillna(0)
+                    df_diario = pd.merge(df_diario_desp, df_diario_km, on='Date', how='outer').fillna(0).sort_values('Date')
                     
-                    df_sem['SubRegion'] = df_sem.apply(lambda x: asignar_subregion(x[c_desp], x.get(c_reg, '')), axis=1)
-
-                    df_diario = df_sem.groupby('Fecha_DT').agg({
-                        c_cub: 'sum', c_bul: 'sum', c_kms: 'sum'
-                    }).reset_index().sort_values('Fecha_DT')
+                    total_pedidos = df_diario['Pedidos'].sum()
+                    total_bultos = df_diario['Bultos'].sum()
+                    total_kms = df_diario['KILOMETROS'].sum()
                     
-                    total_pedidos = df_diario[c_cub].sum()
-                    total_bultos = df_diario[c_bul].sum()
-                    total_kms = df_diario[c_kms].sum()
-                    
-                    dias_activos = len(df_diario[df_diario[c_cub] > 0])
+                    dias_activos = len(df_diario[df_diario['Pedidos'] > 0])
                     prom_ped = total_pedidos / dias_activos if dias_activos > 0 else 0
                     prom_bul = total_bultos / dias_activos if dias_activos > 0 else 0
                     prom_kms = total_kms / dias_activos if dias_activos > 0 else 0
 
-                    df_diario['% Diario'] = (df_diario[c_cub] / total_pedidos * 100).fillna(0)
+                    df_diario['% Diario'] = (df_diario['Pedidos'] / total_pedidos * 100).fillna(0) if total_pedidos > 0 else 0
                     
                     def get_arrow(val, prom):
                         if val > prom * 1.05: return "<span style='color:#2e7d32; font-size:18px;'>⬆️</span>", "#2e7d32"
@@ -853,29 +906,29 @@ with t_despachos:
                     meses_es = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
 
                     for _, r in df_diario.iterrows():
-                        fecha_obj = r['Fecha_DT']
+                        fecha_obj = pd.to_datetime(r['Date'])
                         str_fecha = f"{dias_semana_es[fecha_obj.weekday()]}, {fecha_obj.day} de {meses_es[fecha_obj.month-1]} de {fecha_obj.year}"
                         
-                        arr_ped, c_ped = get_arrow(r[c_cub], prom_ped)
+                        arr_ped, c_ped = get_arrow(r['Pedidos'], prom_ped)
                         arr_por, c_por = get_arrow(r['% Diario'], (100/dias_activos) if dias_activos>0 else 0)
                         
                         filas_diarias_html += f"""
                         <tr style="text-align: center; border-bottom: 1px solid #000; background: white;">
                             <td style="padding: 8px; border: 1px solid #000; font-weight: bold; text-align: left;">{str_fecha}</td>
-                            <td style="padding: 8px; border: 1px solid #000; font-weight: 900; font-size: 16px; color: {c_ped};">{arr_ped} {f_p(r[c_cub])}</td>
+                            <td style="padding: 8px; border: 1px solid #000; font-weight: 900; font-size: 16px; color: {c_ped};">{arr_ped} {f_p(r['Pedidos'])}</td>
                             <td style="padding: 8px; border: 1px solid #000; font-weight: 900; font-size: 16px; color: {c_por};">{arr_por} {r['% Diario']:.2f}</td>
-                            <td style="padding: 8px; border: 1px solid #000; font-weight: 900; font-size: 14px;">{f_p(r[c_bul])} BULTOS</td>
-                            <td style="padding: 8px; border: 1px solid #000; font-weight: 900; font-size: 14px;">{f_p(r[c_kms])} Kms</td>
+                            <td style="padding: 8px; border: 1px solid #000; font-weight: 900; font-size: 14px;">{f_p(r['Bultos'])} BULTOS</td>
+                            <td style="padding: 8px; border: 1px solid #000; font-weight: 900; font-size: 14px;">{f_p(r['KILOMETROS'])} Kms</td>
                         </tr>
                         """
 
                     # AGRUPACIÓN POR REGIONES
-                    df_reg = df_sem.groupby(['Region', 'SubRegion']).agg({c_cub: 'sum', c_bul: 'sum'}).reset_index()
+                    df_reg = df_sem.groupby(['Region', 'SubRegion_Clean']).agg({'Pedidos': 'sum', 'Bultos': 'sum'}).reset_index()
 
                     def generar_bloque_region(nombre_macro, color_macro, df_f):
                         if df_f.empty: return ""
-                        t_ped = df_f[c_cub].sum()
-                        t_bul = df_f[c_bul].sum()
+                        t_ped = df_f['Pedidos'].sum()
+                        t_bul = df_f['Bultos'].sum()
                         
                         html_bloque = f"""
                         <div style="display:flex; justify-content:space-between; margin-bottom: 10px;">
@@ -888,23 +941,24 @@ with t_despachos:
                                     </tr>
                         """
                         barras_html = ""
-                        colores = ["#1976d2", "#e65100", "#388e3c", "#fbc02d", "#8e24aa"]
+                        colores = ["#1976d2", "#e65100", "#388e3c", "#fbc02d", "#8e24aa", "#e91e63", "#00bcd4", "#ff9800", "#4caf50"]
                         
                         for i, r in df_f.iterrows():
-                            c_p, c_c = get_arrow(r[c_cub], t_ped/len(df_f) if len(df_f)>0 else 0)
+                            c_p, c_c = get_arrow(r['Pedidos'], t_ped/len(df_f) if len(df_f)>0 else 0)
                             html_bloque += f"""
                                     <tr style="background: white;">
-                                        <td style="padding: 6px; border: 1px solid #000; font-weight: bold; text-align: right;">{r['SubRegion']}</td>
-                                        <td style="padding: 6px; border: 1px solid #000; font-weight: 900; text-align: right;">{c_p} {f_p(r[c_cub])}</td>
-                                        <td style="padding: 6px; border: 1px solid #000; font-weight: 900; text-align: right;">{f_p(r[c_bul])}</td>
+                                        <td style="padding: 6px; border: 1px solid #000; font-weight: bold; text-align: right;">{r['SubRegion_Clean']}</td>
+                                        <td style="padding: 6px; border: 1px solid #000; font-weight: 900; text-align: right;">{c_p} {f_p(r['Pedidos'])}</td>
+                                        <td style="padding: 6px; border: 1px solid #000; font-weight: 900; text-align: right;">{f_p(r['Bultos'])}</td>
                                     </tr>
                             """
-                            pct = (r[c_cub] / t_ped * 100) if t_ped > 0 else 0
+                            pct = (r['Pedidos'] / t_ped * 100) if t_ped > 0 else 0
                             col_bar = colores[i % len(colores)]
                             if pct > 0:
-                                barras_html += f"<div style='width: {pct}%; background-color: {col_bar}; color: white; font-size:10px; text-align:center; font-weight:bold; padding: 5px 0; border-right: 1px solid white;'>{int(r[c_cub])} ; {int(pct)}%</div>"
+                                barras_html += f"<div style='width: {pct}%; background-color: {col_bar}; color: white; font-size:10px; text-align:center; font-weight:bold; padding: 5px 0; border-right: 1px solid white;'>{int(r['Pedidos'])} ; {int(pct)}%</div>"
                             
-                        html_bloque += """
+                        # AQUI ESTÁ LA CORRECCIÓN CON EL f-string (f""")
+                        html_bloque += f"""
                                 </table>
                             </div>
                             <div style="width: 43%; background: #333; color: white; padding: 10px; border-radius: 5px; border: 1px solid #000; display:flex; flex-direction:column; justify-content:center;">
@@ -916,7 +970,7 @@ with t_despachos:
                         """
                         for i, r in df_f.iterrows():
                             col_bar = colores[i % len(colores)]
-                            html_bloque += f"<div style='font-size: 9px; margin-right: 10px;'><span style='display:inline-block; width:10px; height:10px; background:{col_bar}; margin-right:3px;'></span>{r['SubRegion']}</div>"
+                            html_bloque += f"<div style='font-size: 9px; margin-right: 10px;'><span style='display:inline-block; width:10px; height:10px; background:{col_bar}; margin-right:3px;'></span>{r['SubRegion_Clean']}</div>"
                             
                         html_bloque += """
                                 </div>
