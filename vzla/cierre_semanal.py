@@ -1322,7 +1322,7 @@ with t_surtido:
                     st.code(msg_surt, language="markdown")
                     
 # ---------------------------------------------------------
-# PESTAÑA 8: GENERADOR DEL MASTER REPORTE SEMANAL (PDF - FIX DEFINITIVO DE RENDERIZADO)
+# PESTAÑA 8: GENERADOR DEL MASTER REPORTE SEMANAL (PDF - FIX SANGRADO DE PÁGINA)
 # ---------------------------------------------------------
 with t_pdf:
     st.info("Ensamblador Final: Sube la foto de portada, llena los datos clave y carga las imágenes para generar el Reporte Master PDF perfecto.")
@@ -1402,7 +1402,7 @@ with t_pdf:
                             <div style="font-size: 22px; font-weight: 900; text-transform: uppercase;">{titulo}</div>
                             <div style="font-size: 16px; font-weight: bold; color: #d4af37;">SEMANA {int(num_sem)}</div>
                         </div>
-                        <div style="padding: 20px; text-align: center; height: 850px; display: flex; align-items: center; justify-content: center; background: #fafafa;">
+                        <div style="padding: 20px; text-align: center; height: 830px; display: flex; align-items: center; justify-content: center; background: #fafafa;">
                             <img src="data:image/png;base64,{b64_img}" style="max-width: 95%; max-height: 100%; object-fit: contain; border: 3px solid #ccc; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
                         </div>
                         <div style="position: absolute; bottom: 0; left: 0; width: 100%; background: #111; padding: 15px 40px; font-size: 13px; font-weight: bold; color: #fff; display: flex; justify-content: space-between; border-top: 4px solid #d4af37; box-sizing: border-box;">
@@ -1413,7 +1413,7 @@ with t_pdf:
                     """
                     pagina_actual += 1
 
-                # HTML MAESTRO (Sin Flexbox en el contenedor raíz)
+                # HTML MAESTRO (Sin Flexbox en el contenedor raíz y con altura reducida a 290mm)
                 html_pdf_master = f"""
                 <!DOCTYPE html><html><head>
                     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
@@ -1426,18 +1426,18 @@ with t_pdf:
                             padding: 20px; 
                         }}
                         
-                        /* EL CONTENEDOR PRINCIPAL ESTRICTAMENTE EN BLOQUE (CERO FLEXBOX AQUÍ) */
+                        /* EL CONTENEDOR PRINCIPAL ESTRICTAMENTE EN BLOQUE */
                         #master-pdf {{
                             display: block;
                             width: 210mm;
                             margin: 0 auto;
                         }}
                         
-                        /* PÁGINA RÍGIDA A4 EXACTA */
+                        /* PÁGINA RÍGIDA - ALTURA REDUCIDA A 290mm PARA ELIMINAR EL SANGRADO INFERIOR */
                         .pdf-page {{ 
                             display: block;
                             width: 210mm; 
-                            height: 296mm; 
+                            height: 290mm; /* A4 real es 297mm. Dejamos 7mm de margen de seguridad interno */
                             background: white; 
                             position: relative; 
                             overflow: hidden; 
@@ -1533,7 +1533,6 @@ with t_pdf:
                             margin:       0,
                             filename:     'Master_Reporte_Semanal_Semana_{int(num_sem)}.pdf',
                             image:        {{ type: 'jpeg', quality: 0.98 }},
-                            // ScrollY: 0 es CLAVE para evitar el desdoblamiento de divs
                             html2canvas:  {{ scale: 2, useCORS: true, logging: false, scrollY: 0 }},
                             jsPDF:        {{ unit: 'mm', format: 'a4', orientation: 'portrait' }},
                             pagebreak:    {{ mode: 'css', avoid: 'tr' }}
@@ -1544,4 +1543,4 @@ with t_pdf:
                 </body></html>
                 """
                 components.html(html_pdf_master, height=1200, scrolling=True)
-                st.toast("✅ Master PDF generado con motor de bloque (Anti-Duplicación).")
+                st.toast("✅ Master PDF generado con motor de bloque ajustado (Sin sangrado).")
