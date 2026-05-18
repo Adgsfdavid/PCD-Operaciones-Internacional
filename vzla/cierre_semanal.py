@@ -833,14 +833,27 @@ with t_combustible:
                 if df_comb.empty:
                     st.warning(f"No existen registros de combustible para la Semana {int(num_sem)}.")
                 else:
-                    # Columnas numéricas
+                    # Función robusta para limpiar errores de tipeo como "15.000.0" o "15,000"
+                    def limpiar_volumen(v):
+                        if pd.isna(v) or str(v).strip() == "": return 0.0
+                        s = str(v).strip().replace(',', '.')
+                        # Si teclearon más de un punto (ej. 15.000.0), borramos los primeros y dejamos el último como decimal
+                        if s.count('.') > 1:
+                            partes = s.split('.')
+                            s = "".join(partes[:-1]) + "." + partes[-1]
+                        try:
+                            return float(s)
+                        except:
+                            return 0.0
+
+                    # Columnas numéricas aplicándoles el filtro limpiador antibasura
                     cols_tanques = ['Tanque_1_50K', 'Tanque_2_12K', 'Tanque_3_7K', 'Total_Tanques']
                     cols_bidones = ['Gasolina_Bidones', 'Gasoil_Bidones']
                     for col in cols_tanques + cols_bidones:
                         if col in df_comb.columns:
-                            df_comb[col] = pd.to_numeric(df_comb[col], errors='coerce').fillna(0)
+                            df_comb[col] = df_comb[col].apply(limpiar_volumen)
                         else:
-                            df_comb[col] = 0
+                            df_comb[col] = 0.0
 
                     # 1. Apertura (Lunes/Primer día) y Cierre (Viernes/Último día)
                     row_apertura = df_comb.iloc[0]
