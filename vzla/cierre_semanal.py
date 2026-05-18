@@ -424,12 +424,17 @@ with t_guardias:
             df_seg_raw = extraer_datos("SEG_ROL_GUARDIA")
             if df_seg_raw.empty: st.error("No se encontraron registros en SEG_ROL_GUARDIA.")
             else:
-                # [CORRECCIÓN CRÍTICA] Arrastrar celdas combinadas de Cantidad hacia abajo
+                # [CORRECCIÓN ULTRA BLINDADA PARA LA CANTIDAD]
                 c_cant_temp = buscar_columna_estricta(df_seg_raw, ['cant', 'cantidad', 'oficiales'])
                 if c_cant_temp:
-                    df_seg_raw[c_cant_temp] = df_seg_raw[c_cant_temp].replace(r'^\s*$', pd.NA, regex=True).ffill()
+                    # Forzamos la columna a valores numéricos. Esto convierte automáticamente los vacíos "" en NaN.
+                    # Luego usamos ffill() para arrastrar el número hacia abajo a las celdas combinadas.
+                    df_seg_raw[c_cant_temp] = pd.to_numeric(df_seg_raw[c_cant_temp], errors='coerce').ffill()
+                    # Renombramos la columna a 'cant' para que la función agrupador la encuentre sin fallar
+                    df_seg_raw.rename(columns={c_cant_temp: 'cant'}, inplace=True)
 
                 grupos_seg, c_area, c_diu, c_noc, c_cant = agrupar_rol_compacto(df_seg_raw, num_sem)
+                
                 if not grupos_seg: st.warning(f"No hay registros de Seguridad para la semana {int(num_sem)}.")
                 else:
                     for fecha_str, df_grupo in grupos_seg:
@@ -440,12 +445,12 @@ with t_guardias:
                             d_html = "<br>".join(d_list)
                             n_html = "<br>".join(n_list)
                             
-                            # Limpieza estricta de la Cantidad para evitar '.0' o textos basuras
+                            # Extraer la cantidad limpia
                             val_cant = str(r.get(c_cant, '')).strip()
                             if val_cant.lower() in ['nan', 'none', '<na>', '']:
                                 cant = ""
                             else:
-                                cant = val_cant.replace(".0", "")
+                                cant = val_cant.replace(".0", "") # Quitamos los decimales si los trae
                                 
                             filas_seg_html += f"<tr><td style='padding:10px; border:1px solid #000; font-weight:bold; color:{color_azul}; vertical-align:top;'>{r.get(c_area, '')}</td><td style='padding:10px; border:1px solid #000; text-align:center; font-weight:900; color:#d32f2f; font-size:16px; vertical-align:top;'>{cant}</td><td style='padding:10px; border:1px solid #000; vertical-align:top;'>{d_html}</td><td style='padding:10px; border:1px solid #000; vertical-align:top;'>{n_html}</td></tr>"
 
@@ -574,7 +579,7 @@ with t_guardias:
                         for _, r in df_mon.iterrows(): msg_mon += f"👤 *{r.get(c_nom, '')}*\n⏰ {r.get(c_hor, '')}\n\n"
                         if uni_ramon: msg_mon += f"🚛 *Unidades del Sr. Ramón*\nResponsable: {uni_ramon}"
                         st.code(msg_mon, language="markdown")
-
+                        
 # ---------------------------------------------------------
 # PESTAÑA 5: RESUMEN DE DESPACHOS (MIGRADO NETAMENTE A EXCEL)
 # ---------------------------------------------------------
