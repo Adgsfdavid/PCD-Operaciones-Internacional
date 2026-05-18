@@ -133,7 +133,7 @@ def filtrar_ultima_carga(df, num_sem):
     df_sem = df[df['Sem_Calc'] == num_sem].copy()
     
     if df_sem.empty: return df_sem
-    max_dt = df_sem['F_DT'].max() # Extrae solo el último lote guardado (evita duplicados)
+    max_dt = df_sem['F_DT'].max()
     return df_sem[df_sem['F_DT'] == max_dt].copy()
 
 def agrupar_rol_compacto(df_seg, num_sem):
@@ -152,20 +152,16 @@ def agrupar_rol_compacto(df_seg, num_sem):
     if df_sem.empty: return []
     
     grupos = []
-    
-    # 1. SÁBADO
     df_sat = df_sem[df_sem['DT'].dt.weekday == 5]
     if not df_sat.empty:
         fecha_str = f"SÁBADO {df_sat['DT'].iloc[0].strftime('%d/%m/%Y')}"
         grupos.append((fecha_str, df_sat.drop_duplicates(subset=[c_area, c_diu, c_noc])))
         
-    # 2. DOMINGO
     df_sun = df_sem[df_sem['DT'].dt.weekday == 6]
     if not df_sun.empty:
         fecha_str = f"DOMINGO {df_sun['DT'].iloc[0].strftime('%d/%m/%Y')}"
         grupos.append((fecha_str, df_sun.drop_duplicates(subset=[c_area, c_diu, c_noc])))
         
-    # 3. LUNES A VIERNES (COMPACTADO)
     df_lv = df_sem[df_sem['DT'].dt.weekday < 5]
     if not df_lv.empty:
         min_dt = df_lv['DT'].min()
@@ -178,6 +174,25 @@ def agrupar_rol_compacto(df_seg, num_sem):
         grupos.append((fecha_str, df_lv.drop_duplicates(subset=[c_area, c_diu, c_noc])))
         
     return grupos, c_area, c_diu, c_noc, c_cant
+
+# Función Mapeo de Subregiones para Despachos
+def asignar_subregion(ruta, macro_default):
+    r = str(ruta).upper()
+    if any(x in r for x in ["ANACO", "CANTAURA", "CARUPANO", "GUIRIA", "CUMANA", "MATURIN", "PUNTA DE MATA", "ESPARTA", "ARAGUA DE BARCELONA"]): return "ORIENTE NORTE"
+    if any(x in r for x in ["BARCELONA", "CLARINES", "BOLIVAR", "DELTA", "TUMEREMO", "GUARICO", "PARIAGUAN", "ORDAZ", "FELIX", "UPATA", "PIAR", "PARAGUA"]): return "ORIENTE SUR"
+    
+    if any(x in r for x in ["CARACAS", "ARAGUA", "SAN JUAN"]): return "CENTRO"
+    if any(x in r for x in ["CARABOBO", "COJEDES"]): return "CENTRO OCCIDENTE"
+    
+    if any(x in r for x in ["LARA 1", "LARA 01", "PORTUGUESA 1", "PORTUGUESA 01", "LARA 2", "LARA 02", "YARACUY"]): return "OCCIDENTE SUR"
+    if any(x in r for x in ["PORTUGUESA 2", "PORTUGUESA 02", "BARINAS"]): return "LOS LLANOS"
+    if any(x in r for x in ["CORO", "PUNTO FIJO", "MARACAIBO", "CABIMAS", "OJEDA"]): return "OCCIDENTE NORTE"
+    if any(x in r for x in ["MERIDA", "TRUJILLO", "PORTUGUESA 3", "PORTUGUESA 03", "TACHIRA"]): return "LOS ANDES / TACHIRA"
+    
+    if str(macro_default).upper() == "ORIENTE": return "ORIENTE SUR"
+    if str(macro_default).upper() == "CENTRO": return "CENTRO"
+    if str(macro_default).upper() == "OCCIDENTE": return "OCCIDENTE NORTE"
+    return "OTRAS REGIONES"
 
 # ==========================================
 # INTERFAZ PRINCIPAL
@@ -197,19 +212,20 @@ rango_fechas_lv = calcular_rango_lunes_viernes(ano_sel, num_sem)
 color_azul = "#0d47a1"
 logo_b64 = obtener_logo_base64()
 
-# CREAMOS LAS 4 PESTAÑAS
-t_trafico, t_cierres, t_comensales, t_guardias = st.tabs([
+# CREAMOS LAS 5 PESTAÑAS
+t_trafico, t_cierres, t_comensales, t_guardias, t_despachos = st.tabs([
     "📈 Desempeño de Tráfico", 
     "⏱️ Cronometría de Cierres", 
     "🍽️ Pizarra Comensales",
-    "🛡️ Guardias Semanales"
+    "🛡️ Guardias Semanales",
+    "🚚 Resumen de Despachos"
 ])
 
 # ---------------------------------------------------------
 # PESTAÑA 1: DESEMPEÑO DE TRÁFICO
 # ---------------------------------------------------------
 with t_trafico:
-    st.info("Consolida la data de despachos diarios en una pizarra semanal.")
+    st.info("Consolida la data de despachos diarios en una pizarra semanal de rutas.")
     if st.button("🚀 Generar Auditoría de Tráfico", type="primary", use_container_width=True):
         with st.spinner("Consolidando rutas de tráfico..."):
             df_raw = extraer_datos("PIZARRA_TRAFICO")
@@ -284,7 +300,7 @@ with t_trafico:
                         </div>
                         <div class="page" id="pizarra-trafico">
                             <div class="header-master">
-                                <img src="{logo_b64}" style="height: 55px;">
+                                <img src="{logo}" style="height: 55px;">
                                 <div class="header-info">
                                     <h2>AUDITORÍA SEMANAL DE TRÁFICO</h2>
                                     <h3 style="margin: 5px 0 0 0; color: #fff; font-size: 14px;">DEPARTAMENTO DE TRÁFICO</h3>
@@ -420,8 +436,10 @@ with t_cierres:
                     hora_ap = a_12h(r['Apertura'])
                     hora_ju = a_12h(r['Juanita'])
                     hora_dr = a_12h(r['Drotaca'])
+                    
                     color_ap = "#2e7d32" if "06:" in hora_ap or "07:00" in hora_ap else "#000"
                     color_ju = "#e65100" if hora_ju != "N/R" else "#777"
+                    
                     filas_gral_html += f"""
                     <tr style="text-align: center;">
                         <td style="padding: 15px; font-weight: bold; background-color: #f8f9fa; border: 1px solid #000;">{r['Día'].upper()}<br><small style="color:#666;">{r['Fecha']}</small></td>
@@ -442,6 +460,9 @@ with t_cierres:
                         table {{ width: 100%; border-collapse: collapse; }}
                         th {{ background: #f1f4f9; color: {color_azul}; padding: 15px; text-transform: uppercase; font-size: 12px; border: 1px solid #000; }}
                         .footer-promedios {{ background: #f1f4f9; padding: 20px; display: flex; justify-content: space-around; border-top: 2px solid {color_azul}; }}
+                        .promedio-box {{ text-align: center; }}
+                        .promedio-label {{ font-size: 12px; font-weight: bold; color: #555; text-transform: uppercase; }}
+                        .promedio-val {{ font-size: 20px; font-weight: 900; color: {color_azul}; }}
                     </style>
                 </head><body>
                     <div style="text-align: center; margin-bottom: 15px;">
@@ -460,8 +481,14 @@ with t_cierres:
                             <tbody>{filas_gral_html}</tbody>
                         </table>
                         <div class="footer-promedios">
-                            <div style="text-align: center;"><div style="font-size: 12px; font-weight: bold; color: #555; text-transform: uppercase;">📊 Promedio Cierre Drotaca</div><div style="font-size: 20px; font-weight: 900; color: #2e7d32;">{prom_drotaca}</div></div>
-                            <div style="text-align: center;"><div style="font-size: 12px; font-weight: bold; color: #555; text-transform: uppercase;">📊 Promedio Cierre Juanita</div><div style="font-size: 20px; font-weight: 900; color: #e65100;">{prom_juanita}</div></div>
+                            <div class="promedio-box">
+                                <div class="promedio-label">📊 Promedio Cierre Drotaca</div>
+                                <div class="promedio-val" style="color: #2e7d32;">{prom_drotaca}</div>
+                            </div>
+                            <div class="promedio-box">
+                                <div class="promedio-label">📊 Promedio Cierre Juanita</div>
+                                <div class="promedio-val" style="color: #e65100;">{prom_juanita}</div>
+                            </div>
                         </div>
                     </div>
                 """
@@ -613,10 +640,10 @@ with t_comensales:
                     st.code(msg_c, language="markdown")
 
 # ---------------------------------------------------------
-# PESTAÑA 4: GUARDIAS SEMANALES (SEGURIDAD, FLOTA, MONITOREO)
+# PESTAÑA 4: GUARDIAS SEMANALES
 # ---------------------------------------------------------
 with t_guardias:
-    st.info("Genera las pizarras de Guardia (Seguridad, Flota y Monitoreo) correspondientes a la semana seleccionada.")
+    st.info("Genera las pizarras de Guardia (Seguridad, Flota y Monitoreo).")
     if st.button("🛡️ Generar Pizarras de Guardias", type="primary", use_container_width=True):
         with st.spinner("Extrayendo bases de datos de Guardias..."):
             
@@ -709,8 +736,7 @@ with t_guardias:
                         components.html(html_piz_flo, height=600, scrolling=True)
 
                         msg_flo = f"🚛 *GUARDIA DE FLOTA*\n📅 Semana: {int(num_sem)}\n\n"
-                        for _, r in df_flo.iterrows():
-                            msg_flo += f"👤 *{r.get(c_nom, '')}*\n🔹 Rol: {r.get(c_car, '')}\n🗓️ Días: {r.get(c_dia, '')}\n⏰ Horario: {r.get(c_hor, '')}\n\n"
+                        for _, r in df_flo.iterrows(): msg_flo += f"👤 *{r.get(c_nom, '')}*\n🔹 Rol: {r.get(c_car, '')}\n🗓️ Días: {r.get(c_dia, '')}\n⏰ Horario: {r.get(c_hor, '')}\n\n"
                         st.code(msg_flo, language="markdown")
 
             st.markdown("---")
@@ -760,7 +786,222 @@ with t_guardias:
                         components.html(html_piz_mon, height=600, scrolling=True)
 
                         msg_mon = f"🖥️ *GUARDIA DE MONITOREO*\n📅 Semana: {int(num_sem)}\n\n🕒 *Guardias Programadas:*\n\n"
-                        for _, r in df_mon.iterrows():
-                            msg_mon += f"👤 *{r.get(c_nom, '')}*\n⏰ {r.get(c_hor, '')}\n\n"
+                        for _, r in df_mon.iterrows(): msg_mon += f"👤 *{r.get(c_nom, '')}*\n⏰ {r.get(c_hor, '')}\n\n"
                         if uni_ramon: msg_mon += f"🚛 *Unidades del Sr. Ramón*\nResponsable: {uni_ramon}"
                         st.code(msg_mon, language="markdown")
+
+# ---------------------------------------------------------
+# PESTAÑA 5: RESUMEN DE DESPACHOS (NUEVO)
+# ---------------------------------------------------------
+with t_despachos:
+    st.info("Genera el Resumen de Desempeño Logístico (Pedidos, Bultos y KMs) por semana.")
+    if st.button("🚚 Generar Pizarra de Despachos", type="primary", use_container_width=True):
+        with st.spinner("Procesando histórico de despachos..."):
+            df_mon_raw = extraer_datos("MONITOREO_DESPACHOS")
+            
+            if df_mon_raw.empty:
+                st.error("No se pudo acceder a la hoja MONITOREO_DESPACHOS o está vacía.")
+            else:
+                c_fecha = buscar_columna_estricta(df_mon_raw, ['fecha'])
+                if not c_fecha: st.error("No se encontró columna de Fecha en MONITOREO_DESPACHOS."); st.stop()
+                
+                df_mon_raw['Fecha_DT'] = df_mon_raw[c_fecha].apply(extraer_fecha_limpia)
+                df_mon_raw['Num_Semana'] = df_mon_raw['Fecha_DT'].dt.isocalendar().week
+                df_sem = df_mon_raw[df_mon_raw['Num_Semana'] == num_sem].copy()
+                
+                if df_sem.empty:
+                    st.warning(f"No hay registros de despachos para la Semana {int(num_sem)}.")
+                else:
+                    c_cub = buscar_columna_estricta(df_sem, ['cubiertos', 'entregados'])
+                    c_bul = buscar_columna_estricta(df_sem, ['bultos'])
+                    c_kms = buscar_columna_estricta(df_sem, ['kilometros', 'kms', 'recorrido'])
+                    c_desp = buscar_columna_estricta(df_sem, ['despachos', 'ruta', 'rutas'])
+                    c_reg = buscar_columna_estricta(df_sem, ['region', 'macro'])
+                    
+                    if not all([c_cub, c_bul, c_kms]):
+                        st.error("Faltan columnas clave (Cubiertos, Bultos o Kms) en la hoja.")
+                        st.stop()
+
+                    df_sem[c_cub] = pd.to_numeric(df_sem[c_cub], errors='coerce').fillna(0)
+                    df_sem[c_bul] = pd.to_numeric(df_sem[c_bul], errors='coerce').fillna(0)
+                    df_sem[c_kms] = pd.to_numeric(df_sem[c_kms], errors='coerce').fillna(0)
+                    
+                    df_sem['SubRegion'] = df_sem.apply(lambda x: asignar_subregion(x[c_desp], x.get(c_reg, '')), axis=1)
+
+                    df_diario = df_sem.groupby('Fecha_DT').agg({
+                        c_cub: 'sum', c_bul: 'sum', c_kms: 'sum'
+                    }).reset_index().sort_values('Fecha_DT')
+                    
+                    total_pedidos = df_diario[c_cub].sum()
+                    total_bultos = df_diario[c_bul].sum()
+                    total_kms = df_diario[c_kms].sum()
+                    
+                    dias_activos = len(df_diario[df_diario[c_cub] > 0])
+                    prom_ped = total_pedidos / dias_activos if dias_activos > 0 else 0
+                    prom_bul = total_bultos / dias_activos if dias_activos > 0 else 0
+                    prom_kms = total_kms / dias_activos if dias_activos > 0 else 0
+
+                    df_diario['% Diario'] = (df_diario[c_cub] / total_pedidos * 100).fillna(0)
+                    
+                    def get_arrow(val, prom):
+                        if val > prom * 1.05: return "<span style='color:#2e7d32; font-size:18px;'>⬆️</span>", "#2e7d32"
+                        elif val < prom * 0.95: return "<span style='color:#d32f2f; font-size:18px;'>⬇️</span>", "#d32f2f"
+                        return "<span style='color:#f57c00; font-size:18px;'>➡️</span>", "#f57c00"
+
+                    filas_diarias_html = ""
+                    dias_semana_es = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+                    meses_es = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+
+                    for _, r in df_diario.iterrows():
+                        fecha_obj = r['Fecha_DT']
+                        str_fecha = f"{dias_semana_es[fecha_obj.weekday()]}, {fecha_obj.day} de {meses_es[fecha_obj.month-1]} de {fecha_obj.year}"
+                        
+                        arr_ped, c_ped = get_arrow(r[c_cub], prom_ped)
+                        arr_por, c_por = get_arrow(r['% Diario'], (100/dias_activos) if dias_activos>0 else 0)
+                        
+                        filas_diarias_html += f"""
+                        <tr style="text-align: center; border-bottom: 1px solid #000; background: white;">
+                            <td style="padding: 8px; border: 1px solid #000; font-weight: bold; text-align: left;">{str_fecha}</td>
+                            <td style="padding: 8px; border: 1px solid #000; font-weight: 900; font-size: 16px; color: {c_ped};">{arr_ped} {f_p(r[c_cub])}</td>
+                            <td style="padding: 8px; border: 1px solid #000; font-weight: 900; font-size: 16px; color: {c_por};">{arr_por} {r['% Diario']:.2f}</td>
+                            <td style="padding: 8px; border: 1px solid #000; font-weight: 900; font-size: 14px;">{f_p(r[c_bul])} BULTOS</td>
+                            <td style="padding: 8px; border: 1px solid #000; font-weight: 900; font-size: 14px;">{f_p(r[c_kms])} Kms</td>
+                        </tr>
+                        """
+
+                    # AGRUPACIÓN POR REGIONES
+                    df_reg = df_sem.groupby(['Region', 'SubRegion']).agg({c_cub: 'sum', c_bul: 'sum'}).reset_index()
+
+                    def generar_bloque_region(nombre_macro, color_macro, df_f):
+                        if df_f.empty: return ""
+                        t_ped = df_f[c_cub].sum()
+                        t_bul = df_f[c_bul].sum()
+                        
+                        html_bloque = f"""
+                        <div style="display:flex; justify-content:space-between; margin-bottom: 10px;">
+                            <div style="width: 55%;">
+                                <table style="width: 100%; border-collapse: collapse; border: 1px solid #000; font-size: 13px;">
+                                    <tr>
+                                        <th style="padding: 8px; background: #e0e0e0; border: 1px solid #000; text-align: left;">PEDIDOS {nombre_macro} (GENERAL)</th>
+                                        <th style="padding: 8px; background: {color_macro}; color: white; border: 1px solid #000;">{f_p(t_ped)} PEDIDOS</th>
+                                        <th style="padding: 8px; background: {color_macro}; color: white; border: 1px solid #000;">{f_p(t_bul)} BULTOS</th>
+                                    </tr>
+                        """
+                        barras_html = ""
+                        colores = ["#1976d2", "#e65100", "#388e3c", "#fbc02d", "#8e24aa"]
+                        
+                        for i, r in df_f.iterrows():
+                            c_p, c_c = get_arrow(r[c_cub], t_ped/len(df_f) if len(df_f)>0 else 0)
+                            html_bloque += f"""
+                                    <tr style="background: white;">
+                                        <td style="padding: 6px; border: 1px solid #000; font-weight: bold; text-align: right;">{r['SubRegion']}</td>
+                                        <td style="padding: 6px; border: 1px solid #000; font-weight: 900; text-align: right;">{c_p} {f_p(r[c_cub])}</td>
+                                        <td style="padding: 6px; border: 1px solid #000; font-weight: 900; text-align: right;">{f_p(r[c_bul])}</td>
+                                    </tr>
+                            """
+                            pct = (r[c_cub] / t_ped * 100) if t_ped > 0 else 0
+                            col_bar = colores[i % len(colores)]
+                            if pct > 0:
+                                barras_html += f"<div style='width: {pct}%; background-color: {col_bar}; color: white; font-size:10px; text-align:center; font-weight:bold; padding: 5px 0; border-right: 1px solid white;'>{int(r[c_cub])} ; {int(pct)}%</div>"
+                            
+                        html_bloque += """
+                                </table>
+                            </div>
+                            <div style="width: 43%; background: #333; color: white; padding: 10px; border-radius: 5px; border: 1px solid #000; display:flex; flex-direction:column; justify-content:center;">
+                                <div style="text-align: center; font-size: 12px; font-weight: bold; margin-bottom: 10px; text-transform: uppercase;">PEDIDOS ENTREGADOS {nombre_macro}</div>
+                                <div style="display:flex; width: 100%; border-radius: 4px; overflow: hidden; border: 1px solid #fff;">
+                                    {barras_html}
+                                </div>
+                                <div style="display:flex; flex-wrap: wrap; justify-content: center; margin-top: 10px;">
+                        """
+                        for i, r in df_f.iterrows():
+                            col_bar = colores[i % len(colores)]
+                            html_bloque += f"<div style='font-size: 9px; margin-right: 10px;'><span style='display:inline-block; width:10px; height:10px; background:{col_bar}; margin-right:3px;'></span>{r['SubRegion']}</div>"
+                            
+                        html_bloque += """
+                                </div>
+                            </div>
+                        </div>
+                        """
+                        return html_bloque
+
+                    bloque_oriente = generar_bloque_region("ORIENTE", "#2e7d32", df_reg[df_reg['Region'].str.upper() == 'ORIENTE'])
+                    bloque_centro = generar_bloque_region("CENTRO", "#2e7d32", df_reg[df_reg['Region'].str.upper() == 'CENTRO'])
+                    bloque_occidente = generar_bloque_region("OCCIDENTE", "#2e7d32", df_reg[df_reg['Region'].str.upper() == 'OCCIDENTE'])
+
+                    html_pizarra_despachos = f"""
+                    <html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head>
+                    <body style="font-family: Arial, sans-serif; background-color: #f0f2f6; padding: 20px;">
+                    <div style="text-align: center; margin-bottom: 15px;">
+                        <button onclick="capDespachos()" style="background: #1565c0; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR RESUMEN DESPACHOS</button>
+                    </div>
+                    <div id="piz-despachos" style="background:white; width:950px; margin:auto; border:2px solid #1565c0; border-radius:12px; overflow:hidden;">
+                        <div style="padding: 10px;">
+                            <table style="width: 100%; border-collapse: collapse; font-size: 13px; border: 2px solid #000;">
+                                <thead>
+                                    <tr style="background: #1565c0; color: white;">
+                                        <th style="padding: 10px; border: 1px solid #000;">SEMANA {rango_fechas.upper()}</th>
+                                        <th style="padding: 10px; border: 1px solid #000;">PEDIDOS ENTREGADOS</th>
+                                        <th style="padding: 10px; border: 1px solid #000;">% DIARIO</th>
+                                        <th style="padding: 10px; border: 1px solid #000;">BULTOS ENTREGADOS</th>
+                                        <th style="padding: 10px; border: 1px solid #000;">RECORRIDO GENERAL</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {filas_diarias_html}
+                                    <tr style="background: #1565c0; color: white; font-weight: 900; font-size: 16px;">
+                                        <td style="padding: 10px; border: 1px solid #000; text-align: center;">Total general</td>
+                                        <td style="padding: 10px; border: 1px solid #000; text-align: center;">{f_p(total_pedidos)}</td>
+                                        <td style="padding: 10px; border: 1px solid #000; text-align: center;">100,00%</td>
+                                        <td style="padding: 10px; border: 1px solid #000; text-align: center;">{f_p(total_bultos)} BULTOS</td>
+                                        <td style="padding: 10px; border: 1px solid #000; text-align: center;">{f_p(total_kms)} Kms</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+
+                            <div style="display: flex; justify-content: space-between; margin-top: 15px;">
+                                <table style="width: 42%; border-collapse: collapse; border: 2px solid #000; font-size: 13px;">
+                                    <tr><th colspan="2" style="background: #1565c0; color: white; padding: 8px;">PROMEDIO DIARIO</th></tr>
+                                    <tr style="background: white;"><td style="padding: 8px; border: 1px solid #000; font-weight: bold;">PEDIDOS ENTREGADOS</td><td style="padding: 8px; border: 1px solid #000; font-weight: 900; text-align: center;">{f_p(prom_ped)} PEDIDOS</td></tr>
+                                    <tr style="background: white;"><td style="padding: 8px; border: 1px solid #000; font-weight: bold;">BULTOS ENTREGADOS</td><td style="padding: 8px; border: 1px solid #000; font-weight: 900; text-align: center;">{f_p(prom_bul)} BULTOS</td></tr>
+                                    <tr style="background: white;"><td style="padding: 8px; border: 1px solid #000; font-weight: bold;">KILOMETRAJE DIARIO</td><td style="padding: 8px; border: 1px solid #000; font-weight: 900; text-align: center;">{f_p(prom_kms)} Kms</td></tr>
+                                </table>
+                                
+                                <div style="width: 14%; display: flex; align-items: center; justify-content: center;">
+                                    <img src="{logo_b64}" style="width: 100%;">
+                                </div>
+                                
+                                <table style="width: 42%; border-collapse: collapse; border: 2px solid #000; font-size: 13px;">
+                                    <tr><th colspan="2" style="background: #1565c0; color: white; padding: 8px;">RESULTADO SEMANAL</th></tr>
+                                    <tr style="background: white;"><td style="padding: 8px; border: 1px solid #000; font-weight: bold;">PEDIDOS ENTREGADOS</td><td style="padding: 8px; border: 1px solid #000; font-weight: 900; text-align: center;">{f_p(total_pedidos)} PEDIDOS</td></tr>
+                                    <tr style="background: white;"><td style="padding: 8px; border: 1px solid #000; font-weight: bold;">BULTOS ENTREGADOS</td><td style="padding: 8px; border: 1px solid #000; font-weight: 900; text-align: center;">{f_p(total_bultos)} BULTOS</td></tr>
+                                    <tr style="background: white;"><td style="padding: 8px; border: 1px solid #000; font-weight: bold;">KILOMETRAJE SEMANAL</td><td style="padding: 8px; border: 1px solid #000; font-weight: 900; text-align: center;">{f_p(total_kms)} Kms</td></tr>
+                                </table>
+                            </div>
+
+                            <div style="background: #1565c0; color: white; text-align: center; font-size: 24px; font-weight: 900; padding: 10px; margin-top: 15px; border: 2px solid #000;">
+                                ESTADÍSTICA POR REGIONES
+                            </div>
+                            <div style="margin-top: 10px;">
+                                {bloque_oriente}
+                                {bloque_centro}
+                                {bloque_occidente}
+                            </div>
+                        </div>
+                    </div>
+                    <script>function capDespachos() {{ html2canvas(document.getElementById('piz-despachos'), {{scale: 2}}).then(canvas => {{ var link = document.createElement('a'); link.download = 'Resumen_Despachos_{int(num_sem)}.png'; link.href = canvas.toDataURL(); link.click(); }}); }}</script>
+                    </body></html>
+                    """
+                    components.html(html_pizarra_despachos, height=1300, scrolling=True)
+
+                    st.markdown("---")
+                    st.subheader("📱 Mensaje para WhatsApp (Resumen Ejecutivo)")
+                    msg_d = f"📊 *RESUMEN SEMANAL DE DESPACHOS*\n📅 Semana: {int(num_sem)} ({rango_fechas})\n\n"
+                    msg_d += f"*📍 RESULTADO GLOBAL:*\n"
+                    msg_d += f"🏥 Pedidos Entregados: *{f_p(total_pedidos)}*\n"
+                    msg_d += f"📦 Bultos Entregados: *{f_p(total_bultos)}*\n"
+                    msg_d += f"📏 Recorrido Total: *{f_p(total_kms)} Kms*\n\n"
+                    msg_d += f"*⏱️ PROMEDIO DIARIO:*\n"
+                    msg_d += f"🔹 Pedidos: {f_p(prom_ped)}\n🔹 Bultos: {f_p(prom_bul)}\n🔹 KMs: {f_p(prom_kms)}\n\n"
+                    msg_d += "✅ *Dashboard estadístico adjunto en imagen.*"
+                    st.code(msg_d, language="markdown")
