@@ -219,25 +219,19 @@ t_trafico, t_cierres, t_comensales, t_guardias, t_despachos = st.tabs([
     "🚚 Resumen de Despachos"
 ])
 
-# ---------------------------------------------------------
-# PESTAÑA 1: DESEMPEÑO DE TRÁFICO
-# ---------------------------------------------------------
+# (Las Pestañas 1, 2, 3 y 4 se mantienen exactamente iguales...)
 with t_trafico:
     st.info("Consolida la data de despachos diarios en una pizarra semanal de rutas.")
     if st.button("🚀 Generar Auditoría de Tráfico", type="primary", use_container_width=True):
         with st.spinner("Consolidando rutas de tráfico..."):
             df_raw = extraer_datos("PIZARRA_TRAFICO")
-            if df_raw.empty:
-                st.error("Error al conectar con la base de datos o la hoja está vacía.")
+            if df_raw.empty: st.error("Error al conectar con la base de datos o la hoja está vacía.")
             else:
                 c_sem = buscar_columna_estricta(df_raw, ['semana'])
                 if not c_sem: st.error("No se encontró columna Semana en Tráfico."); st.stop()
-                
                 df_raw['Num_Semana'] = df_raw[c_sem].astype(str).str.extract(r'(\d+)').astype(float)
                 df_sem = df_raw[df_raw['Num_Semana'] == num_sem].copy()
-
-                if df_sem.empty:
-                    st.warning(f"No hay registros de tráfico para la Semana {int(num_sem)}.")
+                if df_sem.empty: st.warning(f"No hay registros de tráfico para la Semana {int(num_sem)}.")
                 else:
                     c_fecha = buscar_columna_estricta(df_sem, ['fecha'])
                     c_dia = buscar_columna_estricta(df_sem, ['dia', 'día'], evitar=['fecha'])
@@ -250,100 +244,30 @@ with t_trafico:
                     c_unidad = buscar_columna_estricta(df_sem, ['unidad'])
                     c_farma = buscar_columna_estricta(df_sem, ['farmacia']) 
                     c_bultos = buscar_columna_estricta(df_sem, ['bulto'])
-
                     df_t = df_sem.drop_duplicates(subset=[c_fecha]).copy()
                     df_t['Fecha_Temp'] = pd.to_datetime(df_t[c_fecha], format='%d/%m/%Y', errors='coerce')
                     df_t = df_t.sort_values('Fecha_Temp')
-
                     df_sem[c_farma] = pd.to_numeric(df_sem[c_farma], errors='coerce').fillna(0)
                     df_sem[c_bultos] = pd.to_numeric(df_sem[c_bultos], errors='coerce').fillna(0)
-
-                    df_rutas = df_sem.groupby([c_ruta, c_zona], as_index=False).agg({
-                        c_unidad: 'last', c_farma: 'sum', c_bultos: 'sum'
-                    }).sort_values(by=[c_zona, c_ruta])
-                    
+                    df_rutas = df_sem.groupby([c_ruta, c_zona], as_index=False).agg({c_unidad: 'last', c_farma: 'sum', c_bultos: 'sum'}).sort_values(by=[c_zona, c_ruta])
                     total_f = df_rutas[c_farma].sum()
                     total_b = df_rutas[c_bultos].sum()
-
                     df_zonas = df_rutas.groupby(c_zona).agg({c_farma: 'sum', c_bultos: 'sum'}).reset_index()
                     df_zonas['%_Far'] = (df_zonas[c_farma] / total_f * 100).round(1).fillna(0)
                     df_zonas['%_Bul'] = (df_zonas[c_bultos] / total_b * 100).round(1).fillna(0)
-
                     color_dorado = "#d4af37"
-
                     filas_t = "".join([f"<tr><td>{r[c_fecha]}</td><td>{r[c_dia]}</td><td>{a_12h(r[c_h1])}</td><td>{a_12h(r[c_hu])}</td><td>{a_12h(r[c_it])}</td><td>{a_12h(r[c_ct])}</td></tr>" for _,r in df_t.iterrows()])
                     filas_r = "".join([f"<tr><td style='text-align:left;'>{r[c_ruta]}</td><td>{r[c_zona]}</td><td>{r[c_unidad]}</td><td style='font-weight:bold;'>{f_p(r[c_farma])}</td><td style='font-weight:bold;'>{f_p(r[c_bultos])}</td></tr>" for _,r in df_rutas.iterrows()])
                     filas_z = "".join([f"<tr><td style='text-align:left; font-weight:bold;'>{r[c_zona]}</td><td>{f_p(r[c_farma])}</td><td style='color:{color_azul}; font-weight:bold;'>{r['%_Far']}%</td><td>{f_p(r[c_bultos])}</td><td style='color:#e65100; font-weight:bold;'>{r['%_Bul']}%</td></tr>" for _,r in df_zonas.iterrows()])
-
-                    html_pdf = f"""
-                    <!DOCTYPE html><html><head>
-                        <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-                        <style>
-                        @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&display=swap');
-                        body {{ font-family: 'Montserrat', sans-serif; background:#525659; margin:0; padding-bottom: 20px; }}
-                        .page {{ width: 210mm; background: white; margin: 10mm auto; padding: 0; box-shadow: 0 0 10px rgba(0,0,0,0.5); overflow:hidden; border: 1px solid #000; }}
-                        .header-master {{ background: {color_azul}; color: white; padding: 25px 40px; display: flex; justify-content: space-between; align-items: center; border-bottom: 6px solid {color_dorado}; }}
-                        .header-info {{ text-align: right; }}
-                        .header-info h2 {{ margin: 0; font-weight: 900; font-size: 20px; text-transform: uppercase; }}
-                        .header-info p {{ margin: 0; font-size: 14px; font-weight: bold; color: {color_dorado}; }}
-                        .content-padding {{ padding: 12mm; }}
-                        .section-title {{ border-left: 6px solid {color_dorado}; background: #eee; color: #000; padding: 8px 15px; font-weight: 900; font-size: 13px; margin-top: 20px; border: 1px solid #000; }}
-                        table {{ width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 10px; border: 1px solid #000; }}
-                        th {{ background: {color_azul}; color: white; border: 1px solid #000; padding: 8px; text-transform: uppercase; }}
-                        td {{ border: 1px solid #000; padding: 6px; text-align: center; color: #000; }}
-                        .total-bar {{ background: #000; color: white; display: flex; justify-content: space-around; padding: 12px; margin-top: 10px; font-weight: 900; font-size: 13px; border: 1px solid {color_dorado}; }}
-                    </style></head><body>
-                        <div style="text-align:center; padding:20px; display: flex; justify-content: center; gap: 15px;">
-                            <button onclick="descargarFoto()" style="background:#d32f2f; color:white; border:none; padding:12px 30px; font-weight:bold; cursor:pointer; border-radius:5px;">📸 DESCARGAR PIZARRA (FOTO)</button>
-                        </div>
-                        <div class="page" id="pizarra-trafico">
-                            <div class="header-master">
-                                <img src="{logo_b64}" style="height: 55px;">
-                                <div class="header-info">
-                                    <h2>AUDITORÍA SEMANAL DE TRÁFICO</h2>
-                                    <h3 style="margin: 5px 0 0 0; color: #fff; font-size: 14px;">DEPARTAMENTO DE TRÁFICO</h3>
-                                    <p>Semana {int(num_sem)} ({rango_fechas})</p>
-                                </div>
-                            </div>
-                            <div class="content-padding">
-                                <div class="section-title">⏱️ 1. CRONOMETRÍA DE SALIDAS (CONTROL DE TIEMPOS)</div>
-                                <table><thead><tr><th>FECHA</th><th>DÍA</th><th>1ER LISTÍN</th><th>ÚLT. LISTÍN</th><th>INICIO TRÁFICO</th><th>FIN TRÁFICO</th></tr></thead>
-                                <tbody>{filas_t}</tbody></table>
-                                <div class="section-title">🚛 2. CONSOLIDADO DE RUTAS (GESTIÓN SEMANAL)</div>
-                                <table><thead><tr><th style='text-align:left;'>RUTA</th><th>ZONA</th><th>UNIDAD (ÚLT.)</th><th>FARMACIAS TOT.</th><th>BULTOS TOT.</th></tr></thead>
-                                <tbody>{filas_r}</tbody></table>
-                                <div class="total-bar"><span>TOTAL FARMACIAS: {f_p(total_f)}</span><span>TOTAL BULTOS: {f_p(total_b)}</span></div>
-                                <div class="section-title">🌍 3. DISTRIBUCIÓN POR ZONAS LOGÍSTICAS</div>
-                                <table><thead><tr><th style='text-align:left;'>ZONA</th><th>FARMACIAS</th><th>% FAR.</th><th>BULTOS</th><th>% BUL.</th></tr></thead>
-                                <tbody>{filas_z}</tbody></table>
-                            </div>
-                        </div>
-                        <script>
-                            function descargarFoto() {{
-                                html2canvas(document.getElementById('pizarra-trafico'), {{ scale: 2 }}).then(canvas => {{
-                                    var link = document.createElement('a');
-                                    link.download = 'Trafico_Semana_{int(num_sem)}.png';
-                                    link.href = canvas.toDataURL();
-                                    link.click();
-                                }});
-                            }}
-                        </script>
-                    </body></html>
-                    """
+                    html_pdf = f"""<!DOCTYPE html><html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script><style>@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&display=swap');body {{ font-family: 'Montserrat', sans-serif; background:#525659; margin:0; padding-bottom: 20px; }} .page {{ width: 210mm; background: white; margin: 10mm auto; padding: 0; box-shadow: 0 0 10px rgba(0,0,0,0.5); overflow:hidden; border: 1px solid #000; }} .header-master {{ background: {color_azul}; color: white; padding: 25px 40px; display: flex; justify-content: space-between; align-items: center; border-bottom: 6px solid {color_dorado}; }} .header-info {{ text-align: right; }} .header-info h2 {{ margin: 0; font-weight: 900; font-size: 20px; text-transform: uppercase; }} .header-info p {{ margin: 0; font-size: 14px; font-weight: bold; color: {color_dorado}; }} .content-padding {{ padding: 12mm; }} .section-title {{ border-left: 6px solid {color_dorado}; background: #eee; color: #000; padding: 8px 15px; font-weight: 900; font-size: 13px; margin-top: 20px; border: 1px solid #000; }} table {{ width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 10px; border: 1px solid #000; }} th {{ background: {color_azul}; color: white; border: 1px solid #000; padding: 8px; text-transform: uppercase; }} td {{ border: 1px solid #000; padding: 6px; text-align: center; color: #000; }} .total-bar {{ background: #000; color: white; display: flex; justify-content: space-around; padding: 12px; margin-top: 10px; font-weight: 900; font-size: 13px; border: 1px solid {color_dorado}; }}</style></head><body><div style="text-align:center; padding:20px; display: flex; justify-content: center; gap: 15px;"><button onclick="descargarFoto()" style="background:#d32f2f; color:white; border:none; padding:12px 30px; font-weight:bold; cursor:pointer; border-radius:5px;">📸 DESCARGAR PIZARRA (FOTO)</button></div><div class="page" id="pizarra-trafico"><div class="header-master"><img src="{logo_b64}" style="height: 55px;"><div class="header-info"><h2>AUDITORÍA SEMANAL DE TRÁFICO</h2><h3 style="margin: 5px 0 0 0; color: #fff; font-size: 14px;">DEPARTAMENTO DE TRÁFICO</h3><p>Semana {int(num_sem)} ({rango_fechas})</p></div></div><div class="content-padding"><div class="section-title">⏱️ 1. CRONOMETRÍA DE SALIDAS (CONTROL DE TIEMPOS)</div><table><thead><tr><th>FECHA</th><th>DÍA</th><th>1ER LISTÍN</th><th>ÚLT. LISTÍN</th><th>INICIO TRÁFICO</th><th>FIN TRÁFICO</th></tr></thead><tbody>{filas_t}</tbody></table><div class="section-title">🚛 2. CONSOLIDADO DE RUTAS (GESTIÓN SEMANAL)</div><table><thead><tr><th style='text-align:left;'>RUTA</th><th>ZONA</th><th>UNIDAD (ÚLT.)</th><th>FARMACIAS TOT.</th><th>BULTOS TOT.</th></tr></thead><tbody>{filas_r}</tbody></table><div class="total-bar"><span>TOTAL FARMACIAS: {f_p(total_f)}</span><span>TOTAL BULTOS: {f_p(total_b)}</span></div><div class="section-title">🌍 3. DISTRIBUCIÓN POR ZONAS LOGÍSTICAS</div><table><thead><tr><th style='text-align:left;'>ZONA</th><th>FARMACIAS</th><th>% FAR.</th><th>BULTOS</th><th>% BUL.</th></tr></thead><tbody>{filas_z}</tbody></table></div></div><script>function descargarFoto() {{ html2canvas(document.getElementById('pizarra-trafico'), {{ scale: 2 }}).then(canvas => {{ var link = document.createElement('a'); link.download = 'Trafico_Semana_{int(num_sem)}.png'; link.href = canvas.toDataURL(); link.click(); }}); }}</script></body></html>"""
                     components.html(html_pdf, height=1200, scrolling=True)
-
                     st.markdown("---")
                     st.subheader("📱 Mensaje para WhatsApp (Tráfico)")
-                    txt_ws = f"*Reporte Semanal de Tráfico Drotaca* 🚚\n📅 Semana: {int(num_sem)} ({rango_fechas})\n\n"
-                    txt_ws += f"*RESUMEN OPERATIVO:*\n📍 Total Despachos: {len(df_rutas)}\n🏥 Farmacias Atendidas: {f_p(total_f)}\n📦 Total Bultos Procesados: {f_p(total_b)}\n\n"
-                    txt_ws += f"*PESO LOGÍSTICO POR ZONA:*\n"
+                    txt_ws = f"*Reporte Semanal de Tráfico Drotaca* 🚚\n📅 Semana: {int(num_sem)} ({rango_fechas})\n\n*RESUMEN OPERATIVO:*\n📍 Total Despachos: {len(df_rutas)}\n🏥 Farmacias Atendidas: {f_p(total_f)}\n📦 Total Bultos Procesados: {f_p(total_b)}\n\n*PESO LOGÍSTICO POR ZONA:*\n"
                     for _, r in df_zonas.iterrows(): txt_ws += f"▪️ {r[c_zona]}: {f_p(r[c_bultos])} Bultos ({r['%_Bul']}%)\n"
                     txt_ws += "\n✅ *Pizarra de auditoría adjunta.*"
                     st.code(txt_ws, language="markdown")
 
-# ---------------------------------------------------------
-# PESTAÑA 2: CRONOMETRÍA DE CIERRES
-# ---------------------------------------------------------
 with t_cierres:
     st.info("Análisis de Apertura y Cierres Drotaca 2.0 (Lunes a Viernes).")
     if st.button("🕒 Procesar Cronometría de Cierres", type="primary", use_container_width=True):
@@ -351,19 +275,12 @@ with t_cierres:
             df_a_raw = extraer_datos("SEG_APERTURA")
             df_j_raw = extraer_datos("SEG_CIERRE_JUANITA")
             df_d_raw = extraer_datos("SEG_CIERRE_DROTACA")
-            
-            if df_d_raw.empty:
-                st.error("No se pudo acceder a la hoja principal SEG_CIERRE_DROTACA.")
+            if df_d_raw.empty: st.error("No se pudo acceder a la hoja principal SEG_CIERRE_DROTACA.")
             else:
                 dias_base = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes"]
                 dias_display = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]
-                
                 df_resumen = pd.DataFrame({"Dia_Norm": dias_base, "Día": dias_display})
-                df_resumen['Apertura'] = "N/R"
-                df_resumen['Juanita'] = "N/R"
-                df_resumen['Drotaca'] = "N/R"
-                df_resumen['Fecha'] = ""
-
+                df_resumen['Apertura'] = "N/R"; df_resumen['Juanita'] = "N/R"; df_resumen['Drotaca'] = "N/R"; df_resumen['Fecha'] = ""
                 if not df_a_raw.empty:
                     c_sem_a = buscar_columna_estricta(df_a_raw, ['semana'])
                     if c_sem_a:
@@ -375,7 +292,6 @@ with t_cierres:
                             f_a['Dia_Norm'] = f_a[c_dia_a].apply(norm_dia)
                             dict_a = f_a.groupby('Dia_Norm')[c_hora_a].last().to_dict()
                             df_resumen['Apertura'] = df_resumen['Dia_Norm'].map(dict_a).fillna("N/R")
-
                 if not df_j_raw.empty:
                     c_sem_j = buscar_columna_estricta(df_j_raw, ['semana'])
                     if c_sem_j:
@@ -387,162 +303,53 @@ with t_cierres:
                             f_j['Dia_Norm'] = f_j[c_dia_j].apply(norm_dia)
                             dict_j = f_j.groupby('Dia_Norm')[c_hora_j].last().to_dict()
                             df_resumen['Juanita'] = df_resumen['Dia_Norm'].map(dict_j).fillna("N/R")
-
                 pivot_deps = pd.DataFrame()
                 if not df_d_raw.empty:
                     c_sem_d = buscar_columna_estricta(df_d_raw, ['semana'])
                     if c_sem_d:
                         df_d_raw['Num_Semana'] = df_d_raw[c_sem_d].astype(str).str.extract(r'(\d+)').astype(float)
                         f_d = df_d_raw[df_d_raw['Num_Semana'] == num_sem].copy()
-                        
                         if not f_d.empty:
                             c_dia_d = buscar_columna_estricta(f_d, ['dia', 'día'], evitar=['fecha'])
                             c_fecha_d = buscar_columna_estricta(f_d, ['fecha'])
                             c_dep = buscar_columna_estricta(f_d, ['departamento', 'area', 'área'], evitar=['fecha', 'hora'])
                             c_hora_sal = buscar_columna_estricta(f_d, ['hora salida', 'salida', 'hora', 'cierre'], evitar=['fecha'])
-                            
                             f_d['Dia_Norm'] = f_d[c_dia_d].apply(norm_dia) if c_dia_d else ""
-                            
                             if c_dep and c_hora_sal and c_dia_d:
                                 filtro_cierre_gen = f_d[c_dep].astype(str).str.upper().str.contains(r"CIERRE DE DROG|CIERRE GENERAL|CIERRE DROTACA", na=False)
                                 df_cierre_gral = f_d[filtro_cierre_gen]
-                                
                                 if not df_cierre_gral.empty:
                                     dict_d = df_cierre_gral.groupby('Dia_Norm')[c_hora_sal].last().to_dict()
                                     df_resumen['Drotaca'] = df_resumen['Dia_Norm'].map(dict_d).fillna("N/R")
-                                
                                 if c_fecha_d:
                                     dict_f = f_d.dropna(subset=[c_fecha_d]).groupby('Dia_Norm')[c_fecha_d].last().to_dict()
                                     df_resumen['Fecha'] = df_resumen['Dia_Norm'].map(dict_f).fillna("")
-
                                 df_deps = f_d[~filtro_cierre_gen].dropna(subset=[c_dep, c_hora_sal]).copy()
-                                df_deps = df_deps[df_deps[c_dep].str.strip() != ""]
-                                df_deps = df_deps[df_deps[c_dep].astype(str).str.lower() != "nan"]
-                                
+                                df_deps = df_deps[df_deps[c_dep].str.strip() != ""]; df_deps = df_deps[df_deps[c_dep].astype(str).str.lower() != "nan"]
                                 if not df_deps.empty:
                                     pivot_deps = df_deps.pivot_table(index=c_dep, columns='Dia_Norm', values=c_hora_sal, aggfunc='last')
                                     for d in dias_base:
                                         if d not in pivot_deps.columns: pivot_deps[d] = "N/R"
                                     pivot_deps = pivot_deps[dias_base].fillna("N/R")
                                     pivot_deps['Promedio'] = pivot_deps.apply(lambda row: calcular_promedio_horas(row.tolist()), axis=1)
-
                 prom_juanita = calcular_promedio_horas(df_resumen['Juanita'].tolist())
                 prom_drotaca = calcular_promedio_horas(df_resumen['Drotaca'].tolist())
-                
                 filas_gral_html = ""
                 for _, r in df_resumen.iterrows():
-                    hora_ap = a_12h(r['Apertura'])
-                    hora_ju = a_12h(r['Juanita'])
-                    hora_dr = a_12h(r['Drotaca'])
-                    
+                    hora_ap = a_12h(r['Apertura']); hora_ju = a_12h(r['Juanita']); hora_dr = a_12h(r['Drotaca'])
                     color_ap = "#2e7d32" if "06:" in hora_ap or "07:00" in hora_ap else "#000"
                     color_ju = "#e65100" if hora_ju != "N/R" else "#777"
-                    
-                    filas_gral_html += f"""
-                    <tr style="text-align: center;">
-                        <td style="padding: 15px; font-weight: bold; background-color: #f8f9fa; border: 1px solid #000;">{r['Día'].upper()}<br><small style="color:#666;">{r['Fecha']}</small></td>
-                        <td style="padding: 15px; color: {color_ap}; font-weight: bold; font-size: 16px; border: 1px solid #000;">{hora_ap}</td>
-                        <td style="padding: 15px; color: {color_ju}; font-weight: bold; font-size: 16px; border: 1px solid #000;">{hora_ju}</td>
-                        <td style="padding: 15px; font-weight: 900; font-size: 16px; border: 1px solid #000;">{hora_dr}</td>
-                    </tr>
-                    """
-
-                html_pizarra_general = f"""
-                <html><head>
-                    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-                    <style>
-                        @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&display=swap');
-                        body {{ font-family: 'Montserrat', sans-serif; padding: 20px; background-color: #f0f2f6; }}
-                        .pizarra {{ background: white; width: 900px; margin: auto; border-radius: 15px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid {color_azul}; margin-bottom: 40px; }}
-                        .header {{ background: {color_azul}; color: white; padding: 30px; display: flex; justify-content: space-between; align-items: center; }}
-                        table {{ width: 100%; border-collapse: collapse; }}
-                        th {{ background: #f1f4f9; color: {color_azul}; padding: 15px; text-transform: uppercase; font-size: 12px; border: 1px solid #000; }}
-                        .footer-promedios {{ background: #f1f4f9; padding: 20px; display: flex; justify-content: space-around; border-top: 2px solid {color_azul}; }}
-                        .promedio-box {{ text-align: center; }}
-                        .promedio-label {{ font-size: 12px; font-weight: bold; color: #555; text-transform: uppercase; }}
-                        .promedio-val {{ font-size: 20px; font-weight: 900; color: {color_azul}; }}
-                    </style>
-                </head><body>
-                    <div style="text-align: center; margin-bottom: 15px;">
-                        <button onclick="capturar('pizarra-general', 'Cierres_Generales_Semana_{int(num_sem)}.png')" style="background: #2e7d32; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR REPORTE GENERAL</button>
-                    </div>
-                    <div class="pizarra" id="pizarra-general">
-                        <div class="header">
-                            <img src="{logo_b64}" style="height: 50px;">
-                            <div style="text-align: right;">
-                                <div style="font-size: 22px; font-weight: 900; letter-spacing: 1px;">REPORTE SEMANAL DE GESTIÓN</div>
-                                <div style="font-size: 14px; font-weight: bold; opacity: 0.9;">SEMANA {int(num_sem)} ({rango_fechas_lv}) | CIERRES GENERALES</div>
-                            </div>
-                        </div>
-                        <table>
-                            <thead><tr><th>DÍA</th><th>APERTURA DROTACA</th><th>CIERRE JUANITA</th><th>CIERRE DROTACA</th></tr></thead>
-                            <tbody>{filas_gral_html}</tbody>
-                        </table>
-                        <div class="footer-promedios">
-                            <div class="promedio-box">
-                                <div class="promedio-label">📊 Promedio Cierre Drotaca</div>
-                                <div class="promedio-val" style="color: #2e7d32;">{prom_drotaca}</div>
-                            </div>
-                            <div class="promedio-box">
-                                <div class="promedio-label">📊 Promedio Cierre Juanita</div>
-                                <div class="promedio-val" style="color: #e65100;">{prom_juanita}</div>
-                            </div>
-                        </div>
-                    </div>
-                """
-
+                    filas_gral_html += f"""<tr style="text-align: center;"><td style="padding: 15px; font-weight: bold; background-color: #f8f9fa; border: 1px solid #000;">{r['Día'].upper()}<br><small style="color:#666;">{r['Fecha']}</small></td><td style="padding: 15px; color: {color_ap}; font-weight: bold; font-size: 16px; border: 1px solid #000;">{hora_ap}</td><td style="padding: 15px; color: {color_ju}; font-weight: bold; font-size: 16px; border: 1px solid #000;">{hora_ju}</td><td style="padding: 15px; font-weight: 900; font-size: 16px; border: 1px solid #000;">{hora_dr}</td></tr>"""
+                html_pizarra_general = f"""<html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script><style>@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&display=swap');body {{ font-family: 'Montserrat', sans-serif; padding: 20px; background-color: #f0f2f6; }} .pizarra {{ background: white; width: 900px; margin: auto; border-radius: 15px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid {color_azul}; margin-bottom: 40px; }} .header {{ background: {color_azul}; color: white; padding: 30px; display: flex; justify-content: space-between; align-items: center; }} table {{ width: 100%; border-collapse: collapse; }} th {{ background: #f1f4f9; color: {color_azul}; padding: 15px; text-transform: uppercase; font-size: 12px; border: 1px solid #000; }} .footer-promedios {{ background: #f1f4f9; padding: 20px; display: flex; justify-content: space-around; border-top: 2px solid {color_azul}; }} .promedio-box {{ text-align: center; }} .promedio-label {{ font-size: 12px; font-weight: bold; color: #555; text-transform: uppercase; }} .promedio-val {{ font-size: 20px; font-weight: 900; color: {color_azul}; }}</style></head><body><div style="text-align: center; margin-bottom: 15px;"><button onclick="capturar('pizarra-general', 'Cierres_Generales_Semana_{int(num_sem)}.png')" style="background: #2e7d32; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR REPORTE GENERAL</button></div><div class="pizarra" id="pizarra-general"><div class="header"><img src="{logo_b64}" style="height: 50px;"><div style="text-align: right;"><div style="font-size: 22px; font-weight: 900; letter-spacing: 1px;">REPORTE SEMANAL DE GESTIÓN</div><div style="font-size: 14px; font-weight: bold; opacity: 0.9;">SEMANA {int(num_sem)} ({rango_fechas_lv}) | CIERRES GENERALES</div></div></div><table><thead><tr><th>DÍA</th><th>APERTURA DROTACA</th><th>CIERRE JUANITA</th><th>CIERRE DROTACA</th></tr></thead><tbody>{filas_gral_html}</tbody></table><div class="footer-promedios"><div class="promedio-box"><div class="promedio-label">📊 Promedio Cierre Drotaca</div><div class="promedio-val" style="color: #2e7d32;">{prom_drotaca}</div></div><div class="promedio-box"><div class="promedio-label">📊 Promedio Cierre Juanita</div><div class="promedio-val" style="color: #e65100;">{prom_juanita}</div></div></div></div>"""
                 html_pizarra_deps = ""
                 if not pivot_deps.empty:
                     filas_deps_html = ""
                     for dep_nombre, row in pivot_deps.iterrows():
                         tds = "".join([f"<td style='padding: 10px; border: 1px solid #000; font-weight: bold; font-size: 13px;'>{a_12h(row[dia])}</td>" for dia in dias_base])
                         prom = row['Promedio']
-                        filas_deps_html += f"""
-                        <tr style="text-align: center;">
-                            <td style="padding: 10px; border: 1px solid #000; font-weight: 900; background-color: #f8f9fa; text-align: left; color: {color_azul}; font-size: 12px;">{str(dep_nombre).upper()}</td>
-                            {tds}
-                            <td style="padding: 10px; border: 1px solid #000; font-weight: 900; font-size: 14px; color: #1b5e20; background-color: #e8f5e9;">{prom}</td>
-                        </tr>
-                        """
-
-                    html_pizarra_deps = f"""
-                        <div style="text-align: center; margin-bottom: 15px; margin-top: 30px;">
-                            <button onclick="capturar('pizarra-departamentos', 'Cierres_Departamentos_Semana_{int(num_sem)}.png')" style="background: #e65100; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR DEPARTAMENTOS</button>
-                        </div>
-                        <div class="pizarra" id="pizarra-departamentos" style="width: 1050px;">
-                            <div class="header" style="background: #1565c0;">
-                                <img src="{logo_b64}" style="height: 50px;">
-                                <div style="text-align: right;">
-                                    <div style="font-size: 22px; font-weight: 900; letter-spacing: 1px;">MATRIZ DE DEPARTAMENTOS</div>
-                                    <div style="font-size: 14px; font-weight: bold; opacity: 0.9;">SEMANA {int(num_sem)} ({rango_fechas_lv}) | HORARIOS DE SALIDA</div>
-                                </div>
-                            </div>
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th style="text-align: left; border: 1px solid #000;">DEPARTAMENTO</th>
-                                        <th style="border: 1px solid #000;">LUNES</th>
-                                        <th style="border: 1px solid #000;">MARTES</th>
-                                        <th style="border: 1px solid #000;">MIÉRCOLES</th>
-                                        <th style="border: 1px solid #000;">JUEVES</th>
-                                        <th style="border: 1px solid #000;">VIERNES</th>
-                                        <th style="background: #c8e6c9; color: #1b5e20; border: 1px solid #000;">PROMEDIO</th>
-                                    </tr>
-                                </thead>
-                                <tbody>{filas_deps_html}</tbody>
-                            </table>
-                            <div style="padding: 15px; text-align: center; font-size: 11px; color: #666; font-weight: bold; background: #f1f4f9;">
-                                REPORTE GENERADO POR CONTROL TOWER LOGÍSTICA - DROTACA VENEZUELA
-                            </div>
-                        </div>
-                        <script>
-                            function capturar(id, filename) {{ html2canvas(document.getElementById(id), {{ scale: 2 }}).then(canvas => {{ var link = document.createElement('a'); link.download = filename; link.href = canvas.toDataURL(); link.click(); }}); }}
-                        </script>
-                    </body></html>
-                    """
-
+                        filas_deps_html += f"""<tr style="text-align: center;"><td style="padding: 10px; border: 1px solid #000; font-weight: 900; background-color: #f8f9fa; text-align: left; color: {color_azul}; font-size: 12px;">{str(dep_nombre).upper()}</td>{tds}<td style="padding: 10px; border: 1px solid #000; font-weight: 900; font-size: 14px; color: #1b5e20; background-color: #e8f5e9;">{prom}</td></tr>"""
+                    html_pizarra_deps = f"""<div style="text-align: center; margin-bottom: 15px; margin-top: 30px;"><button onclick="capturar('pizarra-departamentos', 'Cierres_Departamentos_Semana_{int(num_sem)}.png')" style="background: #e65100; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR DEPARTAMENTOS</button></div><div class="pizarra" id="pizarra-departamentos" style="width: 1050px;"><div class="header" style="background: #1565c0;"><img src="{logo_b64}" style="height: 50px;"><div style="text-align: right;"><div style="font-size: 22px; font-weight: 900; letter-spacing: 1px;">MATRIZ DE DEPARTAMENTOS</div><div style="font-size: 14px; font-weight: bold; opacity: 0.9;">SEMANA {int(num_sem)} ({rango_fechas_lv}) | HORARIOS DE SALIDA</div></div></div><table><thead><tr><th style="text-align: left; border: 1px solid #000;">DEPARTAMENTO</th><th style="border: 1px solid #000;">LUNES</th><th style="border: 1px solid #000;">MARTES</th><th style="border: 1px solid #000;">MIÉRCOLES</th><th style="border: 1px solid #000;">JUEVES</th><th style="border: 1px solid #000;">VIERNES</th><th style="background: #c8e6c9; color: #1b5e20; border: 1px solid #000;">PROMEDIO</th></tr></thead><tbody>{filas_deps_html}</tbody></table><div style="padding: 15px; text-align: center; font-size: 11px; color: #666; font-weight: bold; background: #f1f4f9;">REPORTE GENERADO POR CONTROL TOWER LOGÍSTICA - DROTACA VENEZUELA</div></div><script>function capturar(id, filename) {{ html2canvas(document.getElementById(id), {{ scale: 2 }}).then(canvas => {{ var link = document.createElement('a'); link.download = filename; link.href = canvas.toDataURL(); link.click(); }}); }}</script></body></html>"""
                 components.html(html_pizarra_general + html_pizarra_deps, height=1600, scrolling=True)
-
                 st.markdown("---")
                 st.subheader("📱 Resumen para WhatsApp (Cierres y Departamentos)")
                 msg_w = f"⏱️ *Reporte de Cierres Semanal - Drotaca 2.0*\n📅 Semana: {int(num_sem)} ({rango_fechas_lv})\n\n📍 *Cronometría de la Droguería:*\n🔹 Promedio Cierre General: *{prom_drotaca}*\n🔹 Promedio Cierre Juanita: *{prom_juanita}*\n\n"
@@ -557,9 +364,6 @@ with t_cierres:
                 msg_w += f"\n---\n✅ Tablas de auditoría detalladas adjuntas en imagen."
                 st.code(msg_w, language="markdown")
 
-# ---------------------------------------------------------
-# PESTAÑA 3: PIZARRA COMENSALES
-# ---------------------------------------------------------
 with t_comensales:
     st.info("Consolida el consumo de comedor por departamento de Lunes a Viernes.")
     if st.button("🍽️ Generar Auditoría de Comensales", type="primary", use_container_width=True):
@@ -575,61 +379,29 @@ with t_comensales:
                     c_sem_c = buscar_columna_estricta(df_com_raw, ['semana'])
                     if c_sem_c: df_com_raw['Num_Semana'] = df_com_raw[c_sem_c].astype(str).str.extract(r'(\d+)').astype(float)
                     else: df_com_raw['Num_Semana'] = num_sem
-                
                 df_com = df_com_raw[df_com_raw['Num_Semana'] == num_sem].copy()
                 if df_com.empty: st.warning(f"No hay registros de comensales para la Semana {int(num_sem)}.")
                 else:
                     if c_fecha_c:
                         df_com = df_com.dropna(subset=['Fecha_DT'])
                         df_com = df_com[df_com['Fecha_DT'].dt.weekday < 5].copy()
-
                     c_dep = buscar_columna_estricta(df_com, ['departamento', 'area'])
-                    c_des = buscar_columna_estricta(df_com, ['desayuno'])
-                    c_alm = buscar_columna_estricta(df_com, ['almuerzo'])
-                    c_cen = buscar_columna_estricta(df_com, ['cena'])
-                    
+                    c_des = buscar_columna_estricta(df_com, ['desayuno']); c_alm = buscar_columna_estricta(df_com, ['almuerzo']); c_cen = buscar_columna_estricta(df_com, ['cena'])
                     if not c_dep: st.error("No se detectó columna 'Departamento'."); st.stop()
-                    
                     df_com[c_dep] = df_com[c_dep].astype(str).str.upper().str.strip()
                     for c in [c_des, c_alm, c_cen]:
                         if c: df_com[c] = pd.to_numeric(df_com[c], errors='coerce').fillna(0)
-                    
                     df_grp = df_com.groupby(c_dep).agg({c_des: 'sum' if c_des else lambda x: 0, c_alm: 'sum' if c_alm else lambda x: 0, c_cen: 'sum' if c_cen else lambda x: 0}).reset_index()
                     df_grp['Total_Servicios'] = df_grp[c_des] + df_grp[c_alm] + df_grp[c_cen]
                     df_grp = df_grp[df_grp['Total_Servicios'] > 0].sort_values('Total_Servicios', ascending=False)
                     gran_total = df_grp['Total_Servicios'].sum()
                     df_grp['%'] = (df_grp['Total_Servicios'] / gran_total * 100).fillna(0)
-                    
                     tot_des = df_grp[c_des].sum() if c_des else 0; tot_alm = df_grp[c_alm].sum() if c_alm else 0; tot_cen = df_grp[c_cen].sum() if c_cen else 0
-
                     filas_com_html = ""
                     for _, r in df_grp.iterrows():
                         filas_com_html += f"<tr style='text-align: center;'><td style='padding: 12px; font-weight: bold; text-align: left; background-color: #e3f2fd; color: #333; border: 1px solid #000;'>{r[c_dep]}</td><td style='padding: 12px; color: #555; border: 1px solid #000;'>{f_p(r[c_des]) if c_des else '0'}</td><td style='padding: 12px; color: #555; border: 1px solid #000;'>{f_p(r[c_alm]) if c_alm else '0'}</td><td style='padding: 12px; color: #555; border: 1px solid #000;'>{f_p(r[c_cen]) if c_cen else '0'}</td><td style='padding: 12px; font-weight: 900; font-size: 15px; color: #000; border: 1px solid #000;'>{f_p(r['Total_Servicios'])}</td><td style='padding: 12px; font-weight: bold; color: #555; border: 1px solid #000;'>{r['%']:.1f}%</td></tr>"
-                        
-                    html_pizarra_comensales = f"""
-                    <html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head><body>
-                        <div style="text-align: center; margin-bottom: 15px;"><button onclick="capturarComensales()" style="background: {color_azul}; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR PIZARRA COMENSALES</button></div>
-                        <div id="pizarra-comensales" style="background: white; width: 900px; margin: auto; border-radius: 15px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid {color_azul}; font-family: 'Montserrat', sans-serif;">
-                            <div style="background: {color_azul}; color: white; padding: 30px; display: flex; justify-content: space-between; align-items: center;">
-                                <img src="{logo_b64}" style="height: 50px;">
-                                <div style="text-align: right;"><div style="font-size: 22px; font-weight: 900; letter-spacing: 1px;">AUDITORÍA DE COMENSALES</div><div style="font-size: 14px; font-weight: bold; opacity: 0.9;">SEMANA {int(num_sem)} ({rango_fechas_lv})</div></div>
-                            </div>
-                            <table style="width: 100%; border-collapse: collapse;">
-                                <thead><tr><th style="background: #e3f2fd; color: {color_azul}; padding: 15px; text-align: left; border: 1px solid #000;">DEPARTAMENTO</th><th style="background: #e3f2fd; color: {color_azul}; padding: 15px; border: 1px solid #000;">DESAYUNOS</th><th style="background: #e3f2fd; color: {color_azul}; padding: 15px; border: 1px solid #000;">ALMUERZOS</th><th style="background: #e3f2fd; color: {color_azul}; padding: 15px; border: 1px solid #000;">CENAS</th><th style="background: #bbdefb; color: {color_azul}; padding: 15px; border: 1px solid #000;">TOTAL PLATOS</th><th style="background: #e3f2fd; color: {color_azul}; padding: 15px; border: 1px solid #000;">% CONSUMO</th></tr></thead>
-                                <tbody>{filas_com_html}</tbody>
-                            </table>
-                            <div style="background: #bbdefb; padding: 15px; display: flex; justify-content: space-around; border-top: 3px solid {color_azul}; font-weight: 900; color: #0d47a1;">
-                                <div style="text-align: center;"><span style="font-size:12px; color:#555;">TOT. DESAYUNOS</span><br><span style="font-size:20px;">{f_p(tot_des)}</span></div>
-                                <div style="text-align: center;"><span style="font-size:12px; color:#555;">TOT. ALMUERZOS</span><br><span style="font-size:20px;">{f_p(tot_alm)}</span></div>
-                                <div style="text-align: center;"><span style="font-size:12px; color:#555;">TOT. CENAS</span><br><span style="font-size:20px;">{f_p(tot_cen)}</span></div>
-                                <div style="text-align: center; color:{color_azul};"><span style="font-size:12px;">GRAN TOTAL</span><br><span style="font-size:24px; color:#000;">{f_p(gran_total)}</span></div>
-                            </div>
-                        </div>
-                        <script>function capturarComensales() {{ html2canvas(document.getElementById('pizarra-comensales'), {{ scale: 2 }}).then(canvas => {{ var link = document.createElement('a'); link.download = 'Comensales_Semana_{int(num_sem)}.png'; link.href = canvas.toDataURL(); link.click(); }}); }}</script>
-                    </body></html>
-                    """
+                    html_pizarra_comensales = f"""<html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head><body><div style="text-align: center; margin-bottom: 15px;"><button onclick="capturarComensales()" style="background: {color_azul}; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR PIZARRA COMENSALES</button></div><div id="pizarra-comensales" style="background: white; width: 900px; margin: auto; border-radius: 15px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 2px solid {color_azul}; font-family: 'Montserrat', sans-serif;"><div style="background: {color_azul}; color: white; padding: 30px; display: flex; justify-content: space-between; align-items: center;"><img src="{logo_b64}" style="height: 50px;"><div style="text-align: right;"><div style="font-size: 22px; font-weight: 900; letter-spacing: 1px;">AUDITORÍA DE COMENSALES</div><div style="font-size: 14px; font-weight: bold; opacity: 0.9;">SEMANA {int(num_sem)} ({rango_fechas_lv})</div></div></div><table style="width: 100%; border-collapse: collapse;"><thead><tr><th style="background: #e3f2fd; color: {color_azul}; padding: 15px; text-align: left; border: 1px solid #000;">DEPARTAMENTO</th><th style="background: #e3f2fd; color: {color_azul}; padding: 15px; border: 1px solid #000;">DESAYUNOS</th><th style="background: #e3f2fd; color: {color_azul}; padding: 15px; border: 1px solid #000;">ALMUERZOS</th><th style="background: #e3f2fd; color: {color_azul}; padding: 15px; border: 1px solid #000;">CENAS</th><th style="background: #bbdefb; color: {color_azul}; padding: 15px; border: 1px solid #000;">TOTAL PLATOS</th><th style="background: #e3f2fd; color: {color_azul}; padding: 15px; border: 1px solid #000;">% CONSUMO</th></tr></thead><tbody>{filas_com_html}</tbody></table><div style="background: #bbdefb; padding: 15px; display: flex; justify-content: space-around; border-top: 3px solid {color_azul}; font-weight: 900; color: #0d47a1;"><div style="text-align: center;"><span style="font-size:12px; color:#555;">TOT. DESAYUNOS</span><br><span style="font-size:20px;">{f_p(tot_des)}</span></div><div style="text-align: center;"><span style="font-size:12px; color:#555;">TOT. ALMUERZOS</span><br><span style="font-size:20px;">{f_p(tot_alm)}</span></div><div style="text-align: center;"><span style="font-size:12px; color:#555;">TOT. CENAS</span><br><span style="font-size:20px;">{f_p(tot_cen)}</span></div><div style="text-align: center; color:{color_azul};"><span style="font-size:12px;">GRAN TOTAL</span><br><span style="font-size:24px; color:#000;">{f_p(gran_total)}</span></div></div></div><script>function capturarComensales() {{ html2canvas(document.getElementById('pizarra-comensales'), {{ scale: 2 }}).then(canvas => {{ var link = document.createElement('a'); link.download = 'Comensales_Semana_{int(num_sem)}.png'; link.href = canvas.toDataURL(); link.click(); }}); }}</script></body></html>"""
                     components.html(html_pizarra_comensales, height=1200, scrolling=True)
-
                     st.markdown("---")
                     st.subheader("📱 Resumen para WhatsApp (Comedor)")
                     msg_c = f"🍽️ *Reporte Semanal de Comensales - Drotaca*\n📅 Semana: {int(num_sem)} ({rango_fechas_lv})\n\n*RESUMEN GENERAL:*\n🍳 Desayunos Servidos: *{f_p(tot_des)}*\n🍲 Almuerzos Servidos: *{f_p(tot_alm)}*\n🍝 Cenas Servidas: *{f_p(tot_cen)}*\n📊 Gran Total de Platos: *{f_p(gran_total)}*\n\n*TOP 5 DEPARTAMENTOS DE MAYOR CONSUMO:*\n"
@@ -637,15 +409,10 @@ with t_comensales:
                     msg_c += f"\n✅ Pizarra detallada de comedor adjunta."
                     st.code(msg_c, language="markdown")
 
-# ---------------------------------------------------------
-# PESTAÑA 4: GUARDIAS SEMANALES
-# ---------------------------------------------------------
 with t_guardias:
     st.info("Genera las pizarras de Guardia (Seguridad, Flota y Monitoreo).")
     if st.button("🛡️ Generar Pizarras de Guardias", type="primary", use_container_width=True):
         with st.spinner("Extrayendo bases de datos de Guardias..."):
-            
-            # --- GUARDIA DE SEGURIDAD ---
             df_seg_raw = extraer_datos("SEG_ROL_GUARDIA")
             if df_seg_raw.empty: st.error("No se encontraron registros en SEG_ROL_GUARDIA.")
             else:
@@ -657,139 +424,54 @@ with t_guardias:
                         for _, r in df_grupo.iterrows():
                             d_list = [f"✓ {x.strip()}" for x in str(r.get(c_diu, '')).split('\n') if x.strip()]
                             n_list = [f"✓ {x.strip()}" for x in str(r.get(c_noc, '')).split('\n') if x.strip()]
-                            d_html = "<br>".join(d_list)
-                            n_html = "<br>".join(n_list)
+                            d_html = "<br>".join(d_list); n_html = "<br>".join(n_list)
                             cant = str(r.get(c_cant, '')) if c_cant and pd.notna(r.get(c_cant, '')) else ""
                             filas_seg_html += f"<tr><td style='padding:10px; border:1px solid #000; font-weight:bold; color:{color_azul}; vertical-align:top;'>{r.get(c_area, '')}</td><td style='padding:10px; border:1px solid #000; text-align:center; font-weight:bold; vertical-align:top;'>{cant}</td><td style='padding:10px; border:1px solid #000; vertical-align:top;'>{d_html}</td><td style='padding:10px; border:1px solid #000; vertical-align:top;'>{n_html}</td></tr>"
-
-                        html_piz_seg = f"""
-                        <html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head>
-                        <body style="font-family: Arial, sans-serif; background-color: #f0f2f6; padding: 20px;">
-                        <div style="text-align: center; margin-bottom: 15px;">
-                            <button onclick="capSeg('{fecha_str.split()[0]}')" style="background: {color_azul}; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR {fecha_str.split()[0]}</button>
-                        </div>
-                        <div id="piz-seg-{fecha_str.split()[0]}" style="background:white; width:800px; margin:auto; border:2px solid {color_azul}; border-radius:12px; overflow:hidden; margin-bottom: 40px;">
-                            <div style="background-color: {color_azul}; color: white; padding: 25px; display: flex; align-items: center; justify-content: space-between;">
-                                <img src="{logo_b64}" style="height: 50px;">
-                                <div style="text-align: right;"><h2 style="margin:0; font-size:22px;">ROL GUARDIA SEMANAL</h2><p style="margin:0; font-size:14px;">SEGURIDAD INTEGRAL - SEMANA {int(num_sem)}</p></div>
-                            </div>
-                            <div style="padding: 0;">
-                                <table style="width:100%; border-collapse:collapse; font-size:14px;">
-                                    <thead>
-                                        <tr><th colspan="4" style="background:#e3f2fd; color:{color_azul}; padding:10px; border:1px solid #000; font-size:15px;">OFICIALES DE SEGURIDAD - {fecha_str}</th></tr>
-                                        <tr style="background:#e8eaf6; color:{color_azul};"><th style="padding:10px; border:1px solid #000; text-align:left; width:25%;">ÁREA ASIGNADA</th><th style="padding:10px; border:1px solid #000; text-align:center; width:10%;">CANT.</th><th style="padding:10px; border:1px solid #000; text-align:left; width:32%;">TURNO DIURNO</th><th style="padding:10px; border:1px solid #000; text-align:left; width:33%;">TURNO NOCTURNO</th></tr>
-                                    </thead>
-                                    <tbody>{filas_seg_html}</tbody>
-                                </table>
-                            </div>
-                        </div>
-                        <script>function capSeg(id) {{ html2canvas(document.getElementById('piz-seg-'+id), {{scale: 2}}).then(canvas => {{ var link = document.createElement('a'); link.download = 'Seguridad_'+id+'.png'; link.href = canvas.toDataURL(); link.click(); }}); }}</script>
-                        </body></html>
-                        """
+                        html_piz_seg = f"""<html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head><body style="font-family: Arial, sans-serif; background-color: #f0f2f6; padding: 20px;"><div style="text-align: center; margin-bottom: 15px;"><button onclick="capSeg('{fecha_str.split()[0]}')" style="background: {color_azul}; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR {fecha_str.split()[0]}</button></div><div id="piz-seg-{fecha_str.split()[0]}" style="background:white; width:800px; margin:auto; border:2px solid {color_azul}; border-radius:12px; overflow:hidden; margin-bottom: 40px;"><div style="background-color: {color_azul}; color: white; padding: 25px; display: flex; align-items: center; justify-content: space-between;"><img src="{logo_b64}" style="height: 50px;"><div style="text-align: right;"><h2 style="margin:0; font-size:22px;">ROL GUARDIA SEMANAL</h2><p style="margin:0; font-size:14px;">SEGURIDAD INTEGRAL - SEMANA {int(num_sem)}</p></div></div><div style="padding: 0;"><table style="width:100%; border-collapse:collapse; font-size:14px;"><thead><tr><th colspan="4" style="background:#e3f2fd; color:{color_azul}; padding:10px; border:1px solid #000; font-size:15px;">OFICIALES DE SEGURIDAD - {fecha_str}</th></tr><tr style="background:#e8eaf6; color:{color_azul};"><th style="padding:10px; border:1px solid #000; text-align:left; width:25%;">ÁREA ASIGNADA</th><th style="padding:10px; border:1px solid #000; text-align:center; width:10%;">CANT.</th><th style="padding:10px; border:1px solid #000; text-align:left; width:32%;">TURNO DIURNO</th><th style="padding:10px; border:1px solid #000; text-align:left; width:33%;">TURNO NOCTURNO</th></tr></thead><tbody>{filas_seg_html}</tbody></table></div></div><script>function capSeg(id) {{ html2canvas(document.getElementById('piz-seg-'+id), {{scale: 2}}).then(canvas => {{ var link = document.createElement('a'); link.download = 'Seguridad_'+id+'.png'; link.href = canvas.toDataURL(); link.click(); }}); }}</script></body></html>"""
                         components.html(html_piz_seg, height=450 + (len(df_grupo)*45), scrolling=True)
-
-                    msg_seg = f"🛡️ *ROL DE GUARDIA DE SEGURIDAD*\n📅 Semana: {int(num_sem)}\n\n✅ Guardias asignadas y compactadas exitosamente.\n📸 Ver distribución detallada en las imágenes adjuntas."
+                    msg_seg = f"🛡️ *ROL DE GUARDIA DE SEGURIDAD*\n📅 Semana: {int(num_sem)}\n\nSi el reporte de personal tiene guardias duplicadas, recuerda que el sistema comprime las planificaciones en bloques limpios por área.\n📸 Ver distribución detallada en las imágenes adjuntas."
                     st.code(msg_seg, language="markdown")
-            
             st.markdown("---")
-
-            # --- GUARDIA DE FLOTA ---
             df_flo_raw = extraer_datos("GUARDIA_FLOTA")
             if df_flo_raw.empty: st.error("No se encontraron registros en GUARDIA_FLOTA.")
             else:
                 df_flo = filtrar_ultima_carga(df_flo_raw, num_sem)
                 if df_flo.empty: st.warning(f"No hay registros de Flota para la semana {int(num_sem)}.")
                 else:
-                    c_nom = buscar_columna_estricta(df_flo, ['supervisor', 'nombre', 'personal'])
-                    c_car = buscar_columna_estricta(df_flo, ['turno', 'cargo'])
-                    c_dia = buscar_columna_estricta(df_flo, ['dia', 'dias', 'día', 'días'], evitar=['hora', 'horario'])
-                    c_hor = buscar_columna_estricta(df_flo, ['hora', 'horario', 'horas'])
-
+                    c_nom = buscar_columna_estricta(df_flo, ['supervisor', 'nombre', 'personal']); c_car = buscar_columna_estricta(df_flo, ['turno', 'cargo']); c_dia = buscar_columna_estricta(df_flo, ['dia', 'dias', 'día', 'días'], evitar=['hora', 'horario']); c_hor = buscar_columna_estricta(df_flo, ['hora', 'horario', 'horas'])
                     if c_nom and c_car:
                         filas_flo_html = ""
                         for _, r in df_flo.iterrows():
                             filas_flo_html += f"<tr><td style='padding:12px; border:1px solid #000; font-weight:bold; font-size:15px;'>{r.get(c_nom, '')}</td><td style='padding:12px; border:1px solid #000; font-size:14px;'>{r.get(c_car, '')}</td><td style='padding:12px; border:1px solid #000; text-align:center; font-size:14px; font-weight:bold; color:{color_azul};'>{r.get(c_dia, '')}</td><td style='padding:12px; border:1px solid #000; text-align:center; font-size:14px; font-weight:bold; color:#000000;'>{r.get(c_hor, '')}</td></tr>"
-
-                        html_piz_flo = f"""
-                        <html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head>
-                        <body style="font-family: Arial, sans-serif; background-color: #f0f2f6;">
-                        <div style="text-align: center; margin-bottom: 15px;">
-                            <button onclick="capFlo()" style="background: {color_azul}; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR GUARDIA FLOTA</button>
-                        </div>
-                        <div id="piz-flo" style="background:white; width:800px; margin:auto; border:2px solid {color_azul}; border-radius:12px; overflow:hidden;">
-                            <div style="background-color: {color_azul}; color: white; padding: 25px; display: flex; align-items: center; justify-content: space-between;">
-                                <img src="{logo_b64}" style="height: 50px;">
-                                <div style="text-align: right;"><h2 style="margin:0; font-size:22px;">GUARDIA DE FLOTA</h2><p style="margin:0; font-size:14px;">SEMANA {int(num_sem)} ({rango_fechas})</p></div>
-                            </div>
-                            <div style="padding: 20px;">
-                                <table style="width:100%; border-collapse:collapse; font-size:14px;">
-                                    <thead><tr style="background:{color_azul}; color:white;"><th style="padding:10px; border:1px solid #000; text-align:left;">PERSONAL</th><th style="padding:10px; border:1px solid #000; text-align:left;">CARGO Y TURNO</th><th style="padding:10px; border:1px solid #000; text-align:center;">DÍAS</th><th style="padding:10px; border:1px solid #000; text-align:center;">HORARIO</th></tr></thead>
-                                    <tbody>{filas_flo_html}</tbody>
-                                </table>
-                            </div>
-                        </div>
-                        <script>function capFlo() {{ html2canvas(document.getElementById('piz-flo'), {{scale: 2}}).then(canvas => {{ var link = document.createElement('a'); link.download = 'Flota_Semana_{int(num_sem)}.png'; link.href = canvas.toDataURL(); link.click(); }}); }}</script>
-                        </body></html>
-                        """
+                        html_piz_flo = f"""<html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head><body style="font-family: Arial, sans-serif; background-color: #f0f2f6;"><div style="text-align: center; margin-bottom: 15px;"><button onclick="capFlo()" style="background: {color_azul}; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR GUARDIA FLOTA</button></div><div id="piz-flo" style="background:white; width:800px; margin:auto; border:2px solid {color_azul}; border-radius:12px; overflow:hidden;"><div style="background-color: {color_azul}; color: white; padding: 25px; display: flex; align-items: center; justify-content: space-between;"><img src="{logo_b64}" style="height: 50px;"><div style="text-align: right;"><h2 style="margin:0; font-size:22px;">GUARDIA DE FLOTA</h2><p style="margin:0; font-size:14px;">SEMANA {int(num_sem)} ({rango_fechas})</p></div></div><div style="padding: 20px;"><table style="width:100%; border-collapse:collapse; font-size:14px;"><thead><tr style="background:{color_azul}; color:white;"><th style="padding:10px; border:1px solid #000; text-align:left;">PERSONAL</th><th style="padding:10px; border:1px solid #000; text-align:left;">CARGO Y TURNO</th><th style="padding:10px; border:1px solid #000; text-align:center;">DÍAS</th><th style="padding:10px; border:1px solid #000; text-align:center;">HORARIO</th></tr></thead><tbody>{filas_flo_html}</tbody></table></div></div><script>function capFlo() {{ html2canvas(document.getElementById('piz-flo'), {{scale: 2}}).then(canvas => {{ var link = document.createElement('a'); link.download = 'Flota_Semana_{int(num_sem)}.png'; link.href = canvas.toDataURL(); link.click(); }}); }}</script></body></html>"""
                         components.html(html_piz_flo, height=600, scrolling=True)
-
                         msg_flo = f"🚛 *GUARDIA DE FLOTA*\n📅 Semana: {int(num_sem)}\n\n"
                         for _, r in df_flo.iterrows(): msg_flo += f"👤 *{r.get(c_nom, '')}*\n🔹 Rol: {r.get(c_car, '')}\n🗓️ Días: {r.get(c_dia, '')}\n⏰ Horario: {r.get(c_hor, '')}\n\n"
                         st.code(msg_flo, language="markdown")
-
             st.markdown("---")
-
-            # --- GUARDIA DE MONITOREO ---
             df_mon_raw = extraer_datos("GUARDIA_MONITOREO")
             if df_mon_raw.empty: st.error("No se encontraron registros en GUARDIA_MONITOREO.")
             else:
                 df_mon = filtrar_ultima_carga(df_mon_raw, num_sem)
                 if df_mon.empty: st.warning(f"No hay registros de Monitoreo para la semana {int(num_sem)}.")
                 else:
-                    c_nom = buscar_columna_estricta(df_mon, ['analista', 'nombre', 'turno'])
-                    c_hor = buscar_columna_estricta(df_mon, ['horario', 'hora'])
-                    c_ram = buscar_columna_estricta(df_mon, ['unidades señor ramon', 'ramon', 'ramón', 'responsable', 'unidades'])
-
+                    c_nom = buscar_columna_estricta(df_mon, ['analista', 'nombre', 'turno']); c_hor = buscar_columna_estricta(df_mon, ['horario', 'hora']); c_ram = buscar_columna_estricta(df_mon, ['unidades señor ramon', 'ramon', 'ramón', 'responsable', 'unidades'])
                     if c_nom and c_hor:
                         filas_mon_html = ""
                         uni_ramon = ""
                         for _, r in df_mon.iterrows():
                             filas_mon_html += f"<tr><td style='padding:12px; border:1px solid #000; font-weight:bold; font-size:15px; color:{color_azul};'>{r.get(c_nom, '')}</td><td style='padding:12px; border:1px solid #000; font-size:14px; font-weight:bold;'>{r.get(c_hor, '')}</td></tr>"
                             if c_ram and not uni_ramon and pd.notna(r.get(c_ram, '')): uni_ramon = str(r.get(c_ram, ''))
-
                         box_ramon = f"<div style='background-color:#f8f9fa; padding:15px; border-left:5px solid #e65100; margin-top:20px; border-radius:5px;'><h4 style='margin:0 0 5px 0; color:#333;'>🚛 Unidades del Sr. Ramón</h4><span style='font-size:15px; font-weight:bold; color:{color_azul};'>Responsable: {uni_ramon}</span></div>" if uni_ramon else ""
-
-                        html_piz_mon = f"""
-                        <html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head>
-                        <body style="font-family: Arial, sans-serif; background-color: #f0f2f6;">
-                        <div style="text-align: center; margin-bottom: 15px;">
-                            <button onclick="capMon()" style="background: {color_azul}; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR GUARDIA MONITOREO</button>
-                        </div>
-                        <div id="piz-mon" style="background:white; width:750px; margin:auto; border:2px solid {color_azul}; border-radius:12px; overflow:hidden;">
-                            <div style="background-color: {color_azul}; color: white; padding: 25px; display: flex; align-items: center; justify-content: space-between;">
-                                <img src="{logo_b64}" style="height: 50px;">
-                                <div style="text-align: right;"><h2 style="margin:0; font-size:22px;">GUARDIA DE MONITOREO</h2><p style="margin:0; font-size:14px;">SEMANA {int(num_sem)} ({rango_fechas})</p></div>
-                            </div>
-                            <div style="padding: 20px;">
-                                <table style="width:100%; border-collapse:collapse; font-size:14px;">
-                                    <thead><tr style="background:{color_azul}; color:white;"><th style="padding:10px; border:1px solid #000; text-align:left;">PERSONAL (TURNO)</th><th style="padding:10px; border:1px solid #000; text-align:left;">HORARIO Y DÍAS</th></tr></thead>
-                                    <tbody>{filas_mon_html}</tbody>
-                                </table>
-                                {box_ramon}
-                            </div>
-                        </div>
-                        <script>function capMon() {{ html2canvas(document.getElementById('piz-mon'), {{scale: 2}}).then(canvas => {{ var link = document.createElement('a'); link.download = 'Monitoreo_Semana_{int(num_sem)}.png'; link.href = canvas.toDataURL(); link.click(); }}); }}</script>
-                        </body></html>
-                        """
+                        html_piz_mon = f"""<html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head><body style="font-family: Arial, sans-serif; background-color: #f0f2f6;"><div style="text-align: center; margin-bottom: 15px;"><button onclick="capMon()" style="background: {color_azul}; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR GUARDIA MONITOREO</button></div><div id="piz-mon" style="background:white; width:750px; margin:auto; border:2px solid {color_azul}; border-radius:12px; overflow:hidden;"><div style="background-color: {color_azul}; color: white; padding: 25px; display: flex; align-items: center; justify-content: space-between;"><img src="{logo_b64}" style="height: 50px;"><div style="text-align: right;"><h2 style="margin:0; font-size:22px;">GUARDIA DE MONITOREO</h2><p style="margin:0; font-size:14px;">SEMANA {int(num_sem)} ({rango_fechas})</p></div></div><div style="padding: 20px;"><table style="width:100%; border-collapse:collapse; font-size:14px;"><thead><tr style="background:{color_azul}; color:white;"><th style="padding:10px; border:1px solid #000; text-align:left;">PERSONAL (TURNO)</th><th style="padding:10px; border:1px solid #000; text-align:left;">HORARIO Y DÍAS</th></tr></thead><tbody>{filas_mon_html}</tbody></table>{box_ramon}</div></div><script>function capMon() {{ html2canvas(document.getElementById('piz-mon'), {{scale: 2}}).then(canvas => {{ var link = document.createElement('a'); link.download = 'Monitoreo_Semana_{int(num_sem)}.png'; link.href = canvas.toDataURL(); link.click(); }}); }}</script></body></html>"""
                         components.html(html_piz_mon, height=600, scrolling=True)
-
                         msg_mon = f"🖥️ *GUARDIA DE MONITOREO*\n📅 Semana: {int(num_sem)}\n\n🕒 *Guardias Programadas:*\n\n"
                         for _, r in df_mon.iterrows(): msg_mon += f"👤 *{r.get(c_nom, '')}*\n⏰ {r.get(c_hor, '')}\n\n"
                         if uni_ramon: msg_mon += f"🚛 *Unidades del Sr. Ramón*\nResponsable: {uni_ramon}"
                         st.code(msg_mon, language="markdown")
 
 # ---------------------------------------------------------
-# PESTAÑA 5: RESUMEN DE DESPACHOS (MIGRADO NETAMENTE A EXCEL)
+# PESTAÑA 5: RESUMEN DE DESPACHOS (MIGRADO NETAMENTE A EXCEL CON FILTRO MAESTRO)
 # ---------------------------------------------------------
 with t_despachos:
     st.info("Genera el Resumen Logístico de Lunes a Domingo leyendo directamente de los Excels.")
@@ -808,7 +490,7 @@ with t_despachos:
                 registros_log = []
                 registros_log.append(f"ℹ️ Iniciando auditoría para el Año {ano_sel} - Semana {int(num_sem)}.")
                 
-                # --- 1. PROCESAR DESPACHOS (ESCANEO DINÁMICO) ---
+                # --- 1. PROCESAR DESPACHOS (ESCANEO DINÁMICO DE CABECERAS) ---
                 dfs_despacho = []
                 for file in archivos_despacho:
                     filename = file.name.upper()
@@ -820,21 +502,17 @@ with t_despachos:
                             registros_log.append(f"⚠️ Archivo omitido (no se identificó región en el nombre): {file.name}")
                             continue
 
-                        # Leemos sin cabeceras al principio para buscar la fila exacta donde inician los títulos
                         df_raw = pd.read_excel(file, sheet_name="FARMACIAS", header=None)
                         header_idx = 0
                         for i, row in df_raw.head(20).iterrows():
-                            # Buscamos dos palabras clave inconfundibles para saber qué fila es la cabecera
                             row_vals = [str(val).upper().strip() for val in row.values]
                             if 'BULTOS' in row_vals and 'FECHA DE ENTREGA' in row_vals:
                                 header_idx = i
                                 break
                         
-                        # Reconstruimos el DataFrame con la fila de cabecera correcta
                         df = df_raw.iloc[header_idx+1:].copy()
                         df.columns = [str(c).upper().strip() for c in df_raw.iloc[header_idx].values]
                         
-                        # Mapeo Inteligente basado en los títulos exactos que me diste
                         col_fecha = 'FECHA DE ENTREGA'
                         col_bultos = 'BULTOS'
                         col_status = 'TIPO DE ENTREGA'
@@ -846,7 +524,6 @@ with t_despachos:
                             registros_log.append(f"⚠️ {file.name}: Falló la lectura. Faltan las columnas: {missing}.")
                             continue
                         
-                        # Renombramos a formato estándar del código
                         df = df.rename(columns={
                             col_fecha: 'Fecha', col_bultos: 'Bultos', col_status: 'Status',
                             col_subregion: 'SubRegion', col_region: 'Region'
@@ -857,15 +534,9 @@ with t_despachos:
                         df = df[cols_to_keep]
                         filas_brutas = len(df)
                         
-                        # [LA MAGIA DEL ARRASTRE DE FECHAS]
-                        # 1. Convertimos cualquier celda vacía o de puros espacios a Nulo
                         df['Fecha'] = df['Fecha'].replace(r'^\s*$', pd.NA, regex=True)
-                        # 2. Forzamos a formato de fecha (lo inválido se vuelve Nulo)
                         df['Fecha'] = pd.to_datetime(df['Fecha'], errors='coerce')
-                        # 3. Arrastramos la última fecha válida hacia abajo (arregla las celdas en blanco o combinadas)
                         df['Fecha'] = df['Fecha'].ffill()
-                        
-                        # Ya rellenadas las fechas, borramos lo que quede sin fecha (filas vacías al fondo)
                         df = df.dropna(subset=['Fecha'])
                         
                         registros_log.append(f"✅ Archivo leído: {file.name} | Filas procesadas: {filas_brutas} -> Con Fecha Válida: {len(df)}")
@@ -879,7 +550,6 @@ with t_despachos:
                     st.stop()
 
                 df_desp = pd.concat(dfs_despacho, ignore_index=True)
-                
                 df_desp['Num_Semana'] = df_desp['Fecha'].dt.isocalendar().week
                 df_desp['Ano_Calc'] = df_desp['Fecha'].dt.isocalendar().year
                 
@@ -895,15 +565,34 @@ with t_despachos:
                 df_sem['Pedidos'] = 1 
                 df_sem['SubRegion_Clean'] = df_sem.apply(lambda x: asignar_subregion(x['SubRegion'], x['Region_Macro']), axis=1)
 
-                # --- 2. PROCESAR FLOTA (KILOMETRAJE) ---
+                # --- 2. PROCESAR MAESTRO 'FLOTA ACTUAL' (FILTRO DE EXCLUSIÓN) ---
+                placas_despacho_validas = None
+                try:
+                    df_flota_actual = pd.read_excel(archivo_flota, sheet_name="FLOTA ACTUAL")
+                    df_flota_actual.columns = df_flota_actual.columns.astype(str).str.strip().str.upper()
+                    
+                    if 'PLACA' in df_flota_actual.columns and 'RUTA' in df_flota_actual.columns:
+                        df_flota_actual['PLACA'] = df_flota_actual['PLACA'].astype(str).str.strip().str.upper()
+                        df_flota_actual['RUTA'] = df_flota_actual['RUTA'].astype(str).str.strip().str.upper()
+                        
+                        # Filtro estricto: Solo incluimos Oriente, Centro u Occidente
+                        rutas_operativas = ['ORIENTE', 'CENTRO', 'OCCIDENTE']
+                        df_solo_despacho = df_flota_actual[df_flota_actual['RUTA'].isin(rutas_operativas)]
+                        placas_despacho_validas = set(df_solo_despacho['PLACA'].unique())
+                        
+                        registros_log.append(f"✅ Hoja 'FLOTA ACTUAL' procesada. Total vehículos: {len(df_flota_actual)} | Vehículos autorizados para Despacho: {len(placas_despacho_validas)}")
+                    else:
+                        registros_log.append("⚠️ Advertencia: No se encontraron las columnas 'PLACA' o 'RUTA' en la pestaña FLOTA ACTUAL. Se procesarán todas las placas.")
+                except Exception as e_fa:
+                    registros_log.append(f"⚠️ Advertencia: No se pudo mapear la pestaña 'FLOTA ACTUAL' ({str(e_fa)}). El sistema procesará el kilometraje completo por defecto.")
+
+                # --- 3. PROCESAR HISTÓRICO BASE DE DATOS (KILOMETRAJE) ---
                 try:
                     df_flota_raw = pd.read_excel(archivo_flota, sheet_name="BASE DE DATOS")
                     df_flota_raw.columns = df_flota_raw.columns.astype(str).str.strip().str.upper() 
-                    
-                    # Descartamos columnas sin nombre real si las hay
                     df_flota_raw = df_flota_raw.loc[:, ~df_flota_raw.columns.str.contains('^UNNAMED')]
                     
-                    df_flota_raw['FECHAS'] = pd.to_datetime(df_flota_raw['FECHAS'], errors='coerce')
+                    df_flota_raw['FECHAS'] = pd.to_datetime(df_flota_raw['FECHAS'], dayfirst=True, errors='coerce')
                     df_flota_raw['FECHAS'] = df_flota_raw['FECHAS'].ffill() 
                     df_flota_raw = df_flota_raw.dropna(subset=['FECHAS'])
                     
@@ -917,7 +606,19 @@ with t_despachos:
                     df_flota['Ano_Calc'] = df_flota['FECHAS'].dt.isocalendar().year
                     
                     df_km_sem = df_flota[(df_flota['Num_Semana'] == num_sem) & (df_flota['Ano_Calc'] == ano_sel)].copy()
-                    registros_log.append(f"🚛 Registros de recorrido (Flota) para Año {ano_sel} y Semana {int(num_sem)}: {len(df_km_sem)} entradas | Kilometraje sumado bruto: {df_km_sem['KILOMETROS'].sum():,.2f} Kms")
+                    
+                    # Aplicamos el filtro maestro de placas si se leyó correctamente
+                    if placas_despacho_validas is not None:
+                        km_brutos = df_km_sem['KILOMETROS'].sum()
+                        df_km_sem['PLACA'] = df_km_sem['PLACA'].astype(str).str.strip().str.upper()
+                        # Conservar solo lo operativo de Despacho
+                        df_km_sem = df_km_sem[df_km_sem['PLACA'].isin(placas_despacho_validas)].copy()
+                        km_netos = df_km_sem['KILOMETROS'].sum()
+                        km_excluidos = km_brutos - km_netos
+                        
+                        registros_log.append(f"🎯 Filtro Logístico Aplicado: Kilómetros Totales Brutos: {km_brutos:,.2f} Kms -> Kilómetros Reales de Despacho: {km_netos:,.2f} Kms (Kilometraje administrativo/excluido: {km_excluidos:,.2f} Kms).")
+                    else:
+                        registros_log.append(f"🚛 Kilometraje sumado bruto (sin filtro): {df_km_sem['KILOMETROS'].sum():,.2f} Kms")
                 except Exception as e:
                     registros_log.append(f"❌ Error crítico procesando el archivo de Kilometraje: {str(e)}")
                     st.error(f"Error procesando el archivo de Kilometraje: {e}")
@@ -926,7 +627,7 @@ with t_despachos:
                 if df_sem.empty and df_km_sem.empty:
                     st.warning(f"No hay registros de despachos ni kilometraje para la Semana {int(num_sem)} en el Año {ano_sel}.")
                 else:
-                    # --- 3. CONSOLIDACIÓN DE DATOS DIARIOS ---
+                    # --- 4. CONSOLIDACIÓN DE DATOS DIARIOS ---
                     df_diario_desp = df_sem.groupby(df_sem['Fecha'].dt.date).agg({'Pedidos': 'sum', 'Bultos': 'sum'}).reset_index()
                     df_diario_desp.rename(columns={'Fecha': 'Date'}, inplace=True)
                     df_diario_desp['Date'] = pd.to_datetime(df_diario_desp['Date']).dt.date
@@ -1051,7 +752,7 @@ with t_despachos:
                                         <th style="padding: 10px; border: 1px solid #000;">PEDIDOS ENTREGADOS</th>
                                         <th style="padding: 10px; border: 1px solid #000;">% DIARIO</th>
                                         <th style="padding: 10px; border: 1px solid #000;">BULTOS ENTREGADOS</th>
-                                        <th style="padding: 10px; border: 1px solid #000;">RECORRIDO GENERAL</th>
+                                        <th style="padding: 10px; border: 1px solid #000;">RECORRIDO LOGÍSTICO</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -1104,24 +805,20 @@ with t_despachos:
                     st.markdown("---")
                     st.subheader("📱 Mensaje para WhatsApp (Resumen Ejecutivo)")
                     msg_d = f"📊 *RESUMEN SEMANAL DE DESPACHOS*\n📅 Semana: {int(num_sem)} ({rango_fechas})\n\n"
-                    msg_d += f"*📍 RESULTADO GLOBAL:*\n"
+                    msg_d += f"*📍 RESULTADO GLOBAL (SOLO UNIDADES DE DESPACHO):*\n"
                     msg_d += f"🏥 Pedidos Entregados: *{f_p(total_pedidos)}*\n"
                     msg_d += f"📦 Bultos Entregados: *{f_p(total_bultos)}*\n"
                     msg_d += f"📏 Recorrido Total: *{f_p(total_kms)} Kms*\n\n"
-                    msg_d += f"*⏱️ PROMEDIO DIARIO:*\n"
+                    msg_d += f"*⏱️ PROMEDIO DIARIO OPERATIVO:*\n"
                     msg_d += f"🔹 Pedidos: {f_p(prom_ped)}\n🔹 Bultos: {f_p(prom_bul)}\n🔹 KMs: {f_p(prom_kms)}\n\n"
                     msg_d += "✅ *Dashboard estadístico adjunto en imagen.*"
                     st.code(msg_d, language="markdown")
                     
-                    # --- PANEL DE LOG SOLICITADO ---
+                    # --- PANEL DE LOG ---
                     st.markdown("---")
                     st.subheader("📋 Registro de Auditoría (Log de Procesamiento)")
                     for log_msg in registros_log:
-                        if "❌" in log_msg:
-                            st.error(log_msg)
-                        elif "⚠️" in log_msg:
-                            st.warning(log_msg)
-                        elif "✅" in log_msg:
-                            st.success(log_msg)
-                        else:
-                            st.info(log_msg)
+                        if "❌" in log_msg: st.error(log_msg)
+                        elif "⚠️" in log_msg: st.warning(log_msg)
+                        elif "✅" in log_msg: st.success(log_msg)
+                        else: st.info(log_msg)
