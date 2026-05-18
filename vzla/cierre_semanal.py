@@ -1048,10 +1048,10 @@ with t_combustible:
                     st.code(msg_comb, language="markdown")
                     
 # ---------------------------------------------------------
-# PESTAÑA 7: PIZARRA DE RESULTADO DE SURTIDO Y EXTRACCIÓN (VERSIÓN ULTRA SIMPLE)
+# PESTAÑA 7: PIZARRA DE RESULTADO DE SURTIDO Y EXTRACCIÓN (VERSIÓN ULTRA SIMPLE + PLANTA)
 # ---------------------------------------------------------
 with t_surtido:
-    st.info("Resumen directo y simplificado del consumo de combustible agrupado por TIPO DE SURTIDO.")
+    st.info("Resumen directo y simplificado del consumo de combustible agrupado por TIPO DE SURTIDO y PLANTA ELÉCTRICA.")
     
     if st.button("⛽ Calcular Resumen Semanal de Surtido", type="primary", use_container_width=True):
         with st.spinner("Procesando transacciones de surtido desde la base de datos..."):
@@ -1087,6 +1087,13 @@ with t_surtido:
                     df_surt['LITROS'] = df_surt['LITROS'].apply(limpiar_litros)
                     df_surt['COMBUSTIBLE'] = df_surt['COMBUSTIBLE'].astype(str).str.strip().str.upper()
                     df_surt['TIPO_SURTIDO'] = df_surt['TIPO_SURTIDO'].astype(str).str.strip().str.upper()
+                    df_surt['UNIDAD'] = df_surt['UNIDAD'].astype(str).str.strip().str.upper()
+
+                    # --- EXTRACCIÓN DE LA PLANTA ELÉCTRICA ---
+                    # Si la unidad dice "PLANTA", forzamos su tipo de surtido a una categoría nueva.
+                    # Esto descuenta automáticamente esos litros de los Bidones o E/S.
+                    cond_planta = df_surt['UNIDAD'].str.contains('PLANTA')
+                    df_surt.loc[cond_planta, 'TIPO_SURTIDO'] = 'GENERACIÓN PLANTA ELÉCTRICA'
 
                     # --- KPIs GENERALES ---
                     total_gasolina = df_surt[df_surt['COMBUSTIBLE'] == 'GASOLINA']['LITROS'].sum()
@@ -1107,8 +1114,9 @@ with t_surtido:
                         tot_gasoil_tipo = df_tipo[df_tipo['COMBUSTIBLE'] == 'GASOIL']['LITROS'].sum()
                         tot_ambos = df_tipo['LITROS'].sum()
                         
+                        # Las tarjetas ahora ocupan el 48% para formar una cuadrícula de 2x2 perfecta
                         bloques_html += f"""
-                        <div style="width: 32%; margin-bottom: 20px; box-sizing: border-box;">
+                        <div style="width: 48%; margin-bottom: 25px; box-sizing: border-box;">
                             <h3 style="margin: 0; font-size: 16px; background: #000; color: white; padding: 12px; text-align: center; border: 2px solid #000; text-transform: uppercase; border-bottom: none;">{tipo}</h3>
                             <table style="width: 100%; border-collapse: collapse; font-size: 15px; border: 2px solid #000;">
                                 <tr style="background: white;">
@@ -1181,7 +1189,7 @@ with t_surtido:
                     </script>
                     </body></html>
                     """
-                    components.html(html_pizarra_surtido, height=650, scrolling=True)
+                    components.html(html_pizarra_surtido, height=750, scrolling=True)
 
                     # --- WHATSAPP (CORTO Y AL PUNTO) ---
                     st.markdown("---")
@@ -1192,7 +1200,7 @@ with t_surtido:
                     msg_surt += f"   ⛽ Gasolina: {f_p(total_gasolina)} L\n"
                     msg_surt += f"   🛢️ Gasoil: {f_p(total_gasoil)} L\n\n"
                     
-                    msg_surt += "*DESGLOSE POR ORIGEN:*\n"
+                    msg_surt += "*DESGLOSE POR ORIGEN / DESTINO:*\n"
                     for tipo in tipos_surtido:
                         df_tipo = df_surt[df_surt['TIPO_SURTIDO'] == tipo]
                         tot_g = df_tipo[df_tipo['COMBUSTIBLE'] == 'GASOLINA']['LITROS'].sum()
@@ -1201,5 +1209,5 @@ with t_surtido:
                         if tot_g > 0: msg_surt += f"   - Gasolina: {f_p(tot_g)} L\n"
                         if tot_d > 0: msg_surt += f"   - Gasoil: {f_p(tot_d)} L\n"
                     
-                    msg_surt += "\n✅ *Pizarra detallada en imagen.*"
+                    msg_surt += "\n✅ *Pizarra detallada en imagen adjunta.*"
                     st.code(msg_surt, language="markdown")
