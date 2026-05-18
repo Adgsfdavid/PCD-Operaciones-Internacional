@@ -95,7 +95,7 @@ def calcular_promedio_horas(lista_horas):
     segundos_totales = sum(t.hour * 3600 + t.minute * 60 for t in tiempos) / len(tiempos)
     horas = int(segundos_totales // 3600)
     minutos = int((segundos_totales % 3600) // 60)
-    temp_dt = datetime(2026, 1, 1, horas, minutos)
+    temp_dt = datetime(2026, 1, 1, horas, minutes)
     return temp_dt.strftime("%I:%M %p").upper()
 
 def calcular_rango_semana(ano, semana):
@@ -175,7 +175,6 @@ def agrupar_rol_compacto(df_seg, num_sem):
         
     return grupos, c_area, c_diu, c_noc, c_cant
 
-# Función Mapeo de Subregiones para Despachos
 def asignar_subregion(ruta, macro_default):
     r = str(ruta).upper()
     if any(x in r for x in ["ANACO", "CANTAURA", "CARUPANO", "GUIRIA", "CUMANA", "MATURIN", "PUNTA DE MATA", "ESPARTA", "ARAGUA DE BARCELONA", "CARIPITO", "EL TIGRE"]): return "ORIENTE NORTE"
@@ -212,7 +211,6 @@ rango_fechas_lv = calcular_rango_lunes_viernes(ano_sel, num_sem)
 color_azul = "#0d47a1"
 logo_b64 = obtener_logo_base64()
 
-# CREAMOS LAS 5 PESTAÑAS
 t_trafico, t_cierres, t_comensales, t_guardias, t_despachos = st.tabs([
     "📈 Desempeño de Tráfico", 
     "⏱️ Cronometría de Cierres", 
@@ -556,7 +554,7 @@ with t_cierres:
                         for dep, row in top_10.iterrows():
                             if pd.notna(row['Para_Ordenar']): msg_w += f"🔹 {str(dep).title()}: *{row['Promedio']}*\n"
                     except: pass
-                msg_w += f"\n✅ Tablas de auditoría detalladas adjuntas en imagen."
+                msg_w += f"\n---\n✅ Tablas de auditoría detalladas adjuntas en imagen."
                 st.code(msg_w, language="markdown")
 
 # ---------------------------------------------------------
@@ -791,7 +789,7 @@ with t_guardias:
                         st.code(msg_mon, language="markdown")
 
 # ---------------------------------------------------------
-# PESTAÑA 5: RESUMEN DE DESPACHOS (NUEVA LÓGICA DE EXCEL)
+# PESTAÑA 5: RESUMEN DE DESPACHOS (MIGRADO NETAMENTE A EXCEL)
 # ---------------------------------------------------------
 with t_despachos:
     st.info("Genera el Resumen Logístico de Lunes a Domingo leyendo directamente de los Excels.")
@@ -807,6 +805,9 @@ with t_despachos:
             st.warning("⚠️ Debes cargar al menos un archivo de despacho y el archivo de flota para generar el reporte.")
         else:
             with st.spinner("Procesando histórico de Excels..."):
+                # Lista para acumular mensajes de log en pantalla
+                registros_log = []
+                registros_log.append(f"ℹ️ Iniciando auditoría para el Año {ano_sel} - Semana {int(num_sem)}.")
                 
                 # --- 1. PROCESAR DESPACHOS ---
                 dfs_despacho = []
@@ -815,50 +816,69 @@ with t_despachos:
                     try:
                         if 'ORIENTE' in filename:
                             df = pd.read_excel(file, sheet_name="FARMACIAS", header=6)
+                            df.columns = df.columns.str.strip().str.upper() # Limpieza de espacios
                             cols_map = {'FECHA DE ENTREGA': 'Fecha', 'BULTOS': 'Bultos', 'TIPO DE ENTREGA': 'Status', 'RUTAS': 'SubRegion', 'DISTRIBUCION': 'Region'}
                             df_renamed = df.rename(columns=cols_map)
-                            df_renamed['Region'] = 'ORIENTE'
+                            df_renamed['Region_Macro'] = 'ORIENTE'
+                            
                         elif 'CENTRO' in filename:
                             df = pd.read_excel(file, sheet_name="FARMACIAS", header=5)
+                            df.columns = df.columns.str.strip().str.upper() # Limpieza de espacios
                             cols_map = {'FECHA DE ENTREGA': 'Fecha', 'BULTOS': 'Bultos', 'TIPO DE ENTREGA': 'Status', 'DESPACHO': 'SubRegion', 'DISTRIBUCION': 'Region'}
                             df_renamed = df.rename(columns=cols_map)
-                            df_renamed['Region'] = 'CENTRO'
+                            df_renamed['Region_Macro'] = 'CENTRO'
+                            
                         elif 'OCCIDENTE' in filename:
                             df = pd.read_excel(file, sheet_name="FARMACIAS", header=5)
+                            df.columns = df.columns.str.strip().str.upper() # Limpieza de espacios o diferencias de case
                             cols_map = {'FECHA DE ENTREGA': 'Fecha', 'BULTOS': 'Bultos', 'TIPO DE ENTREGA': 'Status', 'RUTAS': 'SubRegion', 'ZONA': 'Region'}
                             df_renamed = df.rename(columns=cols_map)
-                            df_renamed['Region'] = 'OCCIDENTE'
+                            df_renamed['Region_Macro'] = 'OCCIDENTE'
                         else:
+                            registros_log.append(f"⚠️ Archivo omitido (no se identificó región en el nombre): {file.name}")
                             continue
                         
-                        cols_to_keep = ['Fecha', 'Bultos', 'Status', 'SubRegion', 'Region']
+                        cols_to_keep = ['Fecha', 'Bultos', 'Status', 'SubRegion', 'Region', 'Region_Macro']
                         df_renamed = df_renamed[[c for c in cols_to_keep if c in df_renamed.columns]]
+                        
+                        # Guardar total de filas brutas leídas
+                        filas_brutas = len(df_renamed)
+                        df_renamed['Fecha'] = pd.to_datetime(df_renamed['Fecha'], dayfirst=True, errors='coerce')
+                        df_renamed = df_renamed.dropna(subset=['Fecha'])
+                        
+                        registros_log.append(f"✅ Archivo leído: {file.name} | Filas brutas: {filas_brutas} -> Con Fecha válida: {len(df_renamed)}")
                         dfs_despacho.append(df_renamed)
                     except Exception as e:
-                        st.error(f"Error procesando el archivo de despacho {file.name}: {e}")
+                        registros_log.append(f"❌ Error procesando el archivo de despacho {file.name}: {str(e)}")
                 
                 if not dfs_despacho:
                     st.error("No se pudo extraer información válida de los archivos de despacho cargados.")
                     st.stop()
 
                 df_desp = pd.concat(dfs_despacho, ignore_index=True)
-                df_desp['Fecha'] = pd.to_datetime(df_desp['Fecha'], errors='coerce')
-                df_desp = df_desp.dropna(subset=['Fecha'])
                 
                 # Filtrar semana y status
                 df_desp['Num_Semana'] = df_desp['Fecha'].dt.isocalendar().week
-                df_sem = df_desp[df_desp['Num_Semana'] == num_sem].copy()
+                df_desp['Ano_Calc'] = df_desp['Fecha'].dt.isocalendar().year
+                
+                df_sem = df_desp[(df_desp['Num_Semana'] == num_sem) & (df_desp['Ano_Calc'] == ano_sel)].copy()
+                registros_log.append(f"📊 Registros totales de despacho que coinciden con Año {ano_sel} y Semana {int(num_sem)}: {len(df_sem)}")
+                
                 df_sem['Status'] = df_sem['Status'].astype(str).str.upper().str.strip()
+                filas_antes_status = len(df_sem)
                 df_sem = df_sem[df_sem['Status'] == 'ENTREGADO']
+                registros_log.append(f"🎯 Registros filtrados con Status 'ENTREGADO': {len(df_sem)} (Filas con otros status omitidas: {filas_antes_status - len(df_sem)})")
                 
                 df_sem['Bultos'] = pd.to_numeric(df_sem['Bultos'], errors='coerce').fillna(0)
-                df_sem['Pedidos'] = 1 # Cada fila es un pedido
-                df_sem['SubRegion_Clean'] = df_sem.apply(lambda x: asignar_subregion(x['SubRegion'], x['Region']), axis=1)
+                df_sem['Pedidos'] = 1 
+                df_sem['SubRegion_Clean'] = df_sem.apply(lambda x: asignar_subregion(x['SubRegion'], x['Region_Macro']), axis=1)
 
                 # --- 2. PROCESAR FLOTA (KILOMETRAJE) ---
                 try:
                     df_flota_raw = pd.read_excel(archivo_flota, sheet_name="BASE DE DATOS", usecols=lambda x: 'Unnamed' not in x)
-                    df_flota_raw['FECHAS'] = pd.to_datetime(df_flota_raw['FECHAS'], errors='coerce')
+                    df_flota_raw.columns = df_flota_raw.columns.str.strip().str.upper() # Limpieza estricta de nombres de columnas
+                    
+                    df_flota_raw['FECHAS'] = pd.to_datetime(df_flota_raw['FECHAS'], dayfirst=True, errors='coerce')
                     df_flota_raw = df_flota_raw.dropna(subset=['FECHAS'])
                     
                     columnas_id = ['FECHAS', 'DIA', 'MES']
@@ -868,20 +888,26 @@ with t_despachos:
                     df_flota = df_flota_raw.melt(id_vars=columnas_id_existentes, value_vars=columnas_placas, var_name='PLACA', value_name='KILOMETROS')
                     df_flota['KILOMETROS'] = pd.to_numeric(df_flota['KILOMETROS'], errors='coerce').fillna(0)
                     df_flota['Num_Semana'] = df_flota['FECHAS'].dt.isocalendar().week
-                    df_km_sem = df_flota[df_flota['Num_Semana'] == num_sem].copy()
+                    df_flota['Ano_Calc'] = df_flota['FECHAS'].dt.isocalendar().year
+                    
+                    df_km_sem = df_flota[(df_flota['Num_Semana'] == num_sem) & (df_flota['Ano_Calc'] == ano_sel)].copy()
+                    registros_log.append(f"🚛 Registros de recorrido (Flota) para Año {ano_sel} y Semana {int(num_sem)}: {len(df_km_sem)} entradas | Kilometraje sumado bruto: {df_km_sem['KILOMETROS'].sum():,.2f} Kms")
                 except Exception as e:
+                    registros_log.append(f"❌ Error crítico procesando el archivo de Kilometraje: {str(e)}")
                     st.error(f"Error procesando el archivo de Kilometraje: {e}")
                     st.stop()
 
-                if df_sem.empty:
-                    st.warning(f"No hay registros de despachos ('ENTREGADO') para la Semana {int(num_sem)} en los Excel cargados.")
+                if df_sem.empty and df_km_sem.empty:
+                    st.warning(f"No hay registros de despachos ni kilometraje para la Semana {int(num_sem)} en el Año {ano_sel}.")
                 else:
                     # --- 3. CONSOLIDACIÓN DE DATOS DIARIOS ---
                     df_diario_desp = df_sem.groupby(df_sem['Fecha'].dt.date).agg({'Pedidos': 'sum', 'Bultos': 'sum'}).reset_index()
                     df_diario_desp.rename(columns={'Fecha': 'Date'}, inplace=True)
+                    df_diario_desp['Date'] = pd.to_datetime(df_diario_desp['Date']).dt.date
                     
                     df_diario_km = df_km_sem.groupby(df_km_sem['FECHAS'].dt.date).agg({'KILOMETROS': 'sum'}).reset_index()
                     df_diario_km.rename(columns={'FECHAS': 'Date'}, inplace=True)
+                    df_diario_km['Date'] = pd.to_datetime(df_diario_km['Date']).dt.date
 
                     df_diario = pd.merge(df_diario_desp, df_diario_km, on='Date', how='outer').fillna(0).sort_values('Date')
                     
@@ -890,9 +916,11 @@ with t_despachos:
                     total_kms = df_diario['KILOMETROS'].sum()
                     
                     dias_activos = len(df_diario[df_diario['Pedidos'] > 0])
-                    prom_ped = total_pedidos / dias_activos if dias_activos > 0 else 0
-                    prom_bul = total_bultos / dias_activos if dias_activos > 0 else 0
-                    prom_kms = total_kms / dias_activos if dias_activos > 0 else 0
+                    if dias_activos == 0: dias_activos = 1
+                    
+                    prom_ped = total_pedidos / dias_activos
+                    prom_bul = total_bultos / dias_activos
+                    prom_kms = total_kms / dias_activos
 
                     df_diario['% Diario'] = (df_diario['Pedidos'] / total_pedidos * 100).fillna(0) if total_pedidos > 0 else 0
                     
@@ -907,23 +935,23 @@ with t_despachos:
 
                     for _, r in df_diario.iterrows():
                         fecha_obj = pd.to_datetime(r['Date'])
-                        str_fecha = f"{dias_semana_es[fecha_obj.weekday()]}, {fecha_obj.day} de {meses_es[fecha_obj.month-1]} de {fecha_obj.year}"
+                        str_fecha = f"{dias_semana_es[fecha_obj.weekday()]} {fecha_obj.day} de {meses_es[fecha_obj.month-1]} de {fecha_obj.year}"
                         
                         arr_ped, c_ped = get_arrow(r['Pedidos'], prom_ped)
-                        arr_por, c_por = get_arrow(r['% Diario'], (100/dias_activos) if dias_activos>0 else 0)
+                        arr_por, c_por = get_arrow(r['% Diario'], (100/dias_activos))
                         
                         filas_diarias_html += f"""
                         <tr style="text-align: center; border-bottom: 1px solid #000; background: white;">
                             <td style="padding: 8px; border: 1px solid #000; font-weight: bold; text-align: left;">{str_fecha}</td>
                             <td style="padding: 8px; border: 1px solid #000; font-weight: 900; font-size: 16px; color: {c_ped};">{arr_ped} {f_p(r['Pedidos'])}</td>
-                            <td style="padding: 8px; border: 1px solid #000; font-weight: 900; font-size: 16px; color: {c_por};">{arr_por} {r['% Diario']:.2f}</td>
+                            <td style="padding: 8px; border: 1px solid #000; font-weight: 900; font-size: 16px; color: {c_por};">{arr_por} {r['% Diario']:.2f}%</td>
                             <td style="padding: 8px; border: 1px solid #000; font-weight: 900; font-size: 14px;">{f_p(r['Bultos'])} BULTOS</td>
                             <td style="padding: 8px; border: 1px solid #000; font-weight: 900; font-size: 14px;">{f_p(r['KILOMETROS'])} Kms</td>
                         </tr>
                         """
 
                     # AGRUPACIÓN POR REGIONES
-                    df_reg = df_sem.groupby(['Region', 'SubRegion_Clean']).agg({'Pedidos': 'sum', 'Bultos': 'sum'}).reset_index()
+                    df_reg = df_sem.groupby(['Region_Macro', 'SubRegion_Clean']).agg({'Pedidos': 'sum', 'Bultos': 'sum'}).reset_index()
 
                     def generar_bloque_region(nombre_macro, color_macro, df_f):
                         if df_f.empty: return ""
@@ -957,7 +985,6 @@ with t_despachos:
                             if pct > 0:
                                 barras_html += f"<div style='width: {pct}%; background-color: {col_bar}; color: white; font-size:10px; text-align:center; font-weight:bold; padding: 5px 0; border-right: 1px solid white;'>{int(r['Pedidos'])} ; {int(pct)}%</div>"
                             
-                        # AQUI ESTÁ LA CORRECCIÓN CON EL f-string (f""")
                         html_bloque += f"""
                                 </table>
                             </div>
@@ -979,9 +1006,9 @@ with t_despachos:
                         """
                         return html_bloque
 
-                    bloque_oriente = generar_bloque_region("ORIENTE", "#2e7d32", df_reg[df_reg['Region'].str.upper() == 'ORIENTE'])
-                    bloque_centro = generar_bloque_region("CENTRO", "#2e7d32", df_reg[df_reg['Region'].str.upper() == 'CENTRO'])
-                    bloque_occidente = generar_bloque_region("OCCIDENTE", "#2e7d32", df_reg[df_reg['Region'].str.upper() == 'OCCIDENTE'])
+                    bloque_oriente = generar_bloque_region("ORIENTE", "#2e7d32", df_reg[df_reg['Region_Macro'].str.upper() == 'ORIENTE'])
+                    bloque_centro = generar_bloque_region("CENTRO", "#2e7d32", df_reg[df_reg['Region_Macro'].str.upper() == 'CENTRO'])
+                    bloque_occidente = generar_bloque_region("OCCIDENTE", "#2e7d32", df_reg[df_reg['Region_Macro'].str.upper() == 'OCCIDENTE'])
 
                     html_pizarra_despachos = f"""
                     <html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head>
@@ -1059,3 +1086,16 @@ with t_despachos:
                     msg_d += f"🔹 Pedidos: {f_p(prom_ped)}\n🔹 Bultos: {f_p(prom_bul)}\n🔹 KMs: {f_p(prom_kms)}\n\n"
                     msg_d += "✅ *Dashboard estadístico adjunto en imagen.*"
                     st.code(msg_d, language="markdown")
+                    
+                    # --- PANEL DE LOG SOLICITADO ---
+                    st.markdown("---")
+                    st.subheader("📋 Registro de Auditoría (Log de Procesamiento)")
+                    for log_msg in registros_log:
+                        if "❌" in log_msg:
+                            st.error(log_msg)
+                        elif "⚠️" in log_msg:
+                            st.warning(log_msg)
+                        elif "✅" in log_msg:
+                            st.success(log_msg)
+                        else:
+                            st.info(log_msg)
