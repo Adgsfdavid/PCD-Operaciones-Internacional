@@ -1322,7 +1322,7 @@ with t_surtido:
                     st.code(msg_surt, language="markdown")
                     
 # ---------------------------------------------------------
-# PESTAÑA 8: GENERADOR DEL MASTER REPORTE SEMANAL (PDF - CERO HOJAS EN BLANCO)
+# PESTAÑA 8: GENERADOR DEL MASTER REPORTE SEMANAL (PDF - CORREGIDO SIN DUPLICACIONES)
 # ---------------------------------------------------------
 with t_pdf:
     st.info("Ensamblador Final: Sube la foto de portada, llena los datos clave y carga las imágenes en el orden establecido para generar el Reporte Master PDF perfecto.")
@@ -1392,15 +1392,11 @@ with t_pdf:
                     </tr>
                     """
                     
-                    # Generar Página de Contenido
+                    # Generar Página de Contenido limpia
                     img_file.seek(0)
                     b64_img = base64.b64encode(img_file.read()).decode()
                     
-                    # El separador data-html2canvas-ignore="true" es invisible para el PDF pero visible en pantalla
                     html_paginas += f"""
-                    <div style="height: 30px; background: transparent;" data-html2canvas-ignore="true"></div>
-                    <div class="html2pdf__page-break"></div>
-                    
                     <div class="page">
                         <div style="background-color: #000; color: white; padding: 20px 40px; display: flex; justify-content: space-between; align-items: center; border-bottom: 6px solid #d4af37;">
                             <div style="font-size: 22px; font-weight: 900; text-transform: uppercase;">{titulo}</div>
@@ -1424,8 +1420,28 @@ with t_pdf:
                         @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&display=swap');
                         body {{ font-family: 'Montserrat', sans-serif; background: #525659; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; }}
                         
-                        /* Contenedor exacto A4 sin márgenes verticales para evitar desbordes */
-                        .page {{ width: 210mm; height: 296mm; background: white; position: relative; overflow: hidden; box-sizing: border-box; box-shadow: 0 0 10px rgba(0,0,0,0.5); }}
+                        /* Contenedor estructural base A4 */
+                        .page {{ 
+                            width: 210mm; 
+                            height: 296mm; 
+                            background: white; 
+                            position: relative; 
+                            overflow: hidden; 
+                            box-sizing: border-box; 
+                            page-break-after: always;
+                            page-break-inside: avoid;
+                        }}
+                        
+                        /* Control estricto de visualización en pantalla vs impresión */
+                        @media screen {{
+                            body {{ padding: 20px; }}
+                            .page {{ margin-bottom: 25px; box-shadow: 0 0 15px rgba(0,0,0,0.6); }}
+                        }}
+                        
+                        @media print {{
+                            body {{ padding: 0; background: transparent; }}
+                            .page {{ margin: 0; box-shadow: none; }}
+                        }}
                         
                         /* Estilos de la Portada */
                         .portada-bg {{ background-image: url('data:image/png;base64,{b64_portada}'); background-size: cover; background-position: center; height: 60%; position: relative; }}
@@ -1445,7 +1461,7 @@ with t_pdf:
                         <button onclick="descargarPDF()" style="background:#0d47a1; color:white; border:none; padding:15px 40px; font-size: 16px; font-weight:bold; cursor:pointer; border-radius:8px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">📥 DESCARGAR MASTER PDF</button>
                     </div>
                     
-                    <div id="master-pdf" style="display: flex; flex-direction: column; align-items: center;">
+                    <div id="master-pdf" style="display: flex; flex-direction: column; align-items: center; width: 100%;">
                         
                         <div class="page">
                             <div class="portada-bg">
@@ -1471,10 +1487,7 @@ with t_pdf:
                                 <div class="hl-box"><div class="hl-label">🛣️ RECORRIDO FLOTA</div><div class="hl-value">{hl_kms}</div></div>
                             </div>
                         </div>
-
-                        <div style="height: 30px; background: transparent;" data-html2canvas-ignore="true"></div>
                         
-                        <div class="html2pdf__page-break"></div>
                         <div class="page">
                             <div style="padding: 60px;">
                                 <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 5px solid #000; padding-bottom: 25px; margin-bottom: 40px;">
@@ -1508,7 +1521,7 @@ with t_pdf:
                             margin:       0,
                             filename:     'Master_Reporte_Semanal_Semana_{int(num_sem)}.pdf',
                             image:        {{ type: 'jpeg', quality: 0.98 }},
-                            html2canvas:  {{ scale: 2, useCORS: true }},
+                            html2canvas:  {{ scale: 2, useCORS: true, logging: false }},
                             jsPDF:        {{ unit: 'mm', format: 'a4', orientation: 'portrait' }},
                             pagebreak:    {{ mode: ['css', 'legacy'] }}
                         }};
@@ -1518,4 +1531,4 @@ with t_pdf:
                 </body></html>
                 """
                 components.html(html_pdf_master, height=1200, scrolling=True)
-                st.toast("✅ Master PDF generado exitosamente sin páginas en blanco.")
+                st.toast("✅ Master PDF generado exitosamente.")
