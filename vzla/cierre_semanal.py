@@ -1322,7 +1322,7 @@ with t_surtido:
                     st.code(msg_surt, language="markdown")
                     
 # ---------------------------------------------------------
-# PESTAÑA 8: GENERADOR DEL MASTER REPORTE SEMANAL (PDF - FIX SANGRADO DE PÁGINA)
+# PESTAÑA 8: GENERADOR DEL MASTER REPORTE SEMANAL (PDF - FIX RESOLUCIÓN ULTRA HD)
 # ---------------------------------------------------------
 with t_pdf:
     st.info("Ensamblador Final: Sube la foto de portada, llena los datos clave y carga las imágenes para generar el Reporte Master PDF perfecto.")
@@ -1359,7 +1359,7 @@ with t_pdf:
         if not img_portada:
             st.warning("⚠️ Debes subir al menos la foto de portada para generar el PDF.")
         else:
-            with st.spinner("Ensamblando PDF Corporativo a prueba de fallos..."):
+            with st.spinner("Ensamblando PDF Corporativo en Alta Resolución..."):
                 b64_portada = base64.b64encode(img_portada.read()).decode()
 
                 # Construir lista de secciones dinámicamente en el ORDEN ESTRICTO
@@ -1532,8 +1532,10 @@ with t_pdf:
                         var opt = {{
                             margin:       0,
                             filename:     'Master_Reporte_Semanal_Semana_{int(num_sem)}.pdf',
-                            image:        {{ type: 'jpeg', quality: 0.98 }},
-                            html2canvas:  {{ scale: 2, useCORS: true, logging: false, scrollY: 0 }},
+                            // CAMBIO 1: image type a 'png' para evitar desenfoque de compresión jpeg
+                            image:        {{ type: 'png' }},
+                            // CAMBIO 2: scale a 4 para captura 4K
+                            html2canvas:  {{ scale: 4, useCORS: true, logging: false, scrollY: 0 }},
                             jsPDF:        {{ unit: 'mm', format: 'a4', orientation: 'portrait' }},
                             pagebreak:    {{ mode: 'css', avoid: 'tr' }}
                         }};
@@ -1543,4 +1545,4 @@ with t_pdf:
                 </body></html>
                 """
                 components.html(html_pdf_master, height=1200, scrolling=True)
-                st.toast("✅ Master PDF generado con motor de bloque ajustado (Sin sangrado).")
+                st.toast("✅ Master PDF generado con motor Ultra HD (Sin desenfoque).")
