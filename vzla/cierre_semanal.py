@@ -424,22 +424,6 @@ with t_guardias:
             df_seg_raw = extraer_datos("SEG_ROL_GUARDIA")
             if df_seg_raw.empty: st.error("No se encontraron registros en SEG_ROL_GUARDIA.")
             else:
-                # [CORRECCIÓN ULTRA BLINDADA PARA LA CANTIDAD]
-                # 1. Buscamos cualquier columna que se parezca a Cantidad
-                col_cant_encontrada = None
-                for col in df_seg_raw.columns:
-                    if any(x in str(col).lower() for x in ['cant', 'oficial', 'num']):
-                        col_cant_encontrada = col
-                        break
-                
-                # 2. Arrastramos como Texto Puro para evitar que "to_numeric" destruya los datos
-                if col_cant_encontrada:
-                    df_seg_raw[col_cant_encontrada] = df_seg_raw[col_cant_encontrada].astype(str).str.strip()
-                    df_seg_raw[col_cant_encontrada] = df_seg_raw[col_cant_encontrada].replace(['', 'nan', 'None', '<NA>'], pd.NA)
-                    df_seg_raw['CANT_LIMPIA'] = df_seg_raw[col_cant_encontrada].ffill()
-                else:
-                    df_seg_raw['CANT_LIMPIA'] = "1" # Salvavidas en caso de que borren el título
-
                 grupos_seg, c_area, c_diu, c_noc, _ = agrupar_rol_compacto(df_seg_raw, num_sem)
                 
                 if not grupos_seg: st.warning(f"No hay registros de Seguridad para la semana {int(num_sem)}.")
@@ -447,16 +431,24 @@ with t_guardias:
                     for fecha_str, df_grupo in grupos_seg:
                         filas_seg_html = ""
                         for _, r in df_grupo.iterrows():
-                            d_list = [f"✓ {x.strip()}" for x in str(r.get(c_diu, '')).split('\n') if x.strip() and str(x).lower() not in ['nan', 'none']]
-                            n_list = [f"✓ {x.strip()}" for x in str(r.get(c_noc, '')).split('\n') if x.strip() and str(x).lower() not in ['nan', 'none']]
+                            # Limpieza y listado de oficiales diurnos
+                            d_nombres = [x.strip() for x in str(r.get(c_diu, '')).split('\n') if x.strip() and str(x).lower() not in ['nan', 'none']]
+                            d_list = [f"✓ {nombre}" for nombre in d_nombres]
                             d_html = "<br>".join(d_list)
+                            
+                            # Limpieza y listado de oficiales nocturnos
+                            n_nombres = [x.strip() for x in str(r.get(c_noc, '')).split('\n') if x.strip() and str(x).lower() not in ['nan', 'none']]
+                            n_list = [f"✓ {nombre}" for nombre in n_nombres]
                             n_html = "<br>".join(n_list)
                             
-                            # Obtenemos la cantidad de la columna blindada que acabamos de crear
-                            cant = str(r.get('CANT_LIMPIA', '1')).replace(".0", "")
-                            if cant.lower() in ['nan', 'none', '<na>', '']: cant = "1"
+                            # --- EL CONTEO INTELIGENTE ---
+                            # Sumamos la cantidad de nombres reales que hay en el turno de día y de noche
+                            total_oficiales = len(d_nombres) + len(n_nombres)
+                            
+                            # Para evitar que salga un "0" si el área está vacía (aunque no debería pasar)
+                            cant_mostrar = str(total_oficiales) if total_oficiales > 0 else ""
                                 
-                            filas_seg_html += f"<tr><td style='padding:10px; border:1px solid #000; font-weight:bold; color:{color_azul}; vertical-align:top;'>{r.get(c_area, '')}</td><td style='padding:10px; border:1px solid #000; text-align:center; font-weight:900; color:#d32f2f; font-size:16px; vertical-align:top;'>{cant}</td><td style='padding:10px; border:1px solid #000; vertical-align:top;'>{d_html}</td><td style='padding:10px; border:1px solid #000; vertical-align:top;'>{n_html}</td></tr>"
+                            filas_seg_html += f"<tr><td style='padding:10px; border:1px solid #000; font-weight:bold; color:{color_azul}; vertical-align:top;'>{r.get(c_area, '')}</td><td style='padding:10px; border:1px solid #000; text-align:center; font-weight:900; color:#d32f2f; font-size:16px; vertical-align:top;'>{cant_mostrar}</td><td style='padding:10px; border:1px solid #000; vertical-align:top;'>{d_html}</td><td style='padding:10px; border:1px solid #000; vertical-align:top;'>{n_html}</td></tr>"
 
                         html_piz_seg = f"""
                         <html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head>
