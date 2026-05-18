@@ -1322,10 +1322,10 @@ with t_surtido:
                     st.code(msg_surt, language="markdown")
                     
 # ---------------------------------------------------------
-# PESTAÑA 8: GENERADOR DEL MASTER REPORTE SEMANAL (PDF - CORREGIDO SIN DUPLICACIONES)
+# PESTAÑA 8: GENERADOR DEL MASTER REPORTE SEMANAL (PDF - FIX DEFINITIVO DE RENDERIZADO)
 # ---------------------------------------------------------
 with t_pdf:
-    st.info("Ensamblador Final: Sube la foto de portada, llena los datos clave y carga las imágenes en el orden establecido para generar el Reporte Master PDF perfecto.")
+    st.info("Ensamblador Final: Sube la foto de portada, llena los datos clave y carga las imágenes para generar el Reporte Master PDF perfecto.")
 
     col_p1, col_p2 = st.columns([1, 1])
 
@@ -1359,10 +1359,10 @@ with t_pdf:
         if not img_portada:
             st.warning("⚠️ Debes subir al menos la foto de portada para generar el PDF.")
         else:
-            with st.spinner("Ensamblando PDF Corporativo..."):
+            with st.spinner("Ensamblando PDF Corporativo a prueba de fallos..."):
                 b64_portada = base64.b64encode(img_portada.read()).decode()
 
-                # Construir lista de secciones dinámicamente en el ORDEN ESTRICTO solicitado
+                # Construir lista de secciones dinámicamente en el ORDEN ESTRICTO
                 secciones = []
                 
                 if img_seguridad:
@@ -1392,12 +1392,12 @@ with t_pdf:
                     </tr>
                     """
                     
-                    # Generar Página de Contenido limpia
+                    # Generar Página de Contenido (Bloque Rígido)
                     img_file.seek(0)
                     b64_img = base64.b64encode(img_file.read()).decode()
                     
                     html_paginas += f"""
-                    <div class="page">
+                    <div class="pdf-page">
                         <div style="background-color: #000; color: white; padding: 20px 40px; display: flex; justify-content: space-between; align-items: center; border-bottom: 6px solid #d4af37;">
                             <div style="font-size: 22px; font-weight: 900; text-transform: uppercase;">{titulo}</div>
                             <div style="font-size: 16px; font-weight: bold; color: #d4af37;">SEMANA {int(num_sem)}</div>
@@ -1413,57 +1413,69 @@ with t_pdf:
                     """
                     pagina_actual += 1
 
+                # HTML MAESTRO (Sin Flexbox en el contenedor raíz)
                 html_pdf_master = f"""
                 <!DOCTYPE html><html><head>
                     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
                     <style>
                         @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&display=swap');
-                        body {{ font-family: 'Montserrat', sans-serif; background: #525659; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; }}
+                        body {{ 
+                            font-family: 'Montserrat', sans-serif; 
+                            background: #525659; 
+                            margin: 0; 
+                            padding: 20px; 
+                        }}
                         
-                        /* Contenedor estructural base A4 */
-                        .page {{ 
+                        /* EL CONTENEDOR PRINCIPAL ESTRICTAMENTE EN BLOQUE (CERO FLEXBOX AQUÍ) */
+                        #master-pdf {{
+                            display: block;
+                            width: 210mm;
+                            margin: 0 auto;
+                        }}
+                        
+                        /* PÁGINA RÍGIDA A4 EXACTA */
+                        .pdf-page {{ 
+                            display: block;
                             width: 210mm; 
                             height: 296mm; 
                             background: white; 
                             position: relative; 
                             overflow: hidden; 
                             box-sizing: border-box; 
-                            page-break-after: always;
-                            page-break-inside: avoid;
+                            page-break-after: always !important;
+                            page-break-inside: avoid !important;
+                            margin-bottom: 20px; /* Separación visual en pantalla */
+                            box-shadow: 0 0 10px rgba(0,0,0,0.5); 
                         }}
                         
-                        /* Control estricto de visualización en pantalla vs impresión */
-                        @media screen {{
-                            body {{ padding: 20px; }}
-                            .page {{ margin-bottom: 25px; box-shadow: 0 0 15px rgba(0,0,0,0.6); }}
-                        }}
-                        
+                        /* MODO IMPRESIÓN (Borra las sombras y márgenes visuales para corte limpio) */
                         @media print {{
                             body {{ padding: 0; background: transparent; }}
-                            .page {{ margin: 0; box-shadow: none; }}
+                            #master-pdf {{ margin: 0; }}
+                            .pdf-page {{ margin-bottom: 0; box-shadow: none; border: none; }}
                         }}
                         
-                        /* Estilos de la Portada */
+                        /* Estilos Internos de Portada */
                         .portada-bg {{ background-image: url('data:image/png;base64,{b64_portada}'); background-size: cover; background-position: center; height: 60%; position: relative; }}
                         .overlay {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(135deg, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.4) 100%); }}
                         .portada-content {{ position: absolute; bottom: 50px; left: 50px; color: white; z-index: 2; width: 85%; }}
                         .portada-title {{ font-size: 48px; font-weight: 900; margin: 0; text-transform: uppercase; line-height: 1.1; letter-spacing: -1px; }}
                         .portada-subtitle {{ font-size: 24px; font-weight: bold; color: #d4af37; margin-top: 15px; letter-spacing: 2px; text-transform: uppercase; }}
                         
-                        /* Estilos del Resumen Ejecutivo */
+                        /* Estilos Internos del Resumen */
                         .highlights-container {{ display: flex; flex-wrap: wrap; padding: 40px 50px; justify-content: space-between; background: white; height: 40%; box-sizing: border-box; }}
                         .hl-box {{ width: 31%; background: #f8f9fa; border-left: 6px solid #d32f2f; padding: 20px; margin-bottom: 25px; border-radius: 6px; box-sizing: border-box; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }}
                         .hl-label {{ font-size: 12px; font-weight: bold; color: #777; text-transform: uppercase; letter-spacing: 1px; }}
                         .hl-value {{ font-size: 20px; font-weight: 900; color: #000; margin-top: 8px; }}
                     </style>
                 </head><body>
-                    <div style="text-align:center; margin: 20px 0; width: 100%;" data-html2canvas-ignore="true">
+                    <div style="text-align:center; margin-bottom: 30px;" data-html2canvas-ignore="true">
                         <button onclick="descargarPDF()" style="background:#0d47a1; color:white; border:none; padding:15px 40px; font-size: 16px; font-weight:bold; cursor:pointer; border-radius:8px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">📥 DESCARGAR MASTER PDF</button>
                     </div>
                     
-                    <div id="master-pdf" style="display: flex; flex-direction: column; align-items: center; width: 100%;">
+                    <div id="master-pdf">
                         
-                        <div class="page">
+                        <div class="pdf-page">
                             <div class="portada-bg">
                                 <div class="overlay"></div>
                                 <div class="portada-content">
@@ -1488,7 +1500,7 @@ with t_pdf:
                             </div>
                         </div>
                         
-                        <div class="page">
+                        <div class="pdf-page">
                             <div style="padding: 60px;">
                                 <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 5px solid #000; padding-bottom: 25px; margin-bottom: 40px;">
                                     <div>
@@ -1521,9 +1533,10 @@ with t_pdf:
                             margin:       0,
                             filename:     'Master_Reporte_Semanal_Semana_{int(num_sem)}.pdf',
                             image:        {{ type: 'jpeg', quality: 0.98 }},
-                            html2canvas:  {{ scale: 2, useCORS: true, logging: false }},
+                            // ScrollY: 0 es CLAVE para evitar el desdoblamiento de divs
+                            html2canvas:  {{ scale: 2, useCORS: true, logging: false, scrollY: 0 }},
                             jsPDF:        {{ unit: 'mm', format: 'a4', orientation: 'portrait' }},
-                            pagebreak:    {{ mode: ['css', 'legacy'] }}
+                            pagebreak:    {{ mode: 'css', avoid: 'tr' }}
                         }};
                         html2pdf().set(opt).from(element).save();
                     }}
@@ -1531,4 +1544,4 @@ with t_pdf:
                 </body></html>
                 """
                 components.html(html_pdf_master, height=1200, scrolling=True)
-                st.toast("✅ Master PDF generado exitosamente.")
+                st.toast("✅ Master PDF generado con motor de bloque (Anti-Duplicación).")
