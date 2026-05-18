@@ -1048,7 +1048,7 @@ with t_combustible:
                     st.code(msg_comb, language="markdown")
                     
 # ---------------------------------------------------------
-# PESTAÑA 7: PIZARRA DE RESULTADO DE SURTIDO Y EXTRACCIÓN (VERSIÓN ULTRA SIMPLE + PLANTA)
+# PESTAÑA 7: PIZARRA DE RESULTADO DE SURTIDO Y EXTRACCIÓN (VERSIÓN ULTRA SIMPLE + NOMBRES CORREGIDOS)
 # ---------------------------------------------------------
 with t_surtido:
     st.info("Resumen directo y simplificado del consumo de combustible agrupado por TIPO DE SURTIDO y PLANTA ELÉCTRICA.")
@@ -1089,11 +1089,16 @@ with t_surtido:
                     df_surt['TIPO_SURTIDO'] = df_surt['TIPO_SURTIDO'].astype(str).str.strip().str.upper()
                     df_surt['UNIDAD'] = df_surt['UNIDAD'].astype(str).str.strip().str.upper()
 
-                    # --- EXTRACCIÓN DE LA PLANTA ELÉCTRICA ---
-                    # Si la unidad dice "PLANTA", forzamos su tipo de surtido a una categoría nueva.
-                    # Esto descuenta automáticamente esos litros de los Bidones o E/S.
+                    # --- CORRECCIONES DE NOMBRES Y ERRORES HUMANOS ---
+                    # 1. Renombramos el Tanque Reserva
+                    df_surt['TIPO_SURTIDO'] = df_surt['TIPO_SURTIDO'].replace({
+                        'TANQUE RESERVA': 'TANQUE RESERVA CIUDAD DROTACA (EL TIGRE)'
+                    })
+
+                    # 2. Extraemos Planta Eléctrica y forzamos a GASOIL (corrige errores de digitación en Excel)
                     cond_planta = df_surt['UNIDAD'].str.contains('PLANTA')
-                    df_surt.loc[cond_planta, 'TIPO_SURTIDO'] = 'GENERACIÓN PLANTA ELÉCTRICA'
+                    df_surt.loc[cond_planta, 'TIPO_SURTIDO'] = 'PLANTA ELECTRICA (EL TIGRE)'
+                    df_surt.loc[cond_planta, 'COMBUSTIBLE'] = 'GASOIL'
 
                     # --- KPIs GENERALES ---
                     total_gasolina = df_surt[df_surt['COMBUSTIBLE'] == 'GASOLINA']['LITROS'].sum()
@@ -1114,10 +1119,10 @@ with t_surtido:
                         tot_gasoil_tipo = df_tipo[df_tipo['COMBUSTIBLE'] == 'GASOIL']['LITROS'].sum()
                         tot_ambos = df_tipo['LITROS'].sum()
                         
-                        # Las tarjetas ahora ocupan el 48% para formar una cuadrícula de 2x2 perfecta
+                        # Diseño de cuadrícula 2x2 ajustado
                         bloques_html += f"""
                         <div style="width: 48%; margin-bottom: 25px; box-sizing: border-box;">
-                            <h3 style="margin: 0; font-size: 16px; background: #000; color: white; padding: 12px; text-align: center; border: 2px solid #000; text-transform: uppercase; border-bottom: none;">{tipo}</h3>
+                            <h3 style="margin: 0; font-size: 15px; background: #000; color: white; padding: 12px; text-align: center; border: 2px solid #000; text-transform: uppercase; border-bottom: none;">{tipo}</h3>
                             <table style="width: 100%; border-collapse: collapse; font-size: 15px; border: 2px solid #000;">
                                 <tr style="background: white;">
                                     <td style="padding: 12px; border: 2px solid #000; font-weight: bold; color: #d32f2f;">⛽ GASOLINA</td>
