@@ -1590,10 +1590,10 @@ with t_mantenimiento:
         st.code(msg_manto, language="markdown")
                    
 # ---------------------------------------------------------
-# PESTAÑA 8: GENERADOR DEL MASTER REPORTE SEMANAL (PDF - FIX RESOLUCIÓN ULTRA HD)
+# PESTAÑA 8: GENERADOR DEL MASTER REPORTE SEMANAL (PDF - CON AUDITORÍA DE MANTENIMIENTO)
 # ---------------------------------------------------------
 with t_pdf:
-    st.info("Ensamblador Final: Sube la foto de portada, llena los datos clave y carga las imágenes para generar el Reporte Master PDF perfecto.")
+    st.info("Ensamblador Final: Sube la foto de portada, llena los datos clave y carga las imágenes en el orden establecido para generar el Reporte Master PDF perfecto.")
 
     col_p1, col_p2 = st.columns([1, 1])
 
@@ -1622,6 +1622,7 @@ with t_pdf:
         img_despachos = st.file_uploader("7. Resumen de Despachos", type=["png", "jpg"])
         img_combustible = st.file_uploader("8. Reserva de Combustible", type=["png", "jpg"])
         img_surtido = st.file_uploader("9. Resultados de Surtido", type=["png", "jpg"])
+        img_mantenimiento = st.file_uploader("10. Auditoría de Mantenimiento", type=["png", "jpg"]) # <--- NUEVO CARGADOR DE MANTENIMIENTO
 
     if st.button("📄 GENERAR MASTER REPORTE SEMANAL", type="primary", use_container_width=True):
         if not img_portada:
@@ -1630,7 +1631,7 @@ with t_pdf:
             with st.spinner("Ensamblando PDF Corporativo en Alta Resolución..."):
                 b64_portada = base64.b64encode(img_portada.read()).decode()
 
-                # Construir lista de secciones dinámicamente en el ORDEN ESTRICTO
+                # Construir lista de secciones dinámicamente en el ORDEN ESTRICTO solicitado
                 secciones = []
                 
                 if img_seguridad:
@@ -1646,6 +1647,7 @@ with t_pdf:
                 if img_despachos: secciones.append(("RESUMEN DE DESPACHOS", img_despachos))
                 if img_combustible: secciones.append(("RESERVA DE COMBUSTIBLE", img_combustible))
                 if img_surtido: secciones.append(("RESULTADOS DE SURTIDO", img_surtido))
+                if img_mantenimiento: secciones.append(("AUDITORÍA DE MANTENIMIENTO", img_mantenimiento)) # <--- SE AGREGA DE ÚLTIMO AL REPORTE
 
                 html_indice = ""
                 html_paginas = ""
@@ -1660,7 +1662,7 @@ with t_pdf:
                     </tr>
                     """
                     
-                    # Generar Página de Contenido (Bloque Rígido)
+                    # Generar Página de Contenido (Bloque Rígido Ajustado a 290mm para evitar sangrado inferior)
                     img_file.seek(0)
                     b64_img = base64.b64encode(img_file.read()).decode()
                     
@@ -1681,7 +1683,7 @@ with t_pdf:
                     """
                     pagina_actual += 1
 
-                # HTML MAESTRO (Sin Flexbox en el contenedor raíz y con altura reducida a 290mm)
+                # HTML MAESTRO (Estructura en Bloque sin Flexbox para garantizar simetría perfecta)
                 html_pdf_master = f"""
                 <!DOCTYPE html><html><head>
                     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
@@ -1694,29 +1696,29 @@ with t_pdf:
                             padding: 20px; 
                         }}
                         
-                        /* EL CONTENEDOR PRINCIPAL ESTRICTAMENTE EN BLOQUE */
+                        /* CONTENEDOR PRINCIPAL EN BLOQUE */
                         #master-pdf {{
                             display: block;
                             width: 210mm;
                             margin: 0 auto;
                         }}
                         
-                        /* PÁGINA RÍGIDA - ALTURA REDUCIDA A 290mm PARA ELIMINAR EL SANGRADO INFERIOR */
+                        /* PÁGINA RÍGIDA CON MARGEN DE SEGURIDAD ANTI-DESBORDE Y ANTI-CORTES */
                         .pdf-page {{ 
                             display: block;
                             width: 210mm; 
-                            height: 290mm; /* A4 real es 297mm. Dejamos 7mm de margen de seguridad interno */
+                            height: 290mm; 
                             background: white; 
                             position: relative; 
                             overflow: hidden; 
                             box-sizing: border-box; 
                             page-break-after: always !important;
                             page-break-inside: avoid !important;
-                            margin-bottom: 20px; /* Separación visual en pantalla */
+                            margin-bottom: 20px; 
                             box-shadow: 0 0 10px rgba(0,0,0,0.5); 
                         }}
                         
-                        /* MODO IMPRESIÓN (Borra las sombras y márgenes visuales para corte limpio) */
+                        /* CONFIGURACIÓN DE IMPRESIÓN LIMPIA */
                         @media print {{
                             body {{ padding: 0; background: transparent; }}
                             #master-pdf {{ margin: 0; }}
@@ -1800,10 +1802,8 @@ with t_pdf:
                         var opt = {{
                             margin:       0,
                             filename:     'Master_Reporte_Semanal_Semana_{int(num_sem)}.pdf',
-                            // CAMBIO 1: image type a 'png' para evitar desenfoque de compresión jpeg
-                            image:        {{ type: 'png' }},
-                            // CAMBIO 2: scale a 4 para captura 4K
-                            html2canvas:  {{ scale: 4, useCORS: true, logging: false, scrollY: 0 }},
+                            image:        {{ type: 'png' }}, // Captura en PNG para preservar nitidez 4K en textos comprimidos
+                            html2canvas:  {{ scale: 4, useCORS: true, logging: false, scrollY: 0 }}, // Escala 4 para máxima definición
                             jsPDF:        {{ unit: 'mm', format: 'a4', orientation: 'portrait' }},
                             pagebreak:    {{ mode: 'css', avoid: 'tr' }}
                         }};
@@ -1813,4 +1813,4 @@ with t_pdf:
                 </body></html>
                 """
                 components.html(html_pdf_master, height=1200, scrolling=True)
-                st.toast("✅ Master PDF generado con motor Ultra HD (Sin desenfoque).")
+                st.toast("✅ Master PDF ensamblado con Auditoría de Mantenimiento incluida.")
