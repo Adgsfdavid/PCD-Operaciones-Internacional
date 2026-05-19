@@ -9,11 +9,37 @@ import os
 import json
 import traceback
 import streamlit.components.v1 as components
+import gspread
+import textwrap
+from google.oauth2.service_account import Credentials
 
-# --- CONSTANTES ---
+# ==========================================
+# CONFIGURACIÓN DE CONEXIÓN A GOOGLE SHEETS
+# ==========================================
+CREDENCIALES_GOOGLE = dict(st.secrets["gcp_service_account"])
+llave_sucia = CREDENCIALES_GOOGLE["private_key"]
+llave_limpia = llave_sucia.replace("-----BEGIN PRIVATE KEY-----", "").replace("-----END PRIVATE KEY-----", "").replace("\\n", "").replace("\n", "").replace(" ", "")
+llave_perfecta = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(textwrap.wrap(llave_limpia, 64)) + "\n-----END PRIVATE KEY-----\n"
+CREDENCIALES_GOOGLE["private_key"] = llave_perfecta
+
+def obtener_cliente_sheets():
+    alcance = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+    credenciales = Credentials.from_service_account_info(CREDENCIALES_GOOGLE, scopes=alcance)
+    return gspread.authorize(credenciales)
+
+def guardar_en_googlesheets(datos_lista):
+    cliente = obtener_cliente_sheets()
+    # Conexión directa a la Bóveda PCD
+    doc = cliente.open_by_key("1wCM3tcfQJtIQ4gDB0gLe9gJ4_ON7Vl6U4cBGuxXTKZ0")
+    sheet = doc.worksheet("Historial_GPS")
+    for fila in datos_lista:
+        sheet.append_row(fila)
+
+# ==========================================
+# CONSTANTES
+# ==========================================
 VELOCIDAD_MINIMA_MOVIMIENTO = 5
 DISTANCIA_MAXIMA_METROS = 300
-HISTORICO_CSV_FILE = "historico_chinitas.csv"
 DESPACHOS_DB_FILE = "despachos_guardados.json"
 
 PLACAS_AUTORIZADAS = {
@@ -38,7 +64,9 @@ MASTER_VEHICULOS = {
     'A87EZ8P': {'modelo': 'RICH P11', 'color': 'BLANCO'},
 }
 
-# --- FUNCIONES DE CÁLCULO ---
+# ==========================================
+# FUNCIONES DE CÁLCULO Y LIMPIEZA
+# ==========================================
 def _normalize_df_columns(df):
     df.columns = [str(col).strip().title().replace(" De ", " De ").replace(" Y ", " Y ").replace(" (Km)", " (Km)").replace(" (Km/H)", " (Km/H)") for col in df.columns]
     return df
@@ -86,7 +114,9 @@ def guardar_json_local(file_name, data):
     with open(file_name, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
-# --- INTERFAZ DE STREAMLIT ---
+# ==========================================
+# INTERFAZ DE STREAMLIT
+# ==========================================
 st.set_page_config(page_title="Análisis GPS Chinitas", layout="wide")
 st.title("🛰️ Análisis de Rutas y Paradas GPS (Tracksolid)")
 
@@ -97,12 +127,14 @@ if 'datos_resumen' not in st.session_state:
     st.session_state['datos_resumen'] = []
 if 'reportes_texto' not in st.session_state:
     st.session_state['reportes_texto'] = {}
+if 'chofer_defecto' not in st.session_state:
+    st.session_state['chofer_defecto'] = ""
 
-t_config, t_resumen, t_reportes, t_historico = st.tabs(["⚙️ Configuración", "📊 Resumen de Vehículos", "📝 Reportes Individuales", "💾 Historial"])
+t_config, t_resumen, t_reportes, t_historico = st.tabs(["⚙️ Configuración", "📊 Resumen de Vehículos", "📝 Reportes Individuales", "💾 Guardar en Nube"])
 
-# ==========================================
+# ---------------------------------------------------------
 # PESTAÑA 1: CONFIGURACIÓN
-# ==========================================
+# ---------------------------------------------------------
 with t_config:
     st.subheader("1. Carga de Archivos Base")
     col1, col2, col3 = st.columns(3)
@@ -116,28 +148,25 @@ with t_config:
     st.markdown("---")
     st.subheader("2. Parámetros Globales")
     c1, c2, c3 = st.columns(3)
-    chofer_defecto = c1.text_input("Chofer por defecto:", value="").upper()
+    st.session_state['chofer_defecto'] = c1.text_input("Chofer por defecto:", value="").upper()
     despacho_defecto = c2.text_input("Despacho por defecto:", value="EL TIGRITO").upper()
     auto_resguardo = c3.checkbox("Detectar Hora de Resguardo Automáticamente", value=True)
     hora_manual = c3.time_input("Hora de Resguardo (Manual):", value=datetime.strptime("18:00", "%H:%M").time(), disabled=auto_resguardo)
 
-    if st.button("🚀 ProcesAR CRUCE GPS VS GEOCERCAS", type="primary", use_container_width=True):
+    if st.button("🚀 Procesar Cruce GPS vs Geocercas", type="primary", use_container_width=True):
         if not archivos_historial or not archivo_geocercas:
             st.error("⚠️ Faltan archivos por cargar. (Obligatorio: Tracksolid y Base de Localizaciones)")
         else:
             with st.spinner("Masticando datos de coordenadas con Geopy..."):
                 try:
-                    # Leer y limpiar Geocercas
                     df_base_loc = pd.read_excel(archivo_geocercas)
                     df_base_loc = _normalize_df_columns(df_base_loc)
                     
-                    # Leer y limpiar Odómetro
                     df_odometro = None
                     if archivo_odometro:
                         df_odometro = pd.read_excel(archivo_odometro, header=8)
                         df_odometro = _normalize_df_columns(df_odometro)
 
-                    # Leer y limpiar Historial GPS
                     all_dfs = []
                     for f in archivos_historial:
                         df_h = pd.read_excel(f, header=8)
@@ -160,8 +189,7 @@ with t_config:
                         modelo = MASTER_VEHICULOS[placa]['modelo']
                         color = MASTER_VEHICULOS[placa]['color']
                         
-                        # Lógica Chofer
-                        chofer_para_esta_placa = "YONNER TAMOY" if placa == 'A72EB0P' else chofer_defecto
+                        chofer_para_esta_placa = "YONNER TAMOY" if placa == 'A72EB0P' else st.session_state['chofer_defecto']
                         despacho_guardado_manual = st.session_state['despachos_guardados'].get(placa)
                         despacho_actual = despacho_guardado_manual if despacho_guardado_manual else despacho_defecto
                         
@@ -248,15 +276,14 @@ with t_config:
                     st.error(f"Error fatal: {e}")
                     st.code(traceback.format_exc())
 
-# ==========================================
+# ---------------------------------------------------------
 # PESTAÑA 2: RESUMEN DE VEHÍCULOS (PIZARRA)
-# ==========================================
+# ---------------------------------------------------------
 with t_resumen:
     if st.session_state['datos_resumen']:
         df_res = pd.DataFrame(st.session_state['datos_resumen'])
         km_total_gral = df_res['KM'].sum()
         
-        # Opciones de Guardado de Edición de Rutas
         st.info("Puedes editar la columna **RUTA** directamente en la tabla. Los cambios se guardarán para el próximo reporte.")
         df_editado = st.data_editor(
             df_res[['PLACA', 'MODELO', 'COLOR', 'RUTA', 'KM']], 
@@ -270,7 +297,6 @@ with t_resumen:
             }
         )
         
-        # Guardar cambios en el JSON
         if st.button("💾 Guardar Rutas Editadas"):
             for _, r in df_editado.iterrows():
                 st.session_state['despachos_guardados'][r['PLACA']] = r['RUTA']
@@ -335,15 +361,14 @@ with t_resumen:
     else:
         st.info("Sube los archivos y presiona Procesar en la pestaña Configuración.")
 
-# ==========================================
+# ---------------------------------------------------------
 # PESTAÑA 3: REPORTES INDIVIDUALES
-# ==========================================
+# ---------------------------------------------------------
 with t_reportes:
     if st.session_state['reportes_texto']:
         placa_sel = st.selectbox("Seleccione el Vehículo:", list(st.session_state['reportes_texto'].keys()))
         texto = st.text_area("Reporte Generado (Editable):", value=st.session_state['reportes_texto'][placa_sel], height=400)
         
-        # Enlace rápido para WhatsApp (Abre web.whatsapp.com con el texto pre-escrito)
         import urllib.parse
         texto_url = urllib.parse.quote(texto)
         url_wa = f"https://wa.me/584127969408?text={texto_url}"
@@ -358,36 +383,50 @@ with t_reportes:
     else:
         st.info("Los reportes aparecerán aquí después de procesar los datos.")
 
-# ==========================================
-# PESTAÑA 4: HISTORIAL DE KILOMETRAJES
-# ==========================================
+# ---------------------------------------------------------
+# PESTAÑA 4: GUARDAR EN LA NUBE (NUEVO GOOGLE SHEETS)
+# ---------------------------------------------------------
 with t_historico:
-    st.subheader("Gestión de Historial Local")
-    if st.button("💾 Guardar Datos Actuales en el Historial", type="primary"):
+    st.subheader("💾 Guardar en Google Sheets")
+    st.info("Al presionar el botón, se enviará el resumen del día a tu hoja 'Historial_GPS' en la nube.")
+    
+    if st.button("🚀 Enviar Datos a Google Sheets", type="primary"):
         if st.session_state['datos_resumen']:
-            nuevos = []
-            fecha_hoy = datetime.now().strftime("%Y-%m-%d")
-            for d in st.session_state['datos_resumen']:
-                nuevos.append({'FECHA': fecha_hoy, 'PLACA': d['PLACA'], 'MODELO': d['MODELO'], 'RUTA': d['RUTA'], 'KMS': d['KM']})
-            
-            df_nuevos = pd.DataFrame(nuevos)
-            if os.path.exists(HISTORICO_CSV_FILE):
-                df_hist = pd.read_csv(HISTORICO_CSV_FILE)
-                df_final = pd.concat([df_hist, df_nuevos], ignore_index=True)
-                df_final.drop_duplicates(subset=['FECHA', 'PLACA'], keep='last', inplace=True)
-            else:
-                df_final = df_nuevos
-            
-            df_final.to_csv(HISTORICO_CSV_FILE, index=False)
-            st.success("Historial guardado exitosamente.")
+            try:
+                with st.spinner("Conectando con la nube (Google Sheets)..."):
+                    datos_a_enviar = []
+                    fecha_actual = datetime.now()
+                    
+                    # Calcular semana y mes
+                    semana = fecha_actual.strftime("%W")
+                    
+                    dias_es = {"Monday": "Lunes", "Tuesday": "Martes", "Wednesday": "Miércoles", "Thursday": "Jueves", "Friday": "Viernes", "Saturday": "Sábado", "Sunday": "Domingo"}
+                    meses_es = {"January": "Enero", "February": "Febrero", "March": "Marzo", "April": "Abril", "May": "Mayo", "June": "Junio", "July": "Julio", "August": "Agosto", "September": "Septiembre", "October": "Octubre", "November": "Noviembre", "December": "Diciembre"}
+                    
+                    dia_nombre = dias_es.get(fecha_actual.strftime("%A"), fecha_actual.strftime("%A"))
+                    mes_nombre = meses_es.get(fecha_actual.strftime("%B"), fecha_actual.strftime("%B"))
+                    
+                    for d in st.session_state['datos_resumen']:
+                        # Definir chofer basado en tu lógica preestablecida
+                        chofer = "YONNER TAMOY" if d['PLACA'] == 'A72EB0P' else st.session_state['chofer_defecto']
+                        if not chofer: chofer = "POR DEFINIR"
+                        
+                        fila = [
+                            fecha_actual.strftime("%d/%m/%Y"),
+                            dia_nombre,
+                            semana,
+                            mes_nombre,
+                            d['PLACA'],
+                            chofer,
+                            d['RUTA'],
+                            d['KM']
+                        ]
+                        datos_a_enviar.append(fila)
+                    
+                    guardar_en_googlesheets(datos_a_enviar)
+                    st.success("✅ ¡Datos registrados en Google Sheets exitosamente!")
+            except Exception as e:
+                st.error(f"Error al conectar con Sheets: {e}")
+                st.code(traceback.format_exc())
         else:
-            st.warning("No hay datos en el resumen para guardar.")
-            
-    if os.path.exists(HISTORICO_CSV_FILE):
-        df_historico_view = pd.read_csv(HISTORICO_CSV_FILE)
-        st.dataframe(df_historico_view, use_container_width=True)
-        
-        with open(HISTORICO_CSV_FILE, "rb") as file:
-            st.download_button(label="📥 Descargar CSV Histórico", data=file, file_name="historico_chinitas.csv", mime="text/csv")
-    else:
-        st.info("Aún no se ha guardado ningún historial.")
+            st.warning("No hay datos procesados en la pestaña de Resumen para enviar a la nube.")
