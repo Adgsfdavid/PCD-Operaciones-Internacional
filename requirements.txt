@@ -15,3 +15,4 @@ pdfplumber
 fpdf
 google-auth
 geopy
+fpdf2
