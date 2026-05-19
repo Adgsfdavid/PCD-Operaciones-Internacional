@@ -1565,19 +1565,24 @@ with t_mantenimiento:
         st.markdown("---")
         st.subheader("📱 Mensaje para WhatsApp (Actualizado)")
         
-        msg_manto = f"🛠️ *AUDITORÍA DE MANTENIMIENTO*\\n📅 Semana: {int(num_sem)}\\n\\n"
-        msg_manto += f"📋 *Planificados:* {total_planificados} Tareas\\n"
-        msg_manto += f"✅ *Logrados:* {total_logrados} Tareas\\n"
-        msg_manto += f"📈 *Efectividad:* {efectividad_global:.1f}%\\n"
-        msg_manto += f"🚨 *Imprevistos:* {total_imprevistos} Tareas\\n\\n"
-        msg_manto += "*🏅 Rendimiento Computado:*\\n"
+        # Inteligencia gramatical (Singular vs Plural)
+        t_plan = "Tarea" if total_planificados == 1 else "Tareas"
+        t_log = "Tarea" if total_logrados == 1 else "Tareas"
+        t_imp = "Tarea" if total_imprevistos == 1 else "Tareas"
+        
+        msg_manto = f"🛠️ *AUDITORÍA DE MANTENIMIENTO*\n📅 Semana: {int(num_sem)}\n\n"
+        msg_manto += f"📋 *Planificadas:* {total_planificados} {t_plan}\n"
+        msg_manto += f"✅ *Logradas:* {total_logrados} {t_log}\n"
+        msg_manto += f"📈 *Efectividad:* {efectividad_global:.1f}%\n"
+        msg_manto += f"🚨 *Imprevistos:* {total_imprevistos} {t_imp}\n\n"
+        msg_manto += "*🏅 Rendimiento Computado:*\n"
         
         for _, r in df_mec.iterrows():
             mec_n = str(r['MECANICO_RESPONSABLE']).strip()
             ico = "🏢" if "TALLER" in mec_n or "EXTERNO" in mec_n else "👨‍🔧"
-            msg_manto += f"{ico} {mec_n}: {r['EFECTIVIDAD']:.0f}% ({r['LOGRADOS']}/{r['ASIGNADOS']})\\n"
+            msg_manto += f"{ico} {mec_n}: {r['EFECTIVIDAD']:.0f}% ({r['LOGRADOS']}/{r['ASIGNADOS']})\n"
         
-        msg_manto += "\\n✅ *Ver pizarra detallada adjunta.*"
+        msg_manto += "\n✅ *Ver pizarra detallada adjunta.*"
         st.code(msg_manto, language="markdown")
                    
 # ---------------------------------------------------------
