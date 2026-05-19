@@ -203,7 +203,11 @@ def generar_resumen_pdf(df_datos, total_vehiculos, total_km):
     pdf.set_text_color(0, 0, 0)
     pdf.cell(135, 12, f'TOTAL RECORRIDO (GRAN TOTAL): {formatear_km(total_km)} Kms', 1, 1, 'C', 1)
 
-    return pdf.output(dest='S') # Retorna bytes
+    # Conversión segura a bytes puros para Streamlit (Compatible con fpdf clásico y fpdf2)
+    salida_pdf = pdf.output(dest='S')
+    if isinstance(salida_pdf, str):
+        return salida_pdf.encode('latin-1')
+    return bytes(salida_pdf)
 
 # ==========================================
 # INTERFAZ PRINCIPAL DE STREAMLIT
