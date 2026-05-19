@@ -87,7 +87,8 @@ else:
             st.Page("vzla/seguridad.py", title="Prevención y Control", icon="🛡️"),
             st.Page("vzla/cierre_semanal.py", title="Reporte Semanal", icon="📊"),
             st.Page("vzla/app.py", title="Trafico y Salidas", icon="📊"),
-            st.Page("vzla/compras_flota.py", title="Solicitud de Compras", icon="🛒")
+            st.Page("vzla/compras_flota.py", title="Solicitud de Compras", icon="🛒"),
+            st.Page("vzla/gps_chinitas.py", title="Análisis de Rutas GPS", icon="🛰️") 
         ]
     elif u_data['pais'] == "COMPRAS_VZLA":
         paginas = [st.Page("vzla/compras_flota.py", title="Solicitud de Compras", icon="🛒")]
