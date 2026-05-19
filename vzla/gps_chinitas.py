@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import os
 import json
 import traceback
+import streamlit.components.v1 as components
 
 # --- CONSTANTES ---
 VELOCIDAD_MINIMA_MOVIMIENTO = 5
