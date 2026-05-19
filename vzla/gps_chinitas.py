@@ -8,10 +8,11 @@ from datetime import datetime, timedelta
 import os
 import json
 import traceback
-import streamlit.components.v1 as components
-import gspread
 import textwrap
 from google.oauth2.service_account import Credentials
+import gspread
+from fpdf import FPDF
+import io
 
 # ==========================================
 # CONFIGURACIÓN DE CONEXIÓN A GOOGLE SHEETS
@@ -29,7 +30,6 @@ def obtener_cliente_sheets():
 
 def guardar_en_googlesheets(datos_lista):
     cliente = obtener_cliente_sheets()
-    # Conexión directa a la Bóveda PCD
     doc = cliente.open_by_key("1wCM3tcfQJtIQ4gDB0gLe9gJ4_ON7Vl6U4cBGuxXTKZ0")
     sheet = doc.worksheet("Historial_GPS")
     for fila in datos_lista:
@@ -114,8 +114,99 @@ def guardar_json_local(file_name, data):
     with open(file_name, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
+def formatear_km(valor):
+    try:
+        return f"{int(float(valor)):,.0f}".replace(",", ".")
+    except:
+        return str(valor)
+
 # ==========================================
-# INTERFAZ DE STREAMLIT
+# GENERADOR DE PDF SERVER-SIDE
+# ==========================================
+class GPS_PDF(FPDF):
+    def header(self):
+        # Color Oro PCD para el header
+        self.set_fill_color(13, 71, 161) # Azul PCD
+        self.set_text_color(255, 255, 255)
+        self.set_font('helvetica', 'B', 16)
+        self.cell(0, 15, 'RESUMEN LOGÍSTICO DE FLOTA GPS', 1, 1, 'C', 1)
+        
+        # Detalles bajo el header
+        self.set_text_color(50, 50, 50)
+        self.set_font('helvetica', 'B', 10)
+        fecha_str = datetime.now().strftime("%d/%m/%Y - %I:%M %p")
+        self.cell(0, 10, f'Fecha de Generación: {fecha_str}', 0, 1, 'L')
+        self.ln(5)
+
+    def footer(self):
+        self.set_y(-15)
+        self.set_font('helvetica', 'I', 8)
+        self.set_text_color(100, 100, 100)
+        self.cell(0, 10, f'Reporte Generado por Streamlit-Server v2.1 | Pág. {self.page_no()}', 0, 0, 'C')
+
+def generar_resumen_pdf(df_datos, total_vehiculos, total_km):
+    pdf = GPS_PDF(orientation='L', unit='mm', format='A4')
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.set_font('helvetica', '', 10)
+
+    # --- TABLA PRINCIPAL DE VEHÍCULOS ---
+    
+    # Encabezados con color Oro (F57F17 es el oro de Chinitas/PCD anterior)
+    pdf.set_fill_color(245, 127, 23) # Color ORO PCD
+    pdf.set_text_color(255, 255, 255) # Texto Blanco
+    pdf.set_font('helvetica', 'B', 11)
+    
+    ancho_col = {'placa': 30, 'modelo': 60, 'color': 30, 'ruta': 120, 'km': 35}
+    h_encabezado = 10
+    
+    pdf.cell(ancho_col['placa'], h_encabezado, 'PLACA', 1, 0, 'C', 1)
+    pdf.cell(ancho_col['modelo'], h_encabezado, 'MODELO', 1, 0, 'C', 1)
+    pdf.cell(ancho_col['color'], h_encabezado, 'COLOR', 1, 0, 'C', 1)
+    pdf.cell(ancho_col['ruta'], h_encabezado, 'RUTA / UBICACIÓN FINAL GPS', 1, 0, 'C', 1)
+    pdf.cell(ancho_col['km'], h_encabezado, 'ODÓMETRO (KM)', 1, 1, 'C', 1)
+
+    # Filas de datos
+    pdf.set_text_color(0, 0, 0) # Texto Negro
+    pdf.set_font('helvetica', '', 10)
+    h_fila = 8
+    
+    # Alternar color de fondo
+    fondo = 0
+    
+    # Ordenar por modelo para mejor visualización
+    df_datos = df_datos.sort_values(by=['MODELO', 'PLACA'])
+
+    for _, row in df_datos.iterrows():
+        # Fondo alterno
+        if fondo == 1: pdf.set_fill_color(240, 240, 240); fondo=0
+        else: pdf.set_fill_color(255, 255, 255); fondo=1
+        
+        pdf.cell(ancho_col['placa'], h_fila, row['PLACA'], 1, 0, 'C', 1)
+        pdf.cell(ancho_col['modelo'], h_fila, row['MODELO'], 1, 0, 'L', 1)
+        pdf.cell(ancho_col['color'], h_fila, row['COLOR'], 1, 0, 'C', 1)
+        
+        # Truncar ruta si es muy larga para evitar desbordamiento
+        ruta_corta = str(row['RUTA'])
+        if len(ruta_corta) > 60: ruta_corta = ruta_corta[:57] + "..."
+        pdf.cell(ancho_col['ruta'], h_fila, ruta_corta, 1, 0, 'L', 1)
+        
+        pdf.cell(ancho_col['km'], h_fila, formatear_km(row['KM']), 1, 1, 'R', 1)
+
+    # --- BARRA DE TOTALES ---
+    pdf.ln(10)
+    pdf.set_fill_color(13, 71, 161) # Azul PCD
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font('helvetica', 'B', 12)
+    pdf.cell(140, 12, f'TOTAL DE VEHÍCULOS: {total_vehiculos}', 1, 0, 'C', 1)
+    pdf.set_fill_color(255, 213, 79) # Amarillo/Oro claro para contraste
+    pdf.set_text_color(0, 0, 0)
+    pdf.cell(135, 12, f'TOTAL RECORRIDO (GRAN TOTAL): {formatear_km(total_km)} Kms', 1, 1, 'C', 1)
+
+    return pdf.output(dest='S') # Retorna bytes
+
+# ==========================================
+# INTERFAZ PRINCIPAL DE STREAMLIT
 # ==========================================
 st.set_page_config(page_title="Análisis GPS Chinitas", layout="wide")
 st.title("🛰️ Análisis de Rutas y Paradas GPS (Tracksolid)")
@@ -130,7 +221,7 @@ if 'reportes_texto' not in st.session_state:
 if 'chofer_defecto' not in st.session_state:
     st.session_state['chofer_defecto'] = ""
 
-t_config, t_resumen, t_reportes, t_historico = st.tabs(["⚙️ Configuración", "📊 Resumen de Vehículos", "📝 Reportes Individuales", "💾 Guardar en Nube"])
+t_config, t_resumen, t_reportes, t_historico = st.tabs(["⚙️ Configuración", "📊 Resumen de Vehículos (Pizarra)", "📝 Reportes Individuales", "💾 Guardar en Nube"])
 
 # ---------------------------------------------------------
 # PESTAÑA 1: CONFIGURACIÓN
@@ -277,13 +368,14 @@ with t_config:
                     st.code(traceback.format_exc())
 
 # ---------------------------------------------------------
-# PESTAÑA 2: RESUMEN DE VEHÍCULOS (PIZARRA)
+# PESTAÑA 2: RESUMEN DE VEHÍCULOS (PIZARRA MODERNA)
 # ---------------------------------------------------------
 with t_resumen:
     if st.session_state['datos_resumen']:
         df_res = pd.DataFrame(st.session_state['datos_resumen'])
         km_total_gral = df_res['KM'].sum()
         
+        st.subheader("1. Edición de Rutas")
         st.info("Puedes editar la columna **RUTA** directamente en la tabla. Los cambios se guardarán para el próximo reporte.")
         df_editado = st.data_editor(
             df_res[['PLACA', 'MODELO', 'COLOR', 'RUTA', 'KM']], 
@@ -297,66 +389,65 @@ with t_resumen:
             }
         )
         
-        if st.button("💾 Guardar Rutas Editadas"):
-            for _, r in df_editado.iterrows():
-                st.session_state['despachos_guardados'][r['PLACA']] = r['RUTA']
-            guardar_json_local(DESPACHOS_DB_FILE, st.session_state['despachos_guardados'])
-            st.success("Rutas actualizadas exitosamente.")
-            
+        col_btn1, col_btn2 = st.columns([1, 4])
+        with col_btn1:
+            if st.button("💾 Guardar Rutas"):
+                for _, r in df_editado.iterrows():
+                    st.session_state['despachos_guardados'][r['PLACA']] = r['RUTA']
+                guardar_json_local(DESPACHOS_DB_FILE, st.session_state['despachos_guardados'])
+                st.success("Rutas actualizadas.")
+        
         st.markdown("---")
         
-        # --- GENERACIÓN DE PIZARRA HTML EXACTA AL ORIGINAL ---
-        modelos_grp = df_editado.groupby('MODELO')
-        tarjetas_html = ""
+        st.subheader("2. Generación de Pizarra Ejecutiva (PDF)")
         
-        for mod, grp in modelos_grp:
-            km_mod = grp['KM'].sum()
-            cant_mod = len(grp)
-            
-            filas_vehiculos = "".join([f"<tr><td style='padding:5px; border-bottom:1px solid #ddd;'>{r['PLACA']}</td><td style='padding:5px; border-bottom:1px solid #ddd;'>{r['COLOR']}</td><td style='padding:5px; border-bottom:1px solid #ddd; font-weight:bold; color:#0d47a1;'>{r['RUTA']}</td><td style='padding:5px; border-bottom:1px solid #ddd; text-align:right;'>{r['KM']:,.0f} Kms</td></tr>".replace(',', '.') for _, r in grp.iterrows()])
-            
-            tarjetas_html += f"""
-            <div style="background: white; border: 1px solid #ccc; border-radius: 8px; padding: 15px; margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
-                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0d47a1; padding-bottom: 10px; margin-bottom: 10px;">
-                    <div>
-                        <div style="font-size: 18px; font-weight: 900; color: #333;">{mod} <span style="background: #eee; padding: 2px 8px; border-radius: 10px; font-size: 14px; margin-left: 10px; border: 1px solid #aaa;">{cant_mod} UND</span></div>
-                    </div>
-                    <div style="text-align: right;">
-                        <div style="font-size: 11px; font-weight: bold; color: #666;">KILOMETRAJE</div>
-                        <div style="background: #fff9c4; color: #f57f17; font-weight: 900; font-size: 18px; padding: 5px 15px; border-radius: 5px; border: 1px solid #fbc02d;">{km_mod:,.0f} Kms</div>
-                    </div>
-                </div>
-                <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
-                    <thead><tr style="background: #f8f9fa; color: #555; text-align: left;"><th style="padding:5px;">PLACA</th><th style="padding:5px;">COLOR</th><th style="padding:5px;">RUTA ASIGNADA</th><th style="padding:5px; text-align:right;">ODÓMETRO</th></tr></thead>
-                    <tbody>{filas_vehiculos.replace(',', '.')}</tbody>
+        # Botón para descargar PDF (Server-side)
+        with st.spinner("Preparando documento PDF profesional..."):
+            pdf_bytes = generar_resumen_pdf(df_editado, len(df_editado), km_total_gral)
+            st.download_button(
+                label="📥 DESCARGAR REPORTE PROFESIONAL (PDF)",
+                data=pdf_bytes,
+                file_name=f"Pizarra_GPS_{datetime.now().strftime('%Y%m%d')}.pdf",
+                mime="application/pdf",
+                type="primary",
+                use_container_width=True
+            )
+        
+        st.markdown("### Vista previa del diseño (Formato Sans-Serif & Oro PCD)")
+        
+        # O Oro (F57F17), Azul PCD (0D47A1)
+        st.markdown(f"""
+        <style>
+            .pizarra-cont {{ font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; border: 1px solid #ccc; border-radius: 8px; overflow: hidden; }}
+            .pizarra-header {{ background-color: white; padding: 15px 25px; border-bottom: 3px solid #0D47A1; display: flex; justify-content: space-between; align-items: center; }}
+            .pizarra-header-title {{ font-size: 20px; font-weight: 900; color: #0D47A1; }}
+            .pizarra-body {{ padding: 20px; background-color: #F8F9FA; }}
+            .pizarra-table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+            .pizarra-table th {{ background-color: #F57F17; color: white; padding: 10px; border: 1px solid #ddd; text-align: center; font-weight: bold; text-transform: uppercase; }}
+            .pizarra-table td {{ padding: 8px; border: 1px solid #ddd; background-color: white; }}
+            .pizarra-table tr:nth-child(even) td {{ background-color: #f2f2f2; }}
+            .pizarra-ruta {{ font-weight: bold; color: #0D47A1; }}
+            .pizarra-total {{ background-color: #333; color: white; padding: 15px 25px; display: flex; justify-content: space-between; align-items: center; }}
+        </style>
+        <div class="pizarra-cont">
+            <div class="pizarra-header">
+                <div class="pizarra-header-title">FLOTA PCD / VENEZUELA</div>
+                <div style="font-weight: bold; color: #555;">{datetime.now().strftime("%d/%m/%Y")}</div>
+            </div>
+            <div class="pizarra-body">
+                <table class="pizarra-table">
+                    <thead><tr><th>PLACA</th><th>MODELO</th><th>COLOR</th><th>RUTA / UBICACIÓN FINAL</th><th style="text-align:right;">ODÓMETRO</th></tr></thead>
+                    <tbody>
+                        {"".join([f"<tr><td style='text-align:center;'>{r['PLACA']}</td><td>{r['MODELO']}</td><td style='text-align:center;'>{r['COLOR']}</td><td class='pizarra-ruta'>{r['RUTA']}</td><td style='text-align:right;'>{formatear_km(r['KM'])} Kms</td></tr>" for _, r in df_editado.iterrows()])}
+                    </tbody>
                 </table>
             </div>
-            """
-
-        html_pizarra_completa = f"""
-        <html><head>
-            <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-        </head><body style="font-family: 'Arial', sans-serif; background: #f0f2f6; padding: 20px;">
-            <div style="text-align: center; margin-bottom: 15px;">
-                <button onclick="capResumen()" style="background: #0d47a1; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR PIZARRA COMPLETA</button>
+            <div class="pizarra-total">
+                <div style="font-weight: bold;">VEHÍCULOS: {len(df_editado)}</div>
+                <div style="font-size: 18px; font-weight: 900; color: #FFD54F;">GRAN TOTAL: {formatear_km(km_total_gral)} Kms</div>
             </div>
-            <div id="pizarra-resumen" style="background: #f4f6f9; width: 900px; margin: auto; border: 2px solid #0d47a1; border-radius: 12px; overflow: hidden;">
-                <div style="background: white; padding: 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #0d47a1;">
-                    <div style="font-size: 22px; font-weight: 900; color: #0d47a1;">FLOTA MAZIAD / FLAMINGO 2026</div>
-                    <div style="font-size: 16px; font-weight: bold; color: #555;">{datetime.now().strftime("%d/%m/%Y")}</div>
-                </div>
-                <div style="padding: 20px;">
-                    {tarjetas_html}
-                </div>
-                <div style="background: #333; color: white; padding: 15px 25px; display: flex; justify-content: space-between; align-items: center;">
-                    <div style="font-size: 16px; font-weight: bold;">TOTAL DE VEHÍCULOS: {len(df_res)}</div>
-                    <div style="font-size: 18px; font-weight: 900; color: #ffd54f;">TOTAL RECORRIDO: {km_total_gral:,.0f} Kms</div>
-                </div>
-            </div>
-            <script>function capResumen() {{ html2canvas(document.getElementById('pizarra-resumen'), {{scale: 2}}).then(canvas => {{ var link = document.createElement('a'); link.download = 'Pizarra_GPS.png'; link.href = canvas.toDataURL(); link.click(); }}); }}</script>
-        </body></html>
-        """
-        components.html(html_pizarra_completa.replace(',', '.'), height=1500, scrolling=True)
+        </div>
+        """, unsafe_allow_html=True)
 
     else:
         st.info("Sube los archivos y presiona Procesar en la pestaña Configuración.")
@@ -407,7 +498,6 @@ with t_historico:
                     mes_nombre = meses_es.get(fecha_actual.strftime("%B"), fecha_actual.strftime("%B"))
                     
                     for d in st.session_state['datos_resumen']:
-                        # Definir chofer basado en tu lógica preestablecida
                         chofer = "YONNER TAMOY" if d['PLACA'] == 'A72EB0P' else st.session_state['chofer_defecto']
                         if not chofer: chofer = "POR DEFINIR"
                         
