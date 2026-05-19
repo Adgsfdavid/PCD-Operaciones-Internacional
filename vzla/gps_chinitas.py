@@ -396,12 +396,17 @@ with t_resumen:
             
             <script>
                 function capResumen() {{
-                    // Usando scale: 3 para asegurar una calidad de imagen altísima (HD)
-                    html2canvas(document.getElementById('pizarra-resumen'), {{scale: 3}}).then(canvas => {{
-                        var link = document.createElement('a');
-                        link.download = 'Pizarra_GPS_{datetime.now().strftime('%Y%m%d')}.png';
-                        link.href = canvas.toDataURL('image/png', 1.0);
-                        link.click();
+                    html2canvas(document.getElementById('pizarra-resumen'), {{scale: 2, useCORS: true}}).then(canvas => {{
+                        canvas.toBlob(function(blob) {{
+                            var url = URL.createObjectURL(blob);
+                            var link = document.createElement('a');
+                            link.download = 'Pizarra_GPS_{datetime.now().strftime('%Y%m%d')}.png';
+                            link.href = url;
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                            URL.revokeObjectURL(url);
+                        }}, 'image/png');
                     }});
                 }}
             </script>
