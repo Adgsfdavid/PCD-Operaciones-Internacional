@@ -41,7 +41,6 @@ VELOCIDAD_MINIMA_MOVIMIENTO = 5
 DISTANCIA_MAXIMA_METROS = 300
 DESPACHOS_DB_FILE = "despachos_guardados.json"
 
-# Placa A38CV4G (FORD RANGER) Eliminada
 PLACAS_AUTORIZADAS = {
     'A36AC9X', 'A37CS2D', 'A38BA4N', 'A48AU5T',
     'A71EB8P', 'A72EB0P', 'A88BD0J', 'A84EZ6P', 'A87EZ8P',
@@ -321,13 +320,12 @@ with t_resumen:
         
         st.markdown("---")
         
-        # --- GENERADOR DE WHATSAPP DINÁMICO ---
+        # --- GENERADOR DE WHATSAPP DINÁMICO (EJECUTIVO / RESUMIDO) ---
         st.subheader("2. Resumen para WhatsApp (Listo para Copiar)")
         msg_w = f"🛰️ *REPORTE EJECUTIVO DE FLOTA PCD - GPS*\n📅 Fecha: {datetime.now().strftime('%d/%m/%Y')}\n\n"
-        for _, r in df_editado.iterrows():
-            msg_w += f"🚙 *{r['MODELO']}* ({r['PLACA']})\n📍 Ruta/Status: {r['RUTA']}\n📏 Odómetro: {formatear_km(r['KM'])} Kms\n\n"
         msg_w += f"📊 *TOTAL VEHÍCULOS:* {len(df_editado)} Unidades\n"
-        msg_w += f"🛣️ *GRAN TOTAL RECORRIDO:* {formatear_km(km_total_gral)} Kms"
+        msg_w += f"🛣️ *GRAN TOTAL RECORRIDO:* {formatear_km(km_total_gral)} Kms\n\n"
+        msg_w += f"✅ *Pizarra detallada de rutas adjunta en imagen.*"
         
         st.code(msg_w, language="markdown")
         
