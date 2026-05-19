@@ -211,14 +211,15 @@ rango_fechas_lv = calcular_rango_lunes_viernes(ano_sel, num_sem)
 color_azul = "#0d47a1"
 logo_b64 = obtener_logo_base64()
 
-t_trafico, t_cierres, t_comensales, t_guardias, t_despachos, t_combustible, t_surtido, t_pdf = st.tabs([
-    "📈 Desempeño de Tráfico", 
-    "⏱️ Cronometría de Cierres", 
-    "🍽️ Pizarra Comensales",
+t_trafico, t_cierres, t_comensales, t_guardias, t_despachos, t_combustible, t_surtido, t_mantenimiento, t_pdf = st.tabs([
+    "📈 Desempeño Tráfico", 
+    "⏱️ Cronometría Cierres", 
+    "🍽️ Comensales",
     "🛡️ Guardias Semanales",
-    "🚚 Resumen de Despachos",
+    "🚚 Resumen Despachos",
     "⛽ Reserva Combustible",
-    "⛽ Resultados de Surtido",
+    "⛽ Surtido",
+    "🛠️ Mantenimiento Flota",  # <--- ESTA ES LA NUEVA
     "📄 PDF Master Semanal"
 ])
 
@@ -1320,7 +1321,241 @@ with t_surtido:
                     
                     msg_surt += "\n✅ *Pizarra detallada en imagen adjunta.*"
                     st.code(msg_surt, language="markdown")
+
+# ---------------------------------------------------------
+# PESTAÑA NUEVA: MANTENIMIENTO PLANIFICADO VS REALIZADO
+# ---------------------------------------------------------
+with t_mantenimiento:
+    st.info("Cruce semanal: Compara el plan de mantenimiento de la flota contra lo realmente ejecutado y mide la efectividad por mecánico.")
+    
+    if st.button("🛠️ Calcular Auditoría de Mantenimiento", type="primary", use_container_width=True):
+        with st.spinner("Cruzando Planificación vs. Ejecución..."):
+            df_plan_raw = extraer_datos("FLOTA_PLANIFICADO")
+            df_real_raw = extraer_datos("FLOTA_REALIZADO")
+            
+            if df_plan_raw.empty or df_real_raw.empty:
+                st.error("⚠️ Faltan datos en FLOTA_PLANIFICADO o FLOTA_REALIZADO.")
+            else:
+                # Estandarizar columnas
+                df_plan_raw.columns = df_plan_raw.columns.str.strip()
+                df_real_raw.columns = df_real_raw.columns.str.strip()
+                
+                # Fechas a datetime
+                df_plan_raw['Fecha_DT'] = pd.to_datetime(df_plan_raw['Fecha'], format='%d/%m/%Y', errors='coerce')
+                df_real_raw['Fecha_DT'] = pd.to_datetime(df_real_raw['Fecha'], format='%d/%m/%Y', errors='coerce')
+                
+                df_plan_raw = df_plan_raw.dropna(subset=['Fecha_DT'])
+                df_real_raw = df_real_raw.dropna(subset=['Fecha_DT'])
+                
+                # Filtrar por la semana seleccionada
+                df_plan = df_plan_raw[(df_plan_raw['Fecha_DT'].dt.isocalendar().week == num_sem) & (df_plan_raw['Fecha_DT'].dt.isocalendar().year == ano_sel)].copy()
+                df_real = df_real_raw[(df_real_raw['Fecha_DT'].dt.isocalendar().week == num_sem) & (df_real_raw['Fecha_DT'].dt.isocalendar().year == ano_sel)].copy()
+                
+                if df_plan.empty:
+                    st.warning(f"No hay mantenimientos planificados para la Semana {int(num_sem)}.")
+                else:
+                    # EXTRAER LA PLACA PURA (La primera palabra antes del espacio) para que el cruce sea perfecto
+                    df_plan['PLACA'] = df_plan['Unidad'].astype(str).str.strip().str.upper().apply(lambda x: x.split()[0] if x else '')
+                    df_real['PLACA'] = df_real['Unidad'].astype(str).str.strip().str.upper().apply(lambda x: x.split()[0] if x else '')
                     
+                    df_plan['FECHA_STR'] = df_plan['Fecha_DT'].dt.strftime('%d/%m/%Y')
+                    df_real['FECHA_STR'] = df_real['Fecha_DT'].dt.strftime('%d/%m/%Y')
+                    
+                    # Buscar columnas clave
+                    c_mec = buscar_columna_estricta(df_plan, ['mecánico', 'mecanico'])
+                    c_act_plan = buscar_columna_estricta(df_plan, ['actividad'])
+                    c_cond = buscar_columna_estricta(df_real, ['condición', 'condicion', 'estatus'])
+                    c_act_real = buscar_columna_estricta(df_real, ['resumen actividad', 'actividad'])
+                    
+                    # 1. Agrupar lo REALIZADO por Fecha y Placa por si tienen varias tareas el mismo día
+                    df_real_agg = df_real.groupby(['FECHA_STR', 'PLACA']).agg({
+                        c_cond: lambda x: ' | '.join(x.dropna()),
+                        c_act_real: lambda x: ' | '.join(x.dropna())
+                    }).reset_index()
+                    
+                    # 2. CRUCE MAESTRO (Left Join: Planificado <- Realizado)
+                    df_cruce = pd.merge(df_plan, df_real_agg, on=['FECHA_STR', 'PLACA'], how='left')
+                    
+                    # Lógica de Efectividad
+                    df_cruce['ESTATUS_FINAL'] = df_cruce[c_cond].fillna('NO INICIADO / PENDIENTE')
+                    
+                    def evaluar_logro(estatus):
+                        e = str(estatus).upper()
+                        # Si dice realizado u operativo, es un éxito.
+                        if 'REALIZADO' in e or 'OPERATIVO' in e: return 1
+                        return 0
+                        
+                    df_cruce['LOGRADO_NUM'] = df_cruce['ESTATUS_FINAL'].apply(evaluar_logro)
+                    
+                    # 3. DETECCIÓN DE IMPREVISTOS (Mantenimiento Correctivo no planificado)
+                    df_plan_keys = df_plan[['FECHA_STR', 'PLACA']].drop_duplicates()
+                    df_plan_keys['ES_PLAN'] = True
+                    df_imprevistos_check = pd.merge(df_real, df_plan_keys, on=['FECHA_STR', 'PLACA'], how='left')
+                    df_imprevistos = df_imprevistos_check[df_imprevistos_check['ES_PLAN'].isna()]
+                    
+                    # --- CÁLCULO DE KPIs ---
+                    total_planificados = len(df_cruce)
+                    total_logrados = df_cruce['LOGRADO_NUM'].sum()
+                    efectividad_global = (total_logrados / total_planificados * 100) if total_planificados > 0 else 0
+                    total_imprevistos = len(df_imprevistos)
+                    
+                    # --- AGRUPACIÓN POR MECÁNICO ---
+                    if c_mec:
+                        df_mec = df_cruce.groupby(c_mec).agg(
+                            ASIGNADOS=('PLACA', 'count'),
+                            LOGRADOS=('LOGRADO_NUM', 'sum')
+                        ).reset_index()
+                        df_mec['EFECTIVIDAD'] = (df_mec['LOGRADOS'] / df_mec['ASIGNADOS']) * 100
+                        df_mec = df_mec.sort_values('EFECTIVIDAD', ascending=False)
+                        
+                        filas_mec_html = ""
+                        for _, r in df_mec.iterrows():
+                            color_ef = "#2e7d32" if r['EFECTIVIDAD'] >= 80 else ("#f57f17" if r['EFECTIVIDAD'] >= 50 else "#c62828")
+                            filas_mec_html += f"""
+                            <tr style="background: white;">
+                                <td style="padding: 8px; border: 2px solid #000; font-weight: bold;">{r[c_mec]}</td>
+                                <td style="padding: 8px; border: 2px solid #000; text-align: center; font-weight: 900;">{r['ASIGNADOS']}</td>
+                                <td style="padding: 8px; border: 2px solid #000; text-align: center; font-weight: 900; color: #0d47a1;">{r['LOGRADOS']}</td>
+                                <td style="padding: 8px; border: 2px solid #000; text-align: center; font-weight: 900; color: {color_ef};">{r['EFECTIVIDAD']:.1f}%</td>
+                            </tr>
+                            """
+                    else:
+                        filas_mec_html = "<tr><td colspan='4'>No se encontró la columna Mecánico</td></tr>"
+
+                    # --- LISTADO DETALLADO DEL PLAN ---
+                    filas_plan_html = ""
+                    for _, r in df_cruce.iterrows():
+                        estatus = str(r['ESTATUS_FINAL']).upper()
+                        if 'REALIZADO' in estatus or 'OPERATIVO' in estatus:
+                            color_st = "#e8f5e9"
+                            txt_color = "#2e7d32"
+                        elif 'PROCESO' in estatus:
+                            color_st = "#fff8e1"
+                            txt_color = "#f57f17"
+                        else:
+                            color_st = "#ffebee"
+                            txt_color = "#c62828"
+                            
+                        filas_plan_html += f"""
+                        <tr style="background: {color_st};">
+                            <td style="padding: 8px; border: 2px solid #000; text-align: center; font-weight: bold;">{r['FECHA_STR']}</td>
+                            <td style="padding: 8px; border: 2px solid #000; font-weight: 900;">{r['Unidad']}</td>
+                            <td style="padding: 8px; border: 2px solid #000; font-size: 11px;">{r.get(c_act_plan, '')}</td>
+                            <td style="padding: 8px; border: 2px solid #000; font-weight: bold;">{r.get(c_mec, '')}</td>
+                            <td style="padding: 8px; border: 2px solid #000; text-align: center; font-weight: 900; color: {txt_color};">{estatus}</td>
+                        </tr>
+                        """
+
+                    fecha_in = df_plan['Fecha_DT'].min().strftime('%d/%m/%Y')
+                    fecha_fi = df_plan['Fecha_DT'].max().strftime('%d/%m/%Y')
+
+                    # --- ESTRUCTURA DE LA PIZARRA HTML ---
+                    html_pizarra_manto = f"""
+                    <html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head>
+                    <body style="font-family: Arial, sans-serif; background-color: #f0f2f6; padding: 20px;">
+                    <div style="text-align: center; margin-bottom: 15px;">
+                        <button onclick="capManto()" style="background: #000; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">📸 DESCARGAR AUDITORÍA FLOTA</button>
+                    </div>
+                    <div id="piz-manto" style="background:white; width:1000px; margin:auto; border:4px solid #000; overflow:hidden;">
+                        
+                        <div style="background-color: #000; color: white; padding: 25px 30px; display: flex; align-items: center; justify-content: space-between; border-bottom: 5px solid #d4af37;">
+                            <img src="{logo_b64}" style="height: 50px;">
+                            <div style="text-align: right;">
+                                <h2 style="margin:0; font-size:24px; font-weight: 900; text-transform: uppercase;">AUDITORÍA DE MANTENIMIENTO</h2>
+                                <p style="margin:5px 0 0 0; font-size:14px; font-weight:bold; color:#d4af37;">SEMANA {int(num_sem)} ({fecha_in} AL {fecha_fi})</p>
+                            </div>
+                        </div>
+
+                        <div style="padding: 30px;">
+                            <div style="display: flex; justify-content: space-between; border: 3px solid #000; background: #eee; margin-bottom: 30px;">
+                                <div style="padding: 15px; width: 33%; text-align: center; border-right: 3px solid #000;">
+                                    <span style="font-size: 13px; font-weight: bold; color: #333;">📋 TAREAS PLANIFICADAS</span>
+                                    <h2 style="margin: 5px 0 0 0; font-size: 26px; font-weight: 900; color: #000;">{total_planificados}</h2>
+                                </div>
+                                <div style="padding: 15px; width: 33%; text-align: center; border-right: 3px solid #000; background: #e8f5e9;">
+                                    <span style="font-size: 13px; font-weight: bold; color: #1b5e20;">✅ TAREAS LOGRADAS</span>
+                                    <h2 style="margin: 5px 0 0 0; font-size: 26px; font-weight: 900; color: #1b5e20;">{total_logrados} <span style="font-size: 16px;">({efectividad_global:.1f}%)</span></h2>
+                                </div>
+                                <div style="padding: 15px; width: 33%; text-align: center; background: #ffebee;">
+                                    <span style="font-size: 13px; font-weight: bold; color: #b71c1c;">🚨 IMPREVISTOS / EMERG.</span>
+                                    <h2 style="margin: 5px 0 0 0; font-size: 26px; font-weight: 900; color: #b71c1c;">{total_imprevistos}</h2>
+                                </div>
+                            </div>
+
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 25px;">
+                                <div style="width: 100%;">
+                                    <h3 style="margin: 0 0 10px 0; font-size: 14px; background: #006064; color: white; padding: 8px; text-align: center; border: 2px solid #000; text-transform: uppercase;">👨‍🔧 RENDIMIENTO POR MECÁNICO (PLAN VS REAL)</h3>
+                                    <table style="width: 100%; border-collapse: collapse; font-size: 12px; border: 2px solid #000;">
+                                        <thead>
+                                            <tr style="background: #e0f7fa;">
+                                                <th style="padding: 8px; border: 2px solid #000; text-align: left;">MECÁNICO RESPONSABLE</th>
+                                                <th style="padding: 8px; border: 2px solid #000;">ASIGNADOS</th>
+                                                <th style="padding: 8px; border: 2px solid #000;">COMPLETADOS</th>
+                                                <th style="padding: 8px; border: 2px solid #000;">% EFECTIVIDAD</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {filas_mec_html}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <div style="width: 100%;">
+                                <h3 style="margin: 0 0 10px 0; font-size: 14px; background: #000; color: white; padding: 8px; text-align: center; border: 2px solid #000; text-transform: uppercase;">📋 DETALLE OPERATIVO DE FLOTA</h3>
+                                <table style="width: 100%; border-collapse: collapse; font-size: 12px; border: 2px solid #000;">
+                                    <thead>
+                                        <tr style="background: #eee;">
+                                            <th style="padding: 8px; border: 2px solid #000;">FECHA</th>
+                                            <th style="padding: 8px; border: 2px solid #000; text-align: left;">PLACA / UNIDAD</th>
+                                            <th style="padding: 8px; border: 2px solid #000; text-align: left;">ACTIVIDAD PLANIFICADA</th>
+                                            <th style="padding: 8px; border: 2px solid #000; text-align: left;">MECÁNICO</th>
+                                            <th style="padding: 8px; border: 2px solid #000;">ESTATUS DE CIERRE</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {filas_plan_html}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div style="margin-top: 20px; text-align: center; font-size: 12px; color: #333; border-top: 2px solid #000; padding-top: 15px; font-weight: bold;">
+                                CONTROL TOWER LOGÍSTICA - DIRECCIÓN OPERATIVA DROTACA
+                            </div>
+                        </div>
+                    </div>
+                    <script>
+                    function capManto() {{ 
+                        html2canvas(document.getElementById('piz-manto'), {{scale: 2}}).then(canvas => {{ 
+                            var link = document.createElement('a'); 
+                            link.download = 'Mantenimiento_Semana_{int(num_sem)}.png'; 
+                            link.href = canvas.toDataURL(); 
+                            link.click(); 
+                        }}); 
+                    }}
+                    </script>
+                    </body></html>
+                    """
+                    components.html(html_pizarra_manto, height=900, scrolling=True)
+
+                    # --- WHATSAPP ---
+                    st.markdown("---")
+                    st.subheader("📱 Resumen para WhatsApp")
+                    
+                    msg_manto = f"🛠️ *AUDITORÍA DE MANTENIMIENTO*\n📅 Semana: {int(num_sem)}\n\n"
+                    msg_manto += f"📋 *Planificados:* {total_planificados} Tareas\n"
+                    msg_manto += f"✅ *Logrados:* {total_logrados} Tareas\n"
+                    msg_manto += f"📈 *Efectividad:* {efectividad_global:.1f}%\n"
+                    msg_manto += f"🚨 *Imprevistos:* {total_imprevistos} Tareas (Correctivos)\n\n"
+                    
+                    msg_manto += "*🏅 Top Rendimiento Mecánicos:*\n"
+                    if c_mec:
+                        for _, r in df_mec.iterrows():
+                            msg_manto += f"▪️ {r[c_mec]}: {r['EFECTIVIDAD']:.0f}% ({r['LOGRADOS']}/{r['ASIGNADOS']})\n"
+                    
+                    msg_manto += "\n✅ *Ver pizarra detallada adjunta.*"
+                    st.code(msg_manto, language="markdown")
+                   
 # ---------------------------------------------------------
 # PESTAÑA 8: GENERADOR DEL MASTER REPORTE SEMANAL (PDF - FIX RESOLUCIÓN ULTRA HD)
 # ---------------------------------------------------------
