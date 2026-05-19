@@ -1323,7 +1323,7 @@ with t_surtido:
                     st.code(msg_surt, language="markdown")
 
 # ---------------------------------------------------------
-# PESTAÑA MANTENIMIENTO: AUDITORÍA INTERACTIVA (CON COLUMNA DÍA Y FIX SELECTBOX)
+# PESTAÑA MANTENIMIENTO: AUDITORÍA INTERACTIVA (CON FECHAS LUN-VIE)
 # ---------------------------------------------------------
 with t_mantenimiento:
     st.info("📊 Módulo Interactivo: Carga los datos semanales y ajusta cualquier celda directamente en la tabla. Los KPIs y la pizarra HTML se recalcularán al instante.")
@@ -1386,7 +1386,7 @@ with t_mantenimiento:
                         df_cruce['ESTATUS_CIERRE'] = df_cruce['ESTATUS_CIERRE'].replace({'NO INICIADO / PENDIENTE': 'PENDIENTE', '': 'PENDIENTE'})
                         df_cruce['ACTIVIDAD_PLANIFICADA'] = df_cruce[c_act_plan].fillna('')
                         
-                        # Guardar estructura limpia en sesión con la columna DIA_SEMANA al lado de la fecha
+                        # Guardar estructura limpia en sesión con la columna DIA_SEMANA
                         st.session_state.df_manto_base = df_cruce[['FECHA_STR', 'DIA_SEMANA', 'Unidad', 'ACTIVIDAD_PLANIFICADA', 'MECANICO_RESPONSABLE', 'ESTATUS_CIERRE']].copy()
                         
                         # Calcular Imprevistos iniciales
@@ -1406,7 +1406,7 @@ with t_mantenimiento:
     if st.session_state.df_manto_base is not None:
         st.markdown("### ✏️ 2. Ajustes Manuales en la Tabla")
         
-        # Configurar las columnas incluyendo la nueva columna de Día
+        # Configurar las columnas
         config_columnas = {
             "FECHA_STR": st.column_config.TextColumn("Fecha", disabled=True),
             "DIA_SEMANA": st.column_config.TextColumn("Día", disabled=True),
@@ -1461,7 +1461,7 @@ with t_mantenimiento:
             </tr>
             """
 
-        # Generar HTML para Tabla de Detalles incluyendo la columna DIA_SEMANA
+        # Generar HTML para Tabla de Detalles
         filas_plan_html = ""
         for _, r in df_editado.iterrows():
             estatus = str(r['ESTATUS_CIERRE']).upper()
@@ -1483,6 +1483,11 @@ with t_mantenimiento:
             </tr>
             """
 
+        # --- CÁLCULO EXACTO DEL RANGO DE LUNES A VIERNES ---
+        lunes_dt = datetime.strptime(f"{int(ano_sel)} {int(num_sem)} 1", "%G %V %u")
+        viernes_dt = datetime.strptime(f"{int(ano_sel)} {int(num_sem)} 5", "%G %V %u")
+        rango_lun_vie = f"{lunes_dt.strftime('%d/%m/%Y')} AL {viernes_dt.strftime('%d/%m/%Y')}"
+
         # --- RENDERIZADO DE LA PIZARRA COMPUTADA ---
         st.markdown("### 📸 3. Pizarra de Resultados Computada")
         
@@ -1497,7 +1502,7 @@ with t_mantenimiento:
                 <img src="{logo_b64}" style="height: 50px;">
                 <div style="text-align: right;">
                     <h2 style="margin:0; font-size:24px; font-weight: 900; text-transform: uppercase;">AUDITORÍA DE MANTENIMIENTO</h2>
-                    <p style="margin:5px 0 0 0; font-size:14px; font-weight:bold; color:#d4af37;">SEMANA {int(num_sem)} (DATOS EN TIEMPO REAL)</p>
+                    <p style="margin:5px 0 0 0; font-size:14px; font-weight:bold; color:#d4af37;">SEMANA {int(num_sem)} ({rango_lun_vie})</p>
                 </div>
             </div>
             <div style="padding: 30px;">
@@ -1565,7 +1570,6 @@ with t_mantenimiento:
         st.markdown("---")
         st.subheader("📱 Mensaje para WhatsApp (Actualizado)")
         
-        # Inteligencia gramatical (Singular vs Plural)
         t_plan = "Tarea" if total_planificados == 1 else "Tareas"
         t_log = "Tarea" if total_logrados == 1 else "Tareas"
         t_imp = "Tarea" if total_imprevistos == 1 else "Tareas"
