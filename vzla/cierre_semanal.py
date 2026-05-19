@@ -1326,7 +1326,7 @@ with t_surtido:
 # PESTAÑA NUEVA: MANTENIMIENTO PLANIFICADO VS REALIZADO
 # ---------------------------------------------------------
 with t_mantenimiento:
-    st.info("Cruce semanal: Compara el plan de mantenimiento de la flota contra lo realmente ejecutado y mide la efectividad por mecánico.")
+    st.info("Cruce semanal: Compara el plan de mantenimiento de la flota contra lo realmente ejecutado y mide la efectividad por mecánico y talleres externos.")
     
     if st.button("🛠️ Calcular Auditoría de Mantenimiento", type="primary", use_container_width=True):
         with st.spinner("Cruzando Planificación vs. Ejecución..."):
@@ -1354,7 +1354,7 @@ with t_mantenimiento:
                 if df_plan.empty:
                     st.warning(f"No hay mantenimientos planificados para la Semana {int(num_sem)}.")
                 else:
-                    # EXTRAER LA PLACA PURA (La primera palabra antes del espacio) para que el cruce sea perfecto
+                    # EXTRAER LA PLACA PURA (La primera palabra) para que el cruce sea perfecto
                     df_plan['PLACA'] = df_plan['Unidad'].astype(str).str.strip().str.upper().apply(lambda x: x.split()[0] if x else '')
                     df_real['PLACA'] = df_real['Unidad'].astype(str).str.strip().str.upper().apply(lambda x: x.split()[0] if x else '')
                     
@@ -1367,13 +1367,13 @@ with t_mantenimiento:
                     c_cond = buscar_columna_estricta(df_real, ['condición', 'condicion', 'estatus'])
                     c_act_real = buscar_columna_estricta(df_real, ['resumen actividad', 'actividad'])
                     
-                    # 1. Agrupar lo REALIZADO por Fecha y Placa por si tienen varias tareas el mismo día
+                    # 1. Agrupar lo REALIZADO por Fecha y Placa
                     df_real_agg = df_real.groupby(['FECHA_STR', 'PLACA']).agg({
                         c_cond: lambda x: ' | '.join(x.dropna()),
                         c_act_real: lambda x: ' | '.join(x.dropna())
                     }).reset_index()
                     
-                    # 2. CRUCE MAESTRO (Left Join: Planificado <- Realizado)
+                    # 2. CRUCE MAESTRO
                     df_cruce = pd.merge(df_plan, df_real_agg, on=['FECHA_STR', 'PLACA'], how='left')
                     
                     # Lógica de Efectividad
@@ -1381,13 +1381,12 @@ with t_mantenimiento:
                     
                     def evaluar_logro(estatus):
                         e = str(estatus).upper()
-                        # Si dice realizado u operativo, es un éxito.
                         if 'REALIZADO' in e or 'OPERATIVO' in e: return 1
                         return 0
                         
                     df_cruce['LOGRADO_NUM'] = df_cruce['ESTATUS_FINAL'].apply(evaluar_logro)
                     
-                    # 3. DETECCIÓN DE IMPREVISTOS (Mantenimiento Correctivo no planificado)
+                    # 3. DETECCIÓN DE IMPREVISTOS
                     df_plan_keys = df_plan[['FECHA_STR', 'PLACA']].drop_duplicates()
                     df_plan_keys['ES_PLAN'] = True
                     df_imprevistos_check = pd.merge(df_real, df_plan_keys, on=['FECHA_STR', 'PLACA'], how='left')
@@ -1399,21 +1398,35 @@ with t_mantenimiento:
                     efectividad_global = (total_logrados / total_planificados * 100) if total_planificados > 0 else 0
                     total_imprevistos = len(df_imprevistos)
                     
-                    # --- AGRUPACIÓN POR MECÁNICO ---
+                    # --- AGRUPACIÓN POR MECÁNICO / TALLER EXTERNO ---
                     if c_mec:
+                        # Limpieza extrema para que "Taller Externo" coincida perfecto siempre
+                        df_cruce[c_mec] = df_cruce[c_mec].astype(str).str.strip().str.upper()
+                        df_cruce[c_mec] = df_cruce[c_mec].replace({'NAN': 'NO ASIGNADO', 'NONE': 'NO ASIGNADO', '': 'NO ASIGNADO'})
+
                         df_mec = df_cruce.groupby(c_mec).agg(
                             ASIGNADOS=('PLACA', 'count'),
                             LOGRADOS=('LOGRADO_NUM', 'sum')
                         ).reset_index()
                         df_mec['EFECTIVIDAD'] = (df_mec['LOGRADOS'] / df_mec['ASIGNADOS']) * 100
-                        df_mec = df_mec.sort_values('EFECTIVIDAD', ascending=False)
+                        df_mec = df_mec.sort_values(['EFECTIVIDAD', 'ASIGNADOS'], ascending=[False, False])
                         
                         filas_mec_html = ""
                         for _, r in df_mec.iterrows():
+                            mec_nombre = str(r[c_mec])
+                            
+                            # Lógica visual para diferenciar el Taller Externo
+                            if 'TALLER' in mec_nombre or 'EXTERNO' in mec_nombre:
+                                icono = "🏢"
+                                bg_tr = "#f3e5f5"  # Fondo morado claro para proveedores externos
+                            else:
+                                icono = "👨‍🔧"
+                                bg_tr = "white"
+
                             color_ef = "#2e7d32" if r['EFECTIVIDAD'] >= 80 else ("#f57f17" if r['EFECTIVIDAD'] >= 50 else "#c62828")
                             filas_mec_html += f"""
-                            <tr style="background: white;">
-                                <td style="padding: 8px; border: 2px solid #000; font-weight: bold;">{r[c_mec]}</td>
+                            <tr style="background: {bg_tr};">
+                                <td style="padding: 8px; border: 2px solid #000; font-weight: bold;">{icono} {mec_nombre}</td>
                                 <td style="padding: 8px; border: 2px solid #000; text-align: center; font-weight: 900;">{r['ASIGNADOS']}</td>
                                 <td style="padding: 8px; border: 2px solid #000; text-align: center; font-weight: 900; color: #0d47a1;">{r['LOGRADOS']}</td>
                                 <td style="padding: 8px; border: 2px solid #000; text-align: center; font-weight: 900; color: {color_ef};">{r['EFECTIVIDAD']:.1f}%</td>
@@ -1484,11 +1497,11 @@ with t_mantenimiento:
 
                             <div style="display: flex; justify-content: space-between; margin-bottom: 25px;">
                                 <div style="width: 100%;">
-                                    <h3 style="margin: 0 0 10px 0; font-size: 14px; background: #006064; color: white; padding: 8px; text-align: center; border: 2px solid #000; text-transform: uppercase;">👨‍🔧 RENDIMIENTO POR MECÁNICO (PLAN VS REAL)</h3>
-                                    <table style="width: 100%; border-collapse: collapse; font-size: 12px; border: 2px solid #000;">
+                                    <h3 style="margin: 0 0 10px 0; font-size: 14px; background: #006064; color: white; padding: 8px; text-align: center; border: 2px solid #000; text-transform: uppercase;">RENDIMIENTO POR RESPONSABLE (INTERNO VS EXTERNO)</h3>
+                                    <table style="width: 100%; border-collapse: collapse; font-size: 13px; border: 2px solid #000;">
                                         <thead>
                                             <tr style="background: #e0f7fa;">
-                                                <th style="padding: 8px; border: 2px solid #000; text-align: left;">MECÁNICO RESPONSABLE</th>
+                                                <th style="padding: 8px; border: 2px solid #000; text-align: left;">👨‍🔧 MECÁNICO / 🏢 PROVEEDOR EXTERNO</th>
                                                 <th style="padding: 8px; border: 2px solid #000;">ASIGNADOS</th>
                                                 <th style="padding: 8px; border: 2px solid #000;">COMPLETADOS</th>
                                                 <th style="padding: 8px; border: 2px solid #000;">% EFECTIVIDAD</th>
@@ -1509,7 +1522,7 @@ with t_mantenimiento:
                                             <th style="padding: 8px; border: 2px solid #000;">FECHA</th>
                                             <th style="padding: 8px; border: 2px solid #000; text-align: left;">PLACA / UNIDAD</th>
                                             <th style="padding: 8px; border: 2px solid #000; text-align: left;">ACTIVIDAD PLANIFICADA</th>
-                                            <th style="padding: 8px; border: 2px solid #000; text-align: left;">MECÁNICO</th>
+                                            <th style="padding: 8px; border: 2px solid #000; text-align: left;">MECÁNICO RESPONSABLE</th>
                                             <th style="padding: 8px; border: 2px solid #000;">ESTATUS DE CIERRE</th>
                                         </tr>
                                     </thead>
@@ -1548,10 +1561,12 @@ with t_mantenimiento:
                     msg_manto += f"📈 *Efectividad:* {efectividad_global:.1f}%\n"
                     msg_manto += f"🚨 *Imprevistos:* {total_imprevistos} Tareas (Correctivos)\n\n"
                     
-                    msg_manto += "*🏅 Top Rendimiento Mecánicos:*\n"
+                    msg_manto += "*🏅 Rendimiento de Personal y Proveedores:*\n"
                     if c_mec:
                         for _, r in df_mec.iterrows():
-                            msg_manto += f"▪️ {r[c_mec]}: {r['EFECTIVIDAD']:.0f}% ({r['LOGRADOS']}/{r['ASIGNADOS']})\n"
+                            # Añadimos el emoji también al WhatsApp
+                            ico = "🏢" if "TALLER" in str(r[c_mec]) or "EXTERNO" in str(r[c_mec]) else "👨‍🔧"
+                            msg_manto += f"{ico} {r[c_mec]}: {r['EFECTIVIDAD']:.0f}% ({r['LOGRADOS']}/{r['ASIGNADOS']})\n"
                     
                     msg_manto += "\n✅ *Ver pizarra detallada adjunta.*"
                     st.code(msg_manto, language="markdown")
