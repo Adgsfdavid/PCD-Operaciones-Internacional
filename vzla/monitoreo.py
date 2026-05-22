@@ -765,10 +765,24 @@ def procesar_excel_surtidos(file, grupo_default, target_date):
                         "LITROS": lts
                     })
                     
-        if not datos_totales: return pd.DataFrame(), "OK"
-        return pd.DataFrame(datos_totales), "OK"
+        # AL FINAL DE procesar_excel_surtidos, antes del return:
+        if not datos_totales:
+            return pd.DataFrame(), "OK"
+        
+        df_result = pd.DataFrame(datos_totales)
+        
+        # ── DEDUPLICADOR BLINDADO ──────────────────────────────────────────────
+        # Evita que una misma fila aparezca en múltiples hojas del Excel
+        # (problema clásico cuando la hoja de extracciones repite registros de corta)
+        df_result = df_result.drop_duplicates(
+            subset=['UNIDAD', 'HORA', 'LITROS', 'COMBUSTIBLE', 'SITIO', 'TIPO_SURTIDO'],
+            keep='first'
+        ).reset_index(drop=True)
+        # ──────────────────────────────────────────────────────────────────────
+        
+        return df_result, "OK"
     except Exception as e:
-        return None, f"Error: {str(e)}"
+        return pd.DataFrame(), f"Error procesando surtidos: {str(e)}"
     
 # CREADOR HTML PIZARRAS COMBUSTIBLE (1, 2 Y 3) (SÚPER MODULAR)
 # ==========================================
@@ -1044,6 +1058,12 @@ def html_pizarras_combustible_completas(df, fecha_str):
     }}
     </script>
     """
+    
+    # DEBUG TEMPORAL — borrarlo después de confirmar
+    import streamlit as st
+    df_debug = df_copy[df_copy['TIPO_STD'] == 'TANQUE RESERVA CIUDAD DROTACA']
+    st.write("🔍 DEBUG TANQUE RESERVA CIUDAD DROTACA:", df_debug[['UNIDAD','SITIO','TIPO_SURTIDO','COMBUSTIBLE','LITROS','GRUPO']])
+    
     return html_final
 
 # ==========================================
