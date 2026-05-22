@@ -618,7 +618,7 @@ def html_pizarra_nacional(dict_dfs, fecha_str):
 
 
 # ==========================================
-# MOTOR ESCÁNER DE SURTIDOS DE COMBUSTIBLE
+# MOTOR ESCÁNER DE SURTIDOS DE COMBUSTIBLE (BLINDADO)
 # ==========================================
 def procesar_excel_surtidos(file, grupo_default, target_date):
     try:
@@ -668,7 +668,9 @@ def procesar_excel_surtidos(file, grupo_default, target_date):
                         try:
                             if hasattr(fecha_val, 'date'): f_date = fecha_val.date()
                             else:
-                                dt_parsed = pd.to_datetime(str(fecha_val), dayfirst=True, errors='coerce')
+                                # Limpieza extrema de fecha
+                                fecha_str_clean = str(fecha_val).split(' ')[0].strip()
+                                dt_parsed = pd.to_datetime(fecha_str_clean, dayfirst=True, errors='coerce')
                                 if pd.isna(dt_parsed): continue
                                 f_date = dt_parsed.date()
                             if f_date != t_date: continue
@@ -681,10 +683,17 @@ def procesar_excel_surtidos(file, grupo_default, target_date):
                     chofer = str(fila_valores[mapa['CHOFER']]).title().strip() if mapa['CHOFER'] != -1 else "-"
                     if 'TRANSBORDO' in chofer.upper(): continue
                     
+                    # --- AQUI ESTA LA MAGIA ANTI-ERRORES INVISIBLES ---
                     try: 
-                        val_lts = str(fila_valores[mapa['LITROS']]).upper().replace(',', '').replace(' ', '').replace('LTS', '').replace('L', '').strip()
-                        lts = float(val_lts)
+                        val_raw = str(fila_valores[mapa['LITROS']]).upper().replace(',', '.')
+                        # El Regex busca obligatoriamente un número. Ignora letras o espacios sucios.
+                        nums = re.search(r'([0-9]+\.?[0-9]*)', val_raw)
+                        if nums:
+                            lts = float(nums.group(1))
+                        else:
+                            continue
                     except: continue
+                    
                     if lts <= 0: continue
                     
                     ruta = str(fila_valores[mapa['RUTA']]).title().strip() if mapa['RUTA'] != -1 else "-"
@@ -719,7 +728,7 @@ def procesar_excel_surtidos(file, grupo_default, target_date):
         return pd.DataFrame(datos_totales), "OK"
     except Exception as e:
         return None, f"Error: {str(e)}"
-
+    
 # ==========================================
 # CREADOR HTML PIZARRAS COMBUSTIBLE (1, 2 Y 3) (SÚPER MODULAR)
 # ==========================================
