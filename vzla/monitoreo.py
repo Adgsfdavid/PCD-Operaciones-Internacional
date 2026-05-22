@@ -209,18 +209,27 @@ def generar_ws_surtido_p3(df, fecha_str):
         sitio = str(row.get('SITIO', '')).upper().strip()
         comb = str(row.get('COMBUSTIBLE', '')).upper().strip()
 
-        # Parámetros súper flexibles y blindados
-        es_tanque = any(x in t for x in ['RESERVA', 'TANQUE', 'BASE', 'PLANTA', 'PROPIO'])
-        es_gasoil = any(x in comb for x in ['GASOIL', 'DIESEL', 'GSOIL'])
-        es_drotaca = any(x in sitio for x in ['DROTACA', 'BASE', 'PLANTA'])
+        # ─── TANQUE RESERVA CIUDAD DROTACA ──────────────────────────────────────
+        # REGLA ESTRICTA: sitio debe ser EXACTAMENTE "CIUDAD DROTACA",
+        # tipo debe contener RESERVA o TANQUE, y combustible debe ser GASOIL/DIESEL.
+        # ⚠️  Para que un registro cuente aquí en la hoja de extracciones del Excel:
+        #     • Columna "TIPO DE SURTIDO" → debe decir: TANQUE RESERVA
+        #     • Columna "TIPO COMBUSTIBLE" → debe decir: GASOIL
+        #     • Columna "SITIO"            → debe decir: CIUDAD DROTACA
+        es_sitio_ciudad_drotaca = (sitio == 'CIUDAD DROTACA')
+        es_tanque = any(x in t for x in ['RESERVA', 'TANQUE'])
+        es_gasoil = any(x in comb for x in ['GASOIL', 'DIESEL'])
 
-        if es_tanque and es_gasoil and es_drotaca:
+        if es_sitio_ciudad_drotaca and es_tanque and es_gasoil:
             return 'TANQUE RESERVA CIUDAD DROTACA'
-        if any(x in t for x in ['ESTACION', 'E/S', 'E / S', 'BOMBA']): 
+
+        # ─── RESTO DE CATEGORÍAS ────────────────────────────────────────────────
+        if any(x in t for x in ['ESTACION', 'E/S', 'E / S', 'BOMBA']):
             return 'ESTACION DE SERVICIO'
-        if 'BIDON' in t: 
+        if 'BIDON' in t:
             return 'BIDON'
-        if es_tanque: 
+        # Otros tanques que NO sean CIUDAD DROTACA (BASE, PLANTA, PROPIO, etc.)
+        if any(x in t for x in ['RESERVA', 'TANQUE', 'BASE', 'PLANTA', 'PROPIO']):
             return 'TANQUE RESERVA (OTROS)'
         return 'OTROS'
     
@@ -776,21 +785,27 @@ def html_pizarras_combustible_completas(df, fecha_str):
         sitio = str(row.get('SITIO', '')).upper().strip()
         comb = str(row.get('COMBUSTIBLE', '')).upper().strip()
 
-        # Filtro estricto para CIUDAD DROTACA
-        # Ahora verificamos que el sitio sea exactamente "CIUDAD DROTACA"
-        if sitio == 'CIUDAD DROTACA' and 'RESERVA' in t:
+        # ─── TANQUE RESERVA CIUDAD DROTACA ──────────────────────────────────────
+        # REGLA ESTRICTA: sitio exactamente "CIUDAD DROTACA" + tipo RESERVA/TANQUE + GASOIL.
+        # ⚠️  Para que un registro cuente aquí en la hoja de extracciones del Excel:
+        #     • Columna "TIPO DE SURTIDO" → debe decir: TANQUE RESERVA
+        #     • Columna "TIPO COMBUSTIBLE" → debe decir: GASOIL
+        #     • Columna "SITIO"            → debe decir: CIUDAD DROTACA
+        es_sitio_ciudad_drotaca = (sitio == 'CIUDAD DROTACA')
+        es_tanque = any(x in t for x in ['RESERVA', 'TANQUE'])
+        es_gasoil = any(x in comb for x in ['GASOIL', 'DIESEL'])
+
+        if es_sitio_ciudad_drotaca and es_tanque and es_gasoil:
             return 'TANQUE RESERVA CIUDAD DROTACA'
-        
-        # Resto de las categorías
-        if any(x in t for x in ['ESTACION', 'E/S', 'E / S', 'BOMBA']): 
+
+        # ─── RESTO DE CATEGORÍAS ────────────────────────────────────────────────
+        if any(x in t for x in ['ESTACION', 'E/S', 'E / S', 'BOMBA']):
             return 'ESTACION DE SERVICIO'
-        if 'BIDON' in t: 
+        if 'BIDON' in t:
             return 'BIDON'
-        
-        # Otros tanques que no sean CIUDAD DROTACA
-        if any(x in t for x in ['RESERVA', 'TANQUE', 'BASE', 'PLANTA', 'PROPIO']): 
+        # Otros tanques que NO sean CIUDAD DROTACA
+        if any(x in t for x in ['RESERVA', 'TANQUE', 'BASE', 'PLANTA', 'PROPIO']):
             return 'TANQUE RESERVA (OTROS)'
-            
         return 'OTROS'
     
     df_copy = df.copy()
