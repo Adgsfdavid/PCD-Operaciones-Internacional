@@ -618,7 +618,7 @@ def html_pizarra_nacional(dict_dfs, fecha_str):
 
 
 # ==========================================
-# MOTOR ESCÁNER DE SURTIDOS DE COMBUSTIBLE (BLINDADO)
+# MOTOR ESCÁNER DE SURTIDOS DE COMBUSTIBLE (BLINDADO + MEMORIA DE CELDAS COMBINADAS)
 # ==========================================
 def procesar_excel_surtidos(file, grupo_default, target_date):
     try:
@@ -631,6 +631,7 @@ def procesar_excel_surtidos(file, grupo_default, target_date):
             df_raw = pd.read_excel(xl, sheet_name=sheet, header=None)
             mapa = None
             current_grupo = grupo_default
+            last_valid_date = None # <-- MEMORIA INTELIGENTE PARA CELDAS COMBINADAS EN EXCEL
             
             if 'EXTRAC' in str(sheet).upper(): current_grupo = 'EXTRACCION'
             elif 'CORTA' in str(sheet).upper(): current_grupo = 'RUTA CORTA'
@@ -641,8 +642,11 @@ def procesar_excel_surtidos(file, grupo_default, target_date):
                 fila_valores = df_raw.iloc[i].values
                 fila_str = " ".join([str(x).upper().replace('\n', ' ') for x in fila_valores])
                 
+                # --- 1. DETECCIÓN DE CABECERAS ---
                 if ("SURTIDO" in fila_str or "LITROS" in fila_str) and ("UNIDAD" in fila_str or "PLACA" in fila_str or "CHOFER" in fila_str):
                     mapa = {'FECHA': -1, 'UNIDAD': -1, 'CHOFER': -1, 'LITROS': -1, 'COMBUSTIBLE': -1, 'TIPO_SURTIDO': -1, 'SITIO': -1, 'HORA': -1, 'RUTA': -1}
+                    last_valid_date = None # Reiniciar memoria al cambiar de tabla
+                    
                     for idx, col in enumerate(fila_valores):
                         c_str = str(col).upper().replace('\n', ' ').strip()
                         if ('FECHA' in c_str or 'DATE' in c_str) and mapa['FECHA'] == -1: mapa['FECHA'] = idx
@@ -661,21 +665,36 @@ def procesar_excel_surtidos(file, grupo_default, target_date):
                         elif 'CENTRO' in fila_arriba: current_grupo = 'RUTA CENTRO'
                     continue
 
+                # --- 2. EXTRACCIÓN DE DATOS FILA POR FILA ---
                 if mapa and mapa['LITROS'] != -1 and mapa['UNIDAD'] != -1:
+                    
+                    # Logica de Fecha con Memoria (Evita fallos por celdas combinadas)
+                    f_date = None
                     if mapa['FECHA'] != -1:
                         fecha_val = fila_valores[mapa['FECHA']]
-                        if pd.isna(fecha_val) or str(fecha_val).strip() == '' or str(fecha_val).strip() == 'nan': continue
-                        try:
-                            if hasattr(fecha_val, 'date'): f_date = fecha_val.date()
-                            else:
-                                # Limpieza extrema de fecha
-                                fecha_str_clean = str(fecha_val).split(' ')[0].strip()
-                                dt_parsed = pd.to_datetime(fecha_str_clean, dayfirst=True, errors='coerce')
-                                if pd.isna(dt_parsed): continue
-                                f_date = dt_parsed.date()
-                            if f_date != t_date: continue
-                        except: continue
-                    else: continue 
+                        es_vacia = pd.isna(fecha_val) or str(fecha_val).strip() in ['', 'nan', 'NaN', 'NaT']
+                        
+                        if not es_vacia:
+                            try:
+                                if hasattr(fecha_val, 'date'):
+                                    f_date = fecha_val.date()
+                                else:
+                                    fecha_str_clean = str(fecha_val).split(' ')[0].strip()
+                                    dt_parsed = pd.to_datetime(fecha_str_clean, dayfirst=True, errors='coerce')
+                                    if not pd.isna(dt_parsed):
+                                        f_date = dt_parsed.date()
+                            except: pass
+                            
+                        # Si logramos extraer fecha, la guardamos en la memoria
+                        if f_date is not None:
+                            last_valid_date = f_date
+                        # Si vino vacía, usamos la que está en la memoria
+                        elif last_valid_date is not None:
+                            f_date = last_valid_date
+                    
+                    # Evaluar si pertenece a la fecha buscada
+                    if f_date != t_date: 
+                        continue 
                         
                     unidad = str(fila_valores[mapa['UNIDAD']]).upper().strip()
                     if unidad in ['NAN', 'NONE', '', 'TOTAL'] or 'TOTAL' in unidad: continue
@@ -683,15 +702,12 @@ def procesar_excel_surtidos(file, grupo_default, target_date):
                     chofer = str(fila_valores[mapa['CHOFER']]).title().strip() if mapa['CHOFER'] != -1 else "-"
                     if 'TRANSBORDO' in chofer.upper(): continue
                     
-                    # --- AQUI ESTA LA MAGIA ANTI-ERRORES INVISIBLES ---
+                    # Extracción del Litraje (Regex Blindado)
                     try: 
                         val_raw = str(fila_valores[mapa['LITROS']]).upper().replace(',', '.')
-                        # El Regex busca obligatoriamente un número. Ignora letras o espacios sucios.
                         nums = re.search(r'([0-9]+\.?[0-9]*)', val_raw)
-                        if nums:
-                            lts = float(nums.group(1))
-                        else:
-                            continue
+                        if nums: lts = float(nums.group(1))
+                        else: continue
                     except: continue
                     
                     if lts <= 0: continue
@@ -729,7 +745,6 @@ def procesar_excel_surtidos(file, grupo_default, target_date):
     except Exception as e:
         return None, f"Error: {str(e)}"
     
-# ==========================================
 # CREADOR HTML PIZARRAS COMBUSTIBLE (1, 2 Y 3) (SÚPER MODULAR)
 # ==========================================
 def html_pizarras_combustible_completas(df, fecha_str):
