@@ -204,18 +204,19 @@ def generar_ws_surtido_p3(df, fecha_str):
         return f"*Reporte Ejecutivo de Surtido (3/3)* ⛽\n📅 Fecha: {fecha_str}\n\nNo hay registros."
 
     def std_tipo(row):
-        t = str(row['TIPO_SURTIDO']).upper()
-        sitio = str(row['SITIO']).upper()
-        comb = str(row['COMBUSTIBLE']).upper()
+        # Limpieza profunda de los textos para evitar fallos por espacios
+        t = str(row.get('TIPO_SURTIDO', '')).upper().strip()
+        sitio = str(row.get('SITIO', '')).upper().strip()
+        comb = str(row.get('COMBUSTIBLE', '')).upper().strip()
 
-        # Parámetros estrictos para Ciudad Drotaca
-        es_tanque = any(x in t for x in ['RESERVA', 'TANQUE', 'BASE', 'PLANTA'])
-        es_gasoil = 'GASOIL' in comb or 'DIESEL' in comb
-        es_drotaca = 'CIUDAD DROTACA' in sitio
+        # Parámetros súper flexibles y blindados
+        es_tanque = any(x in t for x in ['RESERVA', 'TANQUE', 'BASE', 'PLANTA', 'PROPIO'])
+        es_gasoil = any(x in comb for x in ['GASOIL', 'DIESEL', 'GSOIL'])
+        es_drotaca = any(x in sitio for x in ['DROTACA', 'BASE', 'PLANTA'])
 
         if es_tanque and es_gasoil and es_drotaca:
             return 'TANQUE RESERVA CIUDAD DROTACA'
-        if 'ESTACION' in t or 'E/S' in t or 'E / S' in t: 
+        if any(x in t for x in ['ESTACION', 'E/S', 'E / S', 'BOMBA']): 
             return 'ESTACION DE SERVICIO'
         if 'BIDON' in t: 
             return 'BIDON'
@@ -224,7 +225,6 @@ def generar_ws_surtido_p3(df, fecha_str):
         return 'OTROS'
     
     df_copy = df.copy()
-    # Aplicamos la función a lo largo de las columnas (axis=1)
     df_copy['TIPO_STD'] = df_copy.apply(std_tipo, axis=1)
     
     df_surtido = df_copy[df_copy['GRUPO'] != 'EXTRACCION']
@@ -233,19 +233,21 @@ def generar_ws_surtido_p3(df, fecha_str):
     t_gasoil = df_surtido[df_surtido['COMBUSTIBLE'].str.contains('GASOIL|DIESEL')]['LITROS'].sum()
     t_gasolina = df_surtido[df_surtido['COMBUSTIBLE'].str.contains('GASOLINA')]['LITROS'].sum()
     t_extraccion = df_extrac['LITROS'].sum()
-    t_total = df_surtido['LITROS'].sum()
+    
+    # NUEVO: Calculamos sobre el 100% de la data (incluyendo extracciones)
+    t_absoluto = df_copy['LITROS'].sum()
     
     msg = f"*Reporte Ejecutivo de Surtido (3/3)* ⛽\n📅 Fecha: {fecha_str}\n\n"
-    msg += f"▪️ *Total Gasoil:* {t_gasoil:,.0f} Lts\n"
-    msg += f"▪️ *Total Gasolina:* {t_gasolina:,.0f} Lts\n"
+    msg += f"▪️ *Total Gasoil (Rutas):* {t_gasoil:,.0f} Lts\n"
+    msg += f"▪️ *Total Gasolina (Rutas):* {t_gasolina:,.0f} Lts\n"
     msg += f"▪️ *Extracciones (Drotaca 2.0 / Ciudad Drotaca):* {t_extraccion:,.0f} Lts\n\n"
     
-    if t_total > 0:
-        msg += "📊 *DISTRIBUCIÓN ESTRATÉGICA:*\n"
+    if t_absoluto > 0:
+        msg += "📊 *DISTRIBUCIÓN ESTRATÉGICA (TOTAL GLOBAL):*\n"
         for tipo in ['ESTACION DE SERVICIO', 'BIDON', 'TANQUE RESERVA CIUDAD DROTACA', 'TANQUE RESERVA (OTROS)', 'OTROS']:
-            lts_tipo = df_surtido[df_surtido['TIPO_STD'] == tipo]['LITROS'].sum()
+            lts_tipo = df_copy[df_copy['TIPO_STD'] == tipo]['LITROS'].sum()
             if lts_tipo > 0:
-                pct = (lts_tipo / t_total) * 100
+                pct = (lts_tipo / t_absoluto) * 100
                 icon = "⛽" if tipo == 'ESTACION DE SERVICIO' else ("🛢️" if tipo == 'BIDON' else "🏭")
                 nombre_mostrar = tipo if 'DROTACA' in tipo else tipo.title()
                 msg += f"{icon} *{nombre_mostrar}:* {lts_tipo:,.0f} Lts ({pct:.1f}%)\n"
@@ -770,24 +772,22 @@ def html_pizarras_combustible_completas(df, fecha_str):
         return f"<div style='padding: 50px; text-align: center; color: #555; font-size: 20px;'>No se registraron movimientos de combustible para la fecha: {fecha_str}</div>"
 
     def std_tipo(row):
-        t = str(row['TIPO_SURTIDO']).upper()
-        sitio = str(row['SITIO']).upper()
-        comb = str(row['COMBUSTIBLE']).upper()
+        t = str(row.get('TIPO_SURTIDO', '')).upper().strip()
+        sitio = str(row.get('SITIO', '')).upper().strip()
+        comb = str(row.get('COMBUSTIBLE', '')).upper().strip()
 
-        # Parámetros estrictos para Ciudad Drotaca
-        es_tanque = any(x in t for x in ['RESERVA', 'TANQUE', 'BASE', 'PLANTA'])
-        es_gasoil = 'GASOIL' in comb or 'DIESEL' in comb
-        es_drotaca = 'CIUDAD DROTACA' in sitio
+        es_tanque = any(x in t for x in ['RESERVA', 'TANQUE', 'BASE', 'PLANTA', 'PROPIO'])
+        es_gasoil = any(x in comb for x in ['GASOIL', 'DIESEL', 'GSOIL'])
+        es_drotaca = any(x in sitio for x in ['DROTACA', 'BASE', 'PLANTA'])
 
         if es_tanque and es_gasoil and es_drotaca:
             return 'TANQUE RESERVA CIUDAD DROTACA'
-        if 'ESTACION' in t or 'E/S' in t or 'E / S' in t: return 'ESTACION DE SERVICIO'
+        if any(x in t for x in ['ESTACION', 'E/S', 'E / S', 'BOMBA']): return 'ESTACION DE SERVICIO'
         if 'BIDON' in t: return 'BIDON'
         if es_tanque: return 'TANQUE RESERVA (OTROS)'
         return 'OTROS'
     
     df_copy = df.copy()
-    # Aplicamos la función para evaluar filas completas
     df_copy['TIPO_STD'] = df_copy.apply(std_tipo, axis=1)
 
     # 1. Filtros por Pizarra
@@ -805,12 +805,11 @@ def html_pizarras_combustible_completas(df, fecha_str):
     t_gasol_p2 = df_p2[df_p2['COMBUSTIBLE'].str.contains('GASOLINA')]['LITROS'].sum()
     t_surtido_p2 = df_p2['LITROS'].sum()
     
-    # Totales Pizarra 3 (Global)
+    # Totales Pizarra 3 (Bloque Superior Surtido vs Extracción)
     df_surtido = df_copy[df_copy['GRUPO'] != 'EXTRACCION']
     t_gasoil = df_surtido[df_surtido['COMBUSTIBLE'].str.contains('GASOIL|DIESEL')]['LITROS'].sum()
     t_gasolina = df_surtido[df_surtido['COMBUSTIBLE'].str.contains('GASOLINA')]['LITROS'].sum()
     t_extraccion = df_copy[df_copy['GRUPO'] == 'EXTRACCION']['LITROS'].sum()
-    t_surtido_total = df_surtido['LITROS'].sum()
     
     def generar_filas(df_filtro):
         df_filtro = df_filtro.reset_index(drop=True)
@@ -871,17 +870,20 @@ def html_pizarras_combustible_completas(df, fecha_str):
     html_centro = construir_tabla("RUTA CENTRO OCCIDENTE", generar_filas(df_p2[df_p2['GRUPO'] == 'RUTA CENTRO']), df_p2[df_p2['GRUPO'] == 'RUTA CENTRO']['LITROS'].sum())
     html_larga = construir_tabla("RUTA OCCIDENTE", generar_filas(df_p2[df_p2['GRUPO'].str.contains('OCCIDENTE|LARGA')]), df_p2[df_p2['GRUPO'].str.contains('OCCIDENTE|LARGA')]['LITROS'].sum())
 
-    # Generación Pizarra 3 (Resumen por Tipo)
+    # Generación Pizarra 3 (Distribución Estratégica Global)
     html_resumen_tipos = ""
-    if t_surtido_total > 0:
+    t_absoluto = df_copy['LITROS'].sum()
+    
+    if t_absoluto > 0:
         filas_tipos = ""
         for tipo in ['ESTACION DE SERVICIO', 'BIDON', 'TANQUE RESERVA CIUDAD DROTACA', 'TANQUE RESERVA (OTROS)', 'OTROS']:
-            df_tipo = df_surtido[df_surtido['TIPO_STD'] == tipo]
+            # AHORA EVALÚA SOBRE DF_COPY PARA INCLUIR EXTRACCIONES
+            df_tipo = df_copy[df_copy['TIPO_STD'] == tipo]
             if not df_tipo.empty:
                 t_gasoil_tipo = df_tipo[df_tipo['COMBUSTIBLE'].str.contains('GASOIL|DIESEL')]['LITROS'].sum()
                 t_gasol_tipo = df_tipo[df_tipo['COMBUSTIBLE'].str.contains('GASOLINA')]['LITROS'].sum()
                 t_tipo = df_tipo['LITROS'].sum()
-                pct_tipo = (t_tipo / t_surtido_total) * 100
+                pct_tipo = (t_tipo / t_absoluto) * 100
                 
                 nombre_mostrar = tipo if 'DROTACA' in tipo else tipo.title()
                 
@@ -895,6 +897,9 @@ def html_pizarras_combustible_completas(df, fecha_str):
                 </tr>
                 """
         
+        t_gasoil_abs = df_copy[df_copy['COMBUSTIBLE'].str.contains('GASOIL|DIESEL')]['LITROS'].sum()
+        t_gasol_abs = df_copy[df_copy['COMBUSTIBLE'].str.contains('GASOLINA')]['LITROS'].sum()
+
         html_resumen_tipos = f"""
         <div style="margin-top: 30px;">
             <table style="width: 100%; border-collapse: collapse; border: 2px solid #000;">
@@ -903,7 +908,7 @@ def html_pizarras_combustible_completas(df, fecha_str):
                         <th style="border: 1px solid #000; padding: 12px; width: 30%;">TIPO DE SURTIDO</th>
                         <th style="border: 1px solid #000; padding: 12px; width: 20%;">GASOIL (Lts)</th>
                         <th style="border: 1px solid #000; padding: 12px; width: 20%;">GASOLINA (Lts)</th>
-                        <th style="border: 1px solid #000; padding: 12px; width: 20%;">TOTAL (Lts)</th>
+                        <th style="border: 1px solid #000; padding: 12px; width: 20%;">TOTAL GLOBAL (Lts)</th>
                         <th style="border: 1px solid #000; padding: 12px; width: 10%;">%</th>
                     </tr>
                 </thead>
@@ -911,9 +916,9 @@ def html_pizarras_combustible_completas(df, fecha_str):
                     {filas_tipos}
                     <tr style="background-color: #f2f2f2; font-size: 18px; color: #000;">
                         <td style="border: 1px solid #000; padding: 15px; text-align: right; font-weight: bold;">GRAN TOTAL:</td>
-                        <td style="border: 1px solid #000; padding: 15px; text-align: center; font-weight: bold; color: #0d47a1;">{t_gasoil:,.0f} Lts</td>
-                        <td style="border: 1px solid #000; padding: 15px; text-align: center; font-weight: bold; color: #e65100;">{t_gasolina:,.0f} Lts</td>
-                        <td style="border: 1px solid #000; padding: 15px; text-align: center; font-weight: bold; font-size: 20px;">{t_surtido_total:,.0f} Lts</td>
+                        <td style="border: 1px solid #000; padding: 15px; text-align: center; font-weight: bold; color: #0d47a1;">{t_gasoil_abs:,.0f} Lts</td>
+                        <td style="border: 1px solid #000; padding: 15px; text-align: center; font-weight: bold; color: #e65100;">{t_gasol_abs:,.0f} Lts</td>
+                        <td style="border: 1px solid #000; padding: 15px; text-align: center; font-weight: bold; font-size: 20px;">{t_absoluto:,.0f} Lts</td>
                         <td style="border: 1px solid #000; padding: 15px; text-align: center; font-weight: bold;">100%</td>
                     </tr>
                 </tbody>
@@ -988,7 +993,7 @@ def html_pizarras_combustible_completas(df, fecha_str):
         {crear_cabecera_html("3", "Resumen Ejecutivo por Tipo de Surtido")}
         <div style="padding: 0 20px;">
             {bloque_p3}
-            <h3 style="text-align: center; color: {color_header}; font-size: 22px; text-transform: uppercase; margin-top: 40px;">Distribución Estratégica del Combustible</h3>
+            <h3 style="text-align: center; color: {color_header}; font-size: 22px; text-transform: uppercase; margin-top: 40px;">Distribución Estratégica del Combustible (Global)</h3>
             {html_resumen_tipos}
         </div>
         <div style="margin-top: 40px; text-align: center; font-size: 12px; color: #777; border-top: 1px solid #ccc; padding: 10px;">Departamento de Flota y Logística</div>
