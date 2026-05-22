@@ -776,15 +776,21 @@ def html_pizarras_combustible_completas(df, fecha_str):
         sitio = str(row.get('SITIO', '')).upper().strip()
         comb = str(row.get('COMBUSTIBLE', '')).upper().strip()
 
-        es_tanque = any(x in t for x in ['RESERVA', 'TANQUE', 'BASE', 'PLANTA', 'PROPIO'])
-        es_gasoil = any(x in comb for x in ['GASOIL', 'DIESEL', 'GSOIL'])
-        es_drotaca = any(x in sitio for x in ['DROTACA', 'BASE', 'PLANTA'])
-
-        if es_tanque and es_gasoil and es_drotaca:
+        # Filtro estricto para CIUDAD DROTACA
+        # Ahora verificamos que el sitio sea exactamente "CIUDAD DROTACA"
+        if sitio == 'CIUDAD DROTACA' and 'RESERVA' in t:
             return 'TANQUE RESERVA CIUDAD DROTACA'
-        if any(x in t for x in ['ESTACION', 'E/S', 'E / S', 'BOMBA']): return 'ESTACION DE SERVICIO'
-        if 'BIDON' in t: return 'BIDON'
-        if es_tanque: return 'TANQUE RESERVA (OTROS)'
+        
+        # Resto de las categorías
+        if any(x in t for x in ['ESTACION', 'E/S', 'E / S', 'BOMBA']): 
+            return 'ESTACION DE SERVICIO'
+        if 'BIDON' in t: 
+            return 'BIDON'
+        
+        # Otros tanques que no sean CIUDAD DROTACA
+        if any(x in t for x in ['RESERVA', 'TANQUE', 'BASE', 'PLANTA', 'PROPIO']): 
+            return 'TANQUE RESERVA (OTROS)'
+            
         return 'OTROS'
     
     df_copy = df.copy()
