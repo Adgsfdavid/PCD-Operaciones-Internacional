@@ -203,15 +203,29 @@ def generar_ws_surtido_p3(df, fecha_str):
     if df.empty:
         return f"*Reporte Ejecutivo de Surtido (3/3)* ⛽\n📅 Fecha: {fecha_str}\n\nNo hay registros."
 
-    def std_tipo(t):
-        t = str(t).upper()
-        if 'ESTACION' in t or 'E/S' in t or 'E / S' in t: return 'ESTACION DE SERVICIO'
-        if 'BIDON' in t: return 'BIDON'
-        if 'RESERVA' in t or 'TANQUE' in t or 'BASE' in t or 'PLANTA' in t: return 'TANQUE RESERVA'
+    def std_tipo(row):
+        t = str(row['TIPO_SURTIDO']).upper()
+        sitio = str(row['SITIO']).upper()
+        comb = str(row['COMBUSTIBLE']).upper()
+
+        # Parámetros estrictos para Ciudad Drotaca
+        es_tanque = any(x in t for x in ['RESERVA', 'TANQUE', 'BASE', 'PLANTA'])
+        es_gasoil = 'GASOIL' in comb or 'DIESEL' in comb
+        es_drotaca = 'CIUDAD DROTACA' in sitio
+
+        if es_tanque and es_gasoil and es_drotaca:
+            return 'TANQUE RESERVA CIUDAD DROTACA'
+        if 'ESTACION' in t or 'E/S' in t or 'E / S' in t: 
+            return 'ESTACION DE SERVICIO'
+        if 'BIDON' in t: 
+            return 'BIDON'
+        if es_tanque: 
+            return 'TANQUE RESERVA (OTROS)'
         return 'OTROS'
     
     df_copy = df.copy()
-    df_copy['TIPO_STD'] = df_copy['TIPO_SURTIDO'].apply(std_tipo)
+    # Aplicamos la función a lo largo de las columnas (axis=1)
+    df_copy['TIPO_STD'] = df_copy.apply(std_tipo, axis=1)
     
     df_surtido = df_copy[df_copy['GRUPO'] != 'EXTRACCION']
     df_extrac = df_copy[df_copy['GRUPO'] == 'EXTRACCION']
@@ -228,12 +242,12 @@ def generar_ws_surtido_p3(df, fecha_str):
     
     if t_total > 0:
         msg += "📊 *DISTRIBUCIÓN ESTRATÉGICA:*\n"
-        for tipo in ['ESTACION DE SERVICIO', 'BIDON', 'TANQUE RESERVA', 'OTROS']:
+        for tipo in ['ESTACION DE SERVICIO', 'BIDON', 'TANQUE RESERVA CIUDAD DROTACA', 'TANQUE RESERVA (OTROS)', 'OTROS']:
             lts_tipo = df_surtido[df_surtido['TIPO_STD'] == tipo]['LITROS'].sum()
             if lts_tipo > 0:
                 pct = (lts_tipo / t_total) * 100
                 icon = "⛽" if tipo == 'ESTACION DE SERVICIO' else ("🛢️" if tipo == 'BIDON' else "🏭")
-                nombre_mostrar = "TANQUE RESERVA CIUDAD DROTACA" if tipo == 'TANQUE RESERVA' else tipo.title()
+                nombre_mostrar = tipo if 'DROTACA' in tipo else tipo.title()
                 msg += f"{icon} *{nombre_mostrar}:* {lts_tipo:,.0f} Lts ({pct:.1f}%)\n"
     
     return msg
@@ -755,18 +769,30 @@ def html_pizarras_combustible_completas(df, fecha_str):
     if df.empty:
         return f"<div style='padding: 50px; text-align: center; color: #555; font-size: 20px;'>No se registraron movimientos de combustible para la fecha: {fecha_str}</div>"
 
-    def std_tipo(t):
-        t = str(t).upper()
+    def std_tipo(row):
+        t = str(row['TIPO_SURTIDO']).upper()
+        sitio = str(row['SITIO']).upper()
+        comb = str(row['COMBUSTIBLE']).upper()
+
+        # Parámetros estrictos para Ciudad Drotaca
+        es_tanque = any(x in t for x in ['RESERVA', 'TANQUE', 'BASE', 'PLANTA'])
+        es_gasoil = 'GASOIL' in comb or 'DIESEL' in comb
+        es_drotaca = 'CIUDAD DROTACA' in sitio
+
+        if es_tanque and es_gasoil and es_drotaca:
+            return 'TANQUE RESERVA CIUDAD DROTACA'
         if 'ESTACION' in t or 'E/S' in t or 'E / S' in t: return 'ESTACION DE SERVICIO'
         if 'BIDON' in t: return 'BIDON'
-        if 'RESERVA' in t or 'TANQUE' in t or 'BASE' in t or 'PLANTA' in t: return 'TANQUE RESERVA'
+        if es_tanque: return 'TANQUE RESERVA (OTROS)'
         return 'OTROS'
     
-    df['TIPO_STD'] = df['TIPO_SURTIDO'].apply(std_tipo)
+    df_copy = df.copy()
+    # Aplicamos la función para evaluar filas completas
+    df_copy['TIPO_STD'] = df_copy.apply(std_tipo, axis=1)
 
     # 1. Filtros por Pizarra
-    df_p1 = df[df['GRUPO'].isin(['RUTA CORTA', 'EXTRACCION'])]
-    df_p2 = df[df['GRUPO'].str.contains('CENTRO|LARGA|OCCIDENTE', na=False)]
+    df_p1 = df_copy[df_copy['GRUPO'].isin(['RUTA CORTA', 'EXTRACCION'])]
+    df_p2 = df_copy[df_copy['GRUPO'].str.contains('CENTRO|LARGA|OCCIDENTE', na=False)]
     
     # Totales Pizarra 1
     df_surt_p1 = df_p1[df_p1['GRUPO'] == 'RUTA CORTA']
@@ -780,10 +806,10 @@ def html_pizarras_combustible_completas(df, fecha_str):
     t_surtido_p2 = df_p2['LITROS'].sum()
     
     # Totales Pizarra 3 (Global)
-    df_surtido = df[df['GRUPO'] != 'EXTRACCION']
+    df_surtido = df_copy[df_copy['GRUPO'] != 'EXTRACCION']
     t_gasoil = df_surtido[df_surtido['COMBUSTIBLE'].str.contains('GASOIL|DIESEL')]['LITROS'].sum()
     t_gasolina = df_surtido[df_surtido['COMBUSTIBLE'].str.contains('GASOLINA')]['LITROS'].sum()
-    t_extraccion = df[df['GRUPO'] == 'EXTRACCION']['LITROS'].sum()
+    t_extraccion = df_copy[df_copy['GRUPO'] == 'EXTRACCION']['LITROS'].sum()
     t_surtido_total = df_surtido['LITROS'].sum()
     
     def generar_filas(df_filtro):
@@ -849,7 +875,7 @@ def html_pizarras_combustible_completas(df, fecha_str):
     html_resumen_tipos = ""
     if t_surtido_total > 0:
         filas_tipos = ""
-        for tipo in ['ESTACION DE SERVICIO', 'BIDON', 'TANQUE RESERVA', 'OTROS']:
+        for tipo in ['ESTACION DE SERVICIO', 'BIDON', 'TANQUE RESERVA CIUDAD DROTACA', 'TANQUE RESERVA (OTROS)', 'OTROS']:
             df_tipo = df_surtido[df_surtido['TIPO_STD'] == tipo]
             if not df_tipo.empty:
                 t_gasoil_tipo = df_tipo[df_tipo['COMBUSTIBLE'].str.contains('GASOIL|DIESEL')]['LITROS'].sum()
@@ -857,7 +883,7 @@ def html_pizarras_combustible_completas(df, fecha_str):
                 t_tipo = df_tipo['LITROS'].sum()
                 pct_tipo = (t_tipo / t_surtido_total) * 100
                 
-                nombre_mostrar = "TANQUE RESERVA CIUDAD DROTACA" if tipo == 'TANQUE RESERVA' else tipo.title()
+                nombre_mostrar = tipo if 'DROTACA' in tipo else tipo.title()
                 
                 filas_tipos += f"""
                 <tr style="text-align: center; font-size: 16px; color: #000; border-bottom: 1px solid #ccc;">
