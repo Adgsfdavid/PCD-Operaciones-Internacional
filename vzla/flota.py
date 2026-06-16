@@ -19,9 +19,11 @@ from google.oauth2.service_account import Credentials
 FLOTA_MASTER_DATA = [
     ("FORD", "CARGO", "A02CS4V"), ("CHEVROLET", "BUS", "A0378AK"), ("CHEVROLET", "BUS", "A0424AK"),
     ("FOTON", "FOTON", "A04AV4T"), ("FORD", "CARGO", "A07CZ7A"),
+    ("MITSUBISHI", "L200", "A12BK8R"),  # NUEVA UNIDAD AÑADIDA
     ("MITSUBISHI", "L300", "A13CS4G"), ("MITSUBISHI", "L300", "A15AT9B"), ("CHEVROLET", "C 3500", "A17AM0K"),
     ("MITSUBISHI", "L300", "A20CD8V"), ("MITSUBISHI", "L200", "A20EF9G"), ("MITSUBISHI", "CANTER", "A21BC1D"),
     ("FOTON", "FOTON", "A24AS1R"), ("MITSUBISHI", "CANTER", "A28AR0B"), ("MITSUBISHI", "CANTER", "A28BS4D"),
+    ("CHEVROLET", "C 3500", "A29AI9V"), # NUEVA UNIDAD AÑADIDA
     ("CHEVROLET", "C 3500", "A30AS1A"), ("MITSUBISHI", "CANTER", "A31BS3D"),
     ("PEUGEOT", "PEUGEOT", "A33B16D"), ("MITSUBISHI", "CANTER", "A35BK2D"), ("MITSUBISHI", "CANTER", "A38BK6D"),
     ("MITSUBISHI", "CANTER", "A39BK8D"), ("MITSUBISHI", "L300", "A40AK1N"), ("DONG FENG", "DONG FENG", "A41AV9T"),
@@ -1885,11 +1887,13 @@ with tab9:
             if db_i_filt.empty:
                 st.warning("⚠️ No hay registros en ese rango de fechas.")
             else:
+                total_flota_master = len(FLOTA_MASTER_DATA)
+                
                 promedio_activas = db_i_filt['Activas'].mean()
-                disp_porcentaje = (promedio_activas / 68) * 100
+                disp_porcentaje = (promedio_activas / total_flota_master) * 100
                 
                 promedio_gps = db_i_filt['Con_GPS'].mean()
-                gps_porcentaje = (promedio_gps / 68) * 100
+                gps_porcentaje = (promedio_gps / total_flota_master) * 100
                 
                 logo = obtener_logo_base64()
                 area_logo = f'<div style="background-color: #1a237e; padding: 12px 20px; border-radius: 8px; display: flex; align-items: center; justify-content: center;"><img src="{logo}" style="max-height: 55px; max-width: 180px; object-fit: contain;"></div>' if logo else '<div style="background-color: #1a237e; padding: 12px 20px; border-radius: 8px; display: flex; align-items: center; justify-content: center;"><span style="font-size:24px; color: white; font-weight: bold;">📊 REPORTE</span></div>'
@@ -1908,7 +1912,7 @@ with tab9:
                     """
                     
                 filas_chart_i = ""
-                max_chart = 68
+                max_chart = total_flota_master
                 for _, r in db_i_filt.iterrows():
                     ancho_m = (r['Activas'] / max_chart) * 100
                     ancho_g = (r['Con_GPS'] / max_chart) * 100
