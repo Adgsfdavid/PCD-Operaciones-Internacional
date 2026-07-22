@@ -1266,6 +1266,20 @@ with t_combustible:
                         </tr>
                         """
 
+                    # --- TABLA DE BIDONES: UNA FILA POR CADA DÍA REGISTRADO (NO SOLO APERTURA/CIERRE) ---
+                    filas_bidones_html = ""
+                    for i, row in df_comb.iterrows():
+                        fecha_str_b = row['Fecha_DT'].strftime('%d/%m')
+                        dia_nombre_b = dias_semana_es[row['Fecha_DT'].weekday()]
+                        fondo_fila = "white" if i % 2 == 0 else "#f9f9f9"
+                        filas_bidones_html += f"""
+                        <tr style="background: {fondo_fila}; text-align: center;">
+                            <td style="padding: 8px; border: 1px solid #ccc; font-weight: bold; text-align: left;">{dia_nombre_b} {fecha_str_b}</td>
+                            <td style="padding: 8px; border: 1px solid #ccc; font-weight: bold;">{f_p(row['Gasolina_Bidones'])} L</td>
+                            <td style="padding: 8px; border: 1px solid #ccc; font-weight: bold;">{f_p(row['Gasoil_Bidones'])} L</td>
+                        </tr>
+                        """
+
                     html_pizarra_combustible = f"""
                     <html><head><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head>
                     <body style="font-family: Arial, sans-serif; background-color: #f0f2f6; padding: 20px;">
@@ -1325,20 +1339,11 @@ with t_combustible:
                                 <table style="width: 48%; border-collapse: collapse; border: 2px solid #e65100; font-size: 14px;">
                                     <tr><th colspan="3" style="background: #e65100; color: white; padding: 10px; font-size: 15px;">ESTATUS DE BIDONES (RESERVA MOVIL)</th></tr>
                                     <tr style="background: #ffe0b2; color: #d84315;">
-                                        <th style="padding: 8px; border: 1px solid #ccc;">Tipo</th>
-                                        <th style="padding: 8px; border: 1px solid #ccc;">Lunes (Ap.)</th>
-                                        <th style="padding: 8px; border: 1px solid #ccc;">Viernes (Ci.)</th>
+                                        <th style="padding: 8px; border: 1px solid #ccc; text-align: left;">Día</th>
+                                        <th style="padding: 8px; border: 1px solid #ccc;">⛽ Gasolina</th>
+                                        <th style="padding: 8px; border: 1px solid #ccc;">🛢️ Gasoil</th>
                                     </tr>
-                                    <tr style="background: white; text-align: center;">
-                                        <td style="padding: 10px; border: 1px solid #ccc; font-weight: bold;">⛽ Gasolina</td>
-                                        <td style="padding: 10px; border: 1px solid #ccc; font-weight: bold;">{f_p(row_apertura['Gasolina_Bidones'])} L</td>
-                                        <td style="padding: 10px; border: 1px solid #ccc; font-weight: 900; color: #1565c0;">{f_p(row_cierre['Gasolina_Bidones'])} L</td>
-                                    </tr>
-                                    <tr style="background: white; text-align: center;">
-                                        <td style="padding: 10px; border: 1px solid #ccc; font-weight: bold;">🛢️ Gasoil</td>
-                                        <td style="padding: 10px; border: 1px solid #ccc; font-weight: bold;">{f_p(row_apertura['Gasoil_Bidones'])} L</td>
-                                        <td style="padding: 10px; border: 1px solid #ccc; font-weight: 900; color: #1565c0;">{f_p(row_cierre['Gasoil_Bidones'])} L</td>
-                                    </tr>
+                                    {filas_bidones_html}
                                 </table>
                             </div>
                         </div>
@@ -1409,9 +1414,9 @@ with t_surtido:
                     df_surt['UNIDAD'] = df_surt['UNIDAD'].astype(str).str.strip().str.upper()
 
                     # --- CORRECCIONES DE NOMBRES Y ERRORES HUMANOS ---
-                    # 1. Renombramos el Tanque Reserva
+                    # 1. Renombramos el Tanque Reserva dejando claro que es una EXTRACCIÓN, no un "surtido" a destino
                     df_surt['TIPO_SURTIDO'] = df_surt['TIPO_SURTIDO'].replace({
-                        'TANQUE RESERVA': 'TANQUE RESERVA CIUDAD DROTACA (EL TIGRE)'
+                        'TANQUE RESERVA': 'EXTRACCIÓN DE TANQUE RESERVA CIUDAD DROTACA (EL TIGRE)'
                     })
 
                     # 2. Extraemos Planta Eléctrica y forzamos a GASOIL (corrige errores de digitación en Excel)
