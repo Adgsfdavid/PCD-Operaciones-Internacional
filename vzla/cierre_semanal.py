@@ -7,6 +7,8 @@ import base64
 import textwrap
 import unicodedata
 import re
+import io
+from PIL import Image
 from datetime import datetime, timedelta
 import streamlit.components.v1 as components
 from google.oauth2.service_account import Credentials
@@ -15,6 +17,29 @@ import gspread
 # ==========================================
 # CONFIGURACIÓN DE CONEXIÓN Y LOGO
 # ==========================================
+def comprimir_imagen_base64(archivo_subido, max_dim=1600, calidad=80):
+    """
+    Redimensiona y comprime una imagen antes de incrustarla como base64 en el PDF.
+    Esto es clave para que 'Descargar Master PDF' no cuelgue el navegador: una foto
+    de celular sin comprimir (3000-4000px) multiplicada por varias imágenes y por el
+    scale del html2canvas puede generar canvases gigantes que congelan la pestaña.
+    """
+    try:
+        archivo_subido.seek(0)
+        img = Image.open(archivo_subido)
+        img = img.convert('RGB')  # normaliza modo (evita problemas con PNG con transparencia, CMYK, etc.)
+        ancho, alto = img.size
+        if max(ancho, alto) > max_dim:
+            factor = max_dim / max(ancho, alto)
+            img = img.resize((int(ancho * factor), int(alto * factor)), Image.LANCZOS)
+        buffer = io.BytesIO()
+        img.save(buffer, format='JPEG', quality=calidad, optimize=True)
+        return base64.b64encode(buffer.getvalue()).decode()
+    except Exception:
+        # Si algo falla comprimiendo, se usa la imagen original tal cual (mejor que romper el flujo)
+        archivo_subido.seek(0)
+        return base64.b64encode(archivo_subido.read()).decode()
+
 def obtener_logo_base64():
     try:
         from pathlib import Path
@@ -1919,7 +1944,7 @@ with t_pdf:
             st.warning("⚠️ Debes subir al menos la foto de portada para generar el PDF.")
         else:
             with st.spinner("Ensamblando PDF Corporativo en Alta Resolución..."):
-                b64_portada = base64.b64encode(img_portada.read()).decode()
+                b64_portada = comprimir_imagen_base64(img_portada, max_dim=1920, calidad=82)
 
                 # Construir lista de secciones dinámicamente en el ORDEN ESTRICTO solicitado
                 secciones = []
@@ -1953,8 +1978,7 @@ with t_pdf:
                     """
                     
                     # Generar Página de Contenido (Bloque Rígido Ajustado a 290mm para evitar sangrado inferior)
-                    img_file.seek(0)
-                    b64_img = base64.b64encode(img_file.read()).decode()
+                    b64_img = comprimir_imagen_base64(img_file, max_dim=1600, calidad=80)
                     
                     html_paginas += f"""
                     <div class="pdf-page">
@@ -1963,7 +1987,7 @@ with t_pdf:
                             <div style="font-size: 16px; font-weight: bold; color: #d4af37;">SEMANA {int(num_sem)}</div>
                         </div>
                         <div style="padding: 20px; text-align: center; height: 830px; display: flex; align-items: center; justify-content: center; background: #fafafa;">
-                            <img src="data:image/png;base64,{b64_img}" style="max-width: 95%; max-height: 100%; object-fit: contain; border: 3px solid #ccc; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+                            <img src="data:image/jpeg;base64,{b64_img}" style="max-width: 95%; max-height: 100%; object-fit: contain; border: 3px solid #ccc; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
                         </div>
                         <div style="position: absolute; bottom: 0; left: 0; width: 100%; background: #111; padding: 15px 40px; font-size: 13px; font-weight: bold; color: #fff; display: flex; justify-content: space-between; border-top: 4px solid #d4af37; box-sizing: border-box;">
                             <span>Control Tower Logística - Dirección Operativa Drotaca</span>
@@ -2016,7 +2040,7 @@ with t_pdf:
                         }}
                         
                         /* Estilos Internos de Portada */
-                        .portada-bg {{ background-image: url('data:image/png;base64,{b64_portada}'); background-size: cover; background-position: center; height: 60%; position: relative; }}
+                        .portada-bg {{ background-image: url('data:image/jpeg;base64,{b64_portada}'); background-size: cover; background-position: center; height: 60%; position: relative; }}
                         .overlay {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(135deg, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.4) 100%); }}
                         .portada-content {{ position: absolute; bottom: 50px; left: 50px; color: white; z-index: 2; width: 85%; }}
                         .portada-title {{ font-size: 48px; font-weight: 900; margin: 0; text-transform: uppercase; line-height: 1.1; letter-spacing: -1px; }}
@@ -2030,7 +2054,8 @@ with t_pdf:
                     </style>
                 </head><body>
                     <div style="text-align:center; margin-bottom: 30px;" data-html2canvas-ignore="true">
-                        <button onclick="descargarPDF()" style="background:#0d47a1; color:white; border:none; padding:15px 40px; font-size: 16px; font-weight:bold; cursor:pointer; border-radius:8px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">📥 DESCARGAR MASTER PDF</button>
+                        <button id="btn-descargar-pdf" onclick="descargarPDF()" style="background:#0d47a1; color:white; border:none; padding:15px 40px; font-size: 16px; font-weight:bold; cursor:pointer; border-radius:8px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">📥 DESCARGAR MASTER PDF</button>
+                        <div id="pdf-status" style="margin-top:12px; font-size:13px; font-weight:bold; color:#333;"></div>
                     </div>
                     
                     <div id="master-pdf">
@@ -2088,16 +2113,38 @@ with t_pdf:
 
                     <script>
                     function descargarPDF() {{
+                        var boton = document.getElementById('btn-descargar-pdf');
+                        var estado = document.getElementById('pdf-status');
+                        boton.disabled = true;
+                        boton.style.opacity = '0.6';
+                        boton.innerHTML = '⏳ GENERANDO PDF...';
+                        estado.style.color = '#333';
+                        estado.innerHTML = 'Esto puede tardar unos segundos, no cierres esta ventana...';
+
                         var element = document.getElementById('master-pdf');
                         var opt = {{
                             margin:       0,
                             filename:     'Master_Reporte_Semanal_Semana_{int(num_sem)}.pdf',
-                            image:        {{ type: 'png' }}, // Captura en PNG para preservar nitidez 4K en textos comprimidos
-                            html2canvas:  {{ scale: 4, useCORS: true, logging: false, scrollY: 0 }}, // Escala 4 para máxima definición
+                            image:        {{ type: 'jpeg', quality: 0.85 }}, // JPEG liviano en vez de PNG (el PNG a color completo con fotos es muchísimo más pesado)
+                            html2canvas:  {{ scale: 2, useCORS: true, logging: false, scrollY: 0 }}, // Escala 2: buena calidad de impresión sin colgar el navegador
                             jsPDF:        {{ unit: 'mm', format: 'a4', orientation: 'portrait' }},
                             pagebreak:    {{ mode: 'css', avoid: 'tr' }}
                         }};
-                        html2pdf().set(opt).from(element).save();
+
+                        html2pdf().set(opt).from(element).save().then(function() {{
+                            boton.disabled = false;
+                            boton.style.opacity = '1';
+                            boton.innerHTML = '📥 DESCARGAR MASTER PDF';
+                            estado.style.color = '#2e7d32';
+                            estado.innerHTML = '✅ PDF generado. Si tu navegador no lo abrió solo, revisa la carpeta de Descargas.';
+                        }}).catch(function(err) {{
+                            boton.disabled = false;
+                            boton.style.opacity = '1';
+                            boton.innerHTML = '📥 DESCARGAR MASTER PDF';
+                            estado.style.color = '#c62828';
+                            estado.innerHTML = '❌ Error generando el PDF: ' + err.message + '. Intenta con menos imágenes o fotos más livianas.';
+                            console.error('Error generando Master PDF:', err);
+                        }});
                     }}
                     </script>
                 </body></html>
