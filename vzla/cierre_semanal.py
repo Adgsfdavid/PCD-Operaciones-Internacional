@@ -1673,7 +1673,7 @@ with t_mantenimiento:
         efectividad_global = (total_logrados / total_planificados * 100) if total_planificados > 0 else 0
         total_imprevistos = st.session_state.total_imprevistos
 
-        # Agrupación estadística por Mecánico / Taller
+        # Agrupación estadística por Mecánico / Taller (por combo, tal cual aparece en la hoja)
         df_mec = df_editado.groupby('MECANICO_RESPONSABLE').agg(
             ASIGNADOS=('Unidad', 'count'),
             LOGRADOS=('LOGRADO_NUM', 'sum')
@@ -1681,7 +1681,22 @@ with t_mantenimiento:
         df_mec['EFECTIVIDAD'] = (df_mec['LOGRADOS'] / df_mec['ASIGNADOS']) * 100
         df_mec = df_mec.sort_values(['EFECTIVIDAD', 'ASIGNADOS'], ascending=[False, False])
 
-        # Generar HTML para Tabla de Mecánicos
+        # Agrupación INDIVIDUAL: separa los combos ("FIRAS AISSAMI / JORGE CHUNG") y le da
+        # crédito completo a cada persona por separado, para no diluir el desempeño real de nadie.
+        df_individual = df_editado.copy()
+        df_individual['MECANICO_LISTA'] = df_individual['MECANICO_RESPONSABLE'].astype(str).str.split('/')
+        df_individual = df_individual.explode('MECANICO_LISTA')
+        df_individual['MECANICO_LISTA'] = df_individual['MECANICO_LISTA'].str.strip()
+        df_individual = df_individual[df_individual['MECANICO_LISTA'] != '']
+
+        df_mec_ind = df_individual.groupby('MECANICO_LISTA').agg(
+            ASIGNADOS=('Unidad', 'count'),
+            LOGRADOS=('LOGRADO_NUM', 'sum')
+        ).reset_index()
+        df_mec_ind['EFECTIVIDAD'] = (df_mec_ind['LOGRADOS'] / df_mec_ind['ASIGNADOS']) * 100
+        df_mec_ind = df_mec_ind.sort_values(['EFECTIVIDAD', 'ASIGNADOS'], ascending=[False, False])
+
+        # Generar HTML para Tabla de Mecánicos (por combo, tal cual en la hoja)
         filas_mec_html = ""
         for _, r in df_mec.iterrows():
             mec_nombre = str(r['MECANICO_RESPONSABLE']).upper().strip()
@@ -1690,6 +1705,23 @@ with t_mantenimiento:
             color_ef = "#2e7d32" if r['EFECTIVIDAD'] >= 80 else ("#f57f17" if r['EFECTIVIDAD'] >= 50 else "#c62828")
             
             filas_mec_html += f"""
+            <tr style="background: {bg_tr};">
+                <td style="padding: 8px; border: 2px solid #000; font-weight: bold;">{icono} {mec_nombre}</td>
+                <td style="padding: 8px; border: 2px solid #000; text-align: center; font-weight: 900;">{r['ASIGNADOS']}</td>
+                <td style="padding: 8px; border: 2px solid #000; text-align: center; font-weight: 900; color: #0d47a1;">{r['LOGRADOS']}</td>
+                <td style="padding: 8px; border: 2px solid #000; text-align: center; font-weight: 900; color: {color_ef};">{r['EFECTIVIDAD']:.1f}%</td>
+            </tr>
+            """
+
+        # Generar HTML para Tabla de Desempeño INDIVIDUAL (crédito completo a cada persona, incluso en combos)
+        filas_mec_ind_html = ""
+        for _, r in df_mec_ind.iterrows():
+            mec_nombre = str(r['MECANICO_LISTA']).upper().strip()
+            icono = "🏢" if 'TALLER' in mec_nombre or 'EXTERNO' in mec_nombre else "👨‍🔧"
+            bg_tr = "#f3e5f5" if 'TALLER' in mec_nombre or 'EXTERNO' in mec_nombre else "white"
+            color_ef = "#2e7d32" if r['EFECTIVIDAD'] >= 80 else ("#f57f17" if r['EFECTIVIDAD'] >= 50 else "#c62828")
+
+            filas_mec_ind_html += f"""
             <tr style="background: {bg_tr};">
                 <td style="padding: 8px; border: 2px solid #000; font-weight: bold;">{icono} {mec_nombre}</td>
                 <td style="padding: 8px; border: 2px solid #000; text-align: center; font-weight: 900;">{r['ASIGNADOS']}</td>
@@ -1771,6 +1803,21 @@ with t_mantenimiento:
                         <tbody>{filas_mec_html}</tbody>
                     </table>
                 </div>
+                <div style="margin-bottom: 25px;">
+                    <h3 style="margin: 0 0 10px 0; font-size: 14px; background: #4a148c; color: white; padding: 8px; text-align: center; border: 2px solid #000; text-transform: uppercase;">DESEMPEÑO INDIVIDUAL POR MECÁNICO</h3>
+                    <table style="width: 100%; border-collapse: collapse; font-size: 13px; border: 2px solid #000;">
+                        <thead>
+                            <tr style="background: #f3e5f5;">
+                                <th style="padding: 8px; border: 2px solid #000; text-align: left;">MECÁNICO</th>
+                                <th style="padding: 8px; border: 2px solid #000; width: 15%;">ASIGNADOS</th>
+                                <th style="padding: 8px; border: 2px solid #000; width: 15%;">COMPLETADOS</th>
+                                <th style="padding: 8px; border: 2px solid #000; width: 20%;">% EFECTIVIDAD</th>
+                            </tr>
+                        </thead>
+                        <tbody>{filas_mec_ind_html}</tbody>
+                    </table>
+                    <p style="font-size: 10px; color: #666; margin: 6px 2px 0 2px;">* Cuando una tarea la hicieron dos mecánicos juntos, aquí se le abona completa a cada uno por separado (por eso la suma de "Asignados" puede superar el total de tareas). La tabla de arriba muestra el rendimiento de las parejas/combos tal como fueron asignadas.</p>
+                </div>
                 <div>
                     <h3 style="margin: 0 0 10px 0; font-size: 14px; background: #000; color: white; padding: 8px; text-align: center; border: 2px solid #000; text-transform: uppercase;">📋 DETALLE OPERATIVO DE AUDITORÍA</h3>
                     <table style="width: 100%; border-collapse: collapse; font-size: 12px; border: 2px solid #000;">
@@ -1801,7 +1848,7 @@ with t_mantenimiento:
         </script>
         </body></html>
         """
-        components.html(html_pizarra_manto, height=1000, scrolling=True)
+        components.html(html_pizarra_manto, height=1300, scrolling=True)
 
         # --- TEXTO DE WHATSAPP AUTO-RECALCULADO ---
         st.markdown("---")
@@ -1816,10 +1863,16 @@ with t_mantenimiento:
         msg_manto += f"✅ *Logradas:* {total_logrados} {t_log}\n"
         msg_manto += f"📈 *Efectividad:* {efectividad_global:.1f}%\n"
         msg_manto += f"🚨 *Imprevistos:* {total_imprevistos} {t_imp}\n\n"
-        msg_manto += "*🏅 Rendimiento Computado:*\n"
+        msg_manto += "*🏅 Rendimiento por Combo (tal como fue asignado):*\n"
         
         for _, r in df_mec.iterrows():
             mec_n = str(r['MECANICO_RESPONSABLE']).strip()
+            ico = "🏢" if "TALLER" in mec_n or "EXTERNO" in mec_n else "👨‍🔧"
+            msg_manto += f"{ico} {mec_n}: {r['EFECTIVIDAD']:.0f}% ({r['LOGRADOS']}/{r['ASIGNADOS']})\n"
+
+        msg_manto += "\n*👤 Desempeño Individual (crédito completo por persona):*\n"
+        for _, r in df_mec_ind.iterrows():
+            mec_n = str(r['MECANICO_LISTA']).strip()
             ico = "🏢" if "TALLER" in mec_n or "EXTERNO" in mec_n else "👨‍🔧"
             msg_manto += f"{ico} {mec_n}: {r['EFECTIVIDAD']:.0f}% ({r['LOGRADOS']}/{r['ASIGNADOS']})\n"
         
