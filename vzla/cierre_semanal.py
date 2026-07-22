@@ -827,27 +827,64 @@ with t_despachos:
                     df_sem['Pedidos'] = 1
                     df_sem['SubRegion_Clean'] = df_sem.apply(lambda x: asignar_subregion(x['RUTA'], x['Region_Macro']), axis=1)
 
-                    # --- 2. PROCESAR HOJA DE FLOTA (placas válidas) ---
-                    hoja_flota = _buscar_hoja(['FLOTA DROTACA', 'FLOTA ACTUAL', 'FLOTA'])
+                    # --- 2. PROCESAR HOJA DE FLOTA/RUTERO (solo placas de Despacho: Oriente/Centro/Occidente) ---
+                    hoja_flota = _buscar_hoja(['RUTERO', 'FLOTA ACTUAL', 'FLOTA DROTACA', 'FLOTA'])
                     placas_validas = None
                     if hoja_flota:
                         try:
                             df_flota_raw_bf = _leer_hoja_con_headers(hoja_flota)
-                            df_flota_raw_bf.columns = [str(c).strip() for c in df_flota_raw_bf.columns]
+                            df_flota_raw_bf.columns = [str(c).strip().upper() for c in df_flota_raw_bf.columns]
                             k_placa = _buscar_columna_bf(list(df_flota_raw_bf.columns), ['PLACA', 'UNIDAD', 'VEHICULO']) or df_flota_raw_bf.columns[0]
-                            placas_series = (df_flota_raw_bf[k_placa].astype(str).str.strip().str.upper()
-                                             .str.replace(r'[\s\-\.]', '', regex=True))
-                            placas_series = placas_series[
-                                placas_series.str.len().between(4, 12) &
-                                placas_series.str.match(r'^[A-Z0-9]+$') &
-                                ~placas_series.isin(['PLACA', 'UNIDAD', 'NAN', '', 'VEHICULO'])
+                            k_ruta_flota = _buscar_columna_bf(list(df_flota_raw_bf.columns), ['RUTA', 'GRUPO', 'ZONA'], ['FECHA'])
+
+                            df_flota_raw_bf['_PLACA_NORM'] = (df_flota_raw_bf[k_placa].astype(str).str.strip().str.upper()
+                                                               .str.replace(r'[\s\-\.]', '', regex=True))
+                            df_flota_raw_bf = df_flota_raw_bf[
+                                df_flota_raw_bf['_PLACA_NORM'].str.len().between(4, 12) &
+                                df_flota_raw_bf['_PLACA_NORM'].str.match(r'^[A-Z0-9]+$') &
+                                ~df_flota_raw_bf['_PLACA_NORM'].isin(['PLACA', 'UNIDAD', 'NAN', '', 'VEHICULO'])
                             ]
-                            placas_validas = set(placas_series.unique())
-                            registros_log.append(f"✅ Hoja '{hoja_flota}' procesada. Placas detectadas: {len(placas_validas)}.")
+
+                            if k_ruta_flota:
+                                df_flota_raw_bf['_RUTA_NORM'] = df_flota_raw_bf[k_ruta_flota].astype(str).str.strip().str.upper()
+                                df_despacho_only = df_flota_raw_bf[df_flota_raw_bf['_RUTA_NORM'].str.contains('ORIENTE|CENTRO|OCCIDENTE', regex=True, na=False)]
+                                if not df_despacho_only.empty:
+                                    placas_validas = set(df_despacho_only['_PLACA_NORM'].unique())
+                                    registros_log.append(f"✅ Hoja '{hoja_flota}' procesada. Vehículos de Despacho (Oriente/Centro/Occidente): {len(placas_validas)}.")
+                                else:
+                                    placas_validas = set(df_flota_raw_bf['_PLACA_NORM'].unique())
+                                    registros_log.append(f"⚠️ La columna '{k_ruta_flota}' de '{hoja_flota}' no tiene valores Oriente/Centro/Occidente reconocibles. Se usarán las {len(placas_validas)} placas de la hoja sin restringir por ruta.")
+                            else:
+                                placas_validas = set(df_flota_raw_bf['_PLACA_NORM'].unique())
+                                registros_log.append(f"⚠️ La hoja '{hoja_flota}' no tiene columna de ruta/zona. Se usarán las {len(placas_validas)} placas encontradas (no se pudo restringir solo a Despacho).")
                         except Exception as e:
                             registros_log.append(f"⚠️ No se pudo procesar la hoja de flota: {e}")
                     else:
-                        registros_log.append("⚠️ No se encontró una hoja de FLOTA/FLOTA DROTACA en el archivo (se usarán todas las columnas numéricas de KILOMETRAJE).")
+                        registros_log.append("⚠️ No se encontró hoja de FLOTA/RUTERO en el archivo (no se pudo restringir el kilometraje solo a unidades de Despacho).")
+
+                    def _distancia_edicion(a, b):
+                        """Distancia de edición simple (Levenshtein), pensada para strings cortos como placas."""
+                        if a == b: return 0
+                        la, lb = len(a), len(b)
+                        if abs(la - lb) > 1: return 99
+                        dp = [[0] * (lb + 1) for _ in range(la + 1)]
+                        for i in range(la + 1): dp[i][0] = i
+                        for j in range(lb + 1): dp[0][j] = j
+                        for i in range(1, la + 1):
+                            for j in range(1, lb + 1):
+                                costo = 0 if a[i - 1] == b[j - 1] else 1
+                                dp[i][j] = min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + costo)
+                        return dp[la][lb]
+
+                    def _es_columna_placa(col, placas_set):
+                        c_norm = str(col).strip().upper().replace(' ', '').replace('-', '').replace('.', '')
+                        if not c_norm: return False
+                        for p in placas_set:
+                            if c_norm == p or c_norm.startswith(p) or p.startswith(c_norm):
+                                return True
+                            if abs(len(c_norm) - len(p)) <= 1 and _distancia_edicion(c_norm, p) <= 1:
+                                return True
+                        return False
 
                     # --- 3. PROCESAR KILOMETRAJE ---
                     df_km_sem = pd.DataFrame(columns=['FECHAS', 'KILOMETROS'])
@@ -865,12 +902,11 @@ with t_despachos:
 
                             columnas_id_existentes = [c for c in [col_fecha_km, 'FECHAS', 'DIA', 'MES'] if c in df_flota_raw.columns]
                             columnas_placas = [c for c in df_flota_raw.columns if c not in columnas_id_existentes]
+                            columnas_totales = len(columnas_placas)
 
                             if placas_validas:
-                                def _es_columna_placa(col):
-                                    c_norm = str(col).strip().upper().replace(' ', '').replace('-', '').replace('.', '')
-                                    return any(c_norm == p or c_norm.startswith(p) or p.startswith(c_norm) for p in placas_validas)
-                                columnas_placas = [c for c in columnas_placas if _es_columna_placa(c)]
+                                columnas_placas = [c for c in columnas_placas if _es_columna_placa(c, placas_validas)]
+                                registros_log.append(f"🔎 Columnas de KILOMETRAJE cruzadas con la flota de Despacho: {len(columnas_placas)} de {columnas_totales} columnas coincidieron.")
 
                             df_flota_melt = df_flota_raw.melt(id_vars=['FECHAS'], value_vars=columnas_placas, var_name='PLACA', value_name='KILOMETROS')
                             df_flota_melt['KILOMETROS'] = pd.to_numeric(df_flota_melt['KILOMETROS'], errors='coerce').fillna(0)
@@ -878,7 +914,7 @@ with t_despachos:
                             df_flota_melt['Ano_Calc'] = df_flota_melt['FECHAS'].dt.isocalendar().year
 
                             df_km_sem = df_flota_melt[(df_flota_melt['Num_Semana'] == num_sem) & (df_flota_melt['Ano_Calc'] == ano_sel)].copy()
-                            registros_log.append(f"🎯 KMs de la Semana {int(num_sem)} (hoja '{hoja_km}'): {df_km_sem['KILOMETROS'].sum():,.2f} Kms.")
+                            registros_log.append(f"🎯 KMs Netos de Despacho de la Semana {int(num_sem)} (hoja '{hoja_km}'): {df_km_sem['KILOMETROS'].sum():,.2f} Kms.")
                         except Exception as e:
                             registros_log.append(f"⚠️ No se pudo procesar el kilometraje: {e}")
                     else:
