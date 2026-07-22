@@ -578,161 +578,73 @@ with t_guardias:
                         st.code(msg_mon, language="markdown")
                         
 # ---------------------------------------------------------
-# PESTAÑA 5: RESUMEN DE DESPACHOS (MIGRADO NETAMENTE A EXCEL)
+# PESTAÑA 5: RESUMEN DE DESPACHOS (CONECTADO A GOOGLE SHEETS)
 # ---------------------------------------------------------
 with t_despachos:
-    st.info("Genera el Resumen Logístico de Lunes a Domingo leyendo directamente de los Excels.")
-    
-    col_up1, col_up2 = st.columns(2)
-    with col_up1:
-        archivos_despacho = st.file_uploader("📂 Cargar Excels de Despacho (Oriente, Centro, Occidente)", type=["xlsx", "xlsm"], accept_multiple_files=True)
-    with col_up2:
-        archivo_flota = st.file_uploader("🚛 Cargar Excel de Kilometraje (Flota)", type=["xlsx", "xlsm"])
+    st.info("Genera el Resumen Logístico de Lunes a Domingo leyendo directamente de la hoja 'MONITOREO_DESPACHOS' en Google Sheets (sin cargar Excels).")
 
     if st.button("🚚 Generar Pizarra de Despachos", type="primary", use_container_width=True):
-        if not archivos_despacho or not archivo_flota:
-            st.warning("⚠️ Debes cargar al menos un archivo de despacho y el archivo de flota para generar el reporte.")
-        else:
-            with st.spinner("Procesando histórico de Excels..."):
-                registros_log = []
-                registros_log.append(f"ℹ️ Iniciando auditoría para el Año {ano_sel} - Semana {int(num_sem)}.")
-                
-                # --- 1. PROCESAR DESPACHOS (ESCANEO DINÁMICO) ---
-                dfs_despacho = []
-                for file in archivos_despacho:
-                    filename = file.name.upper()
-                    try:
-                        if 'ORIENTE' in filename: region_macro = 'ORIENTE'
-                        elif 'CENTRO' in filename: region_macro = 'CENTRO'
-                        elif 'OCCIDENTE' in filename: region_macro = 'OCCIDENTE'
-                        else:
-                            registros_log.append(f"⚠️ Archivo omitido (no se identificó región en el nombre): {file.name}")
-                            continue
+        with st.spinner("Leyendo MONITOREO_DESPACHOS desde Google Sheets..."):
+            registros_log = []
+            registros_log.append(f"ℹ️ Iniciando auditoría para el Año {ano_sel} - Semana {int(num_sem)}.")
 
-                        df_raw = pd.read_excel(file, sheet_name="FARMACIAS", header=None)
-                        header_idx = 0
-                        for i, row in df_raw.head(20).iterrows():
-                            row_vals = [str(val).upper().strip() for val in row.values]
-                            if 'BULTOS' in row_vals and 'FECHA DE ENTREGA' in row_vals:
-                                header_idx = i
-                                break
-                        
-                        df = df_raw.iloc[header_idx+1:].copy()
-                        df.columns = [str(c).upper().strip() for c in df_raw.iloc[header_idx].values]
-                        
-                        col_fecha = 'FECHA DE ENTREGA'
-                        col_bultos = 'BULTOS'
-                        col_status = 'TIPO DE ENTREGA'
-                        col_subregion = 'RUTAS' if 'RUTAS' in df.columns else 'DESPACHO'
-                        col_region = 'DISTRIBUCION' if 'DISTRIBUCION' in df.columns else 'ZONA'
-                        
-                        missing = [c for c in [col_fecha, col_bultos, col_status, col_subregion, col_region] if c not in df.columns]
-                        if missing:
-                            registros_log.append(f"⚠️ {file.name}: Falló la lectura. Faltan las columnas: {missing}.")
-                            continue
-                        
-                        df = df.rename(columns={
-                            col_fecha: 'Fecha', col_bultos: 'Bultos', col_status: 'Status',
-                            col_subregion: 'SubRegion', col_region: 'Region'
-                        })
-                        
-                        df['Region_Macro'] = region_macro
-                        cols_to_keep = ['Fecha', 'Bultos', 'Status', 'SubRegion', 'Region', 'Region_Macro']
-                        df = df[cols_to_keep]
-                        filas_brutas = len(df)
-                        
-                        df['Fecha'] = df['Fecha'].replace(r'^\s*$', pd.NA, regex=True)
-                        df['Fecha'] = pd.to_datetime(df['Fecha'], errors='coerce')
-                        df['Fecha'] = df['Fecha'].ffill()
-                        df = df.dropna(subset=['Fecha'])
-                        
-                        registros_log.append(f"✅ Archivo leído: {file.name} | Filas procesadas: {filas_brutas} -> Con Fecha Válida: {len(df)}")
-                        dfs_despacho.append(df)
-                    except Exception as e:
-                        registros_log.append(f"❌ Error procesando el archivo de despacho {file.name}: {str(e)}")
-                
-                if not dfs_despacho:
-                    st.error("No se pudo extraer información válida de los archivos de despacho cargados. Revisa el log abajo.")
-                    for log_msg in registros_log: st.write(log_msg)
-                    st.stop()
+            # --- 1. LEER Y NORMALIZAR 'MONITOREO_DESPACHOS' ---
+            df_raw = extraer_datos("MONITOREO_DESPACHOS")
+            if df_raw.empty:
+                st.error("No se pudo leer la hoja 'MONITOREO_DESPACHOS' del Google Sheet. Verifica el acceso del service account y el nombre de la hoja.")
+                st.stop()
 
-                df_desp = pd.concat(dfs_despacho, ignore_index=True)
-                df_desp['Num_Semana'] = df_desp['Fecha'].dt.isocalendar().week
-                df_desp['Ano_Calc'] = df_desp['Fecha'].dt.isocalendar().year
-                
-                df_sem = df_desp[(df_desp['Num_Semana'] == num_sem) & (df_desp['Ano_Calc'] == ano_sel)].copy()
-                registros_log.append(f"📊 Registros totales de despacho (Semana {int(num_sem)}): {len(df_sem)}")
-                
-                df_sem['Status'] = df_sem['Status'].astype(str).str.upper().str.strip()
-                filas_antes_status = len(df_sem)
-                df_sem = df_sem[df_sem['Status'] == 'ENTREGADO']
-                registros_log.append(f"🎯 Filtrados con Status 'ENTREGADO': {len(df_sem)} (Omitidos: {filas_antes_status - len(df_sem)})")
-                
-                df_sem['Bultos'] = pd.to_numeric(df_sem['Bultos'], errors='coerce').fillna(0)
-                df_sem['Pedidos'] = 1 
-                df_sem['SubRegion_Clean'] = df_sem.apply(lambda x: asignar_subregion(x['SubRegion'], x['Region_Macro']), axis=1)
+            df_raw.columns = [str(c).strip().upper() for c in df_raw.columns]
+            columnas_necesarias = ['FECHA', 'DESPACHOS', 'CUBIERTOS', 'BULTOS', 'KILOMETROS', 'REGION']
+            faltantes = [c for c in columnas_necesarias if c not in df_raw.columns]
+            if faltantes:
+                st.error(f"Faltan columnas en la hoja MONITOREO_DESPACHOS: {faltantes}")
+                st.stop()
 
-                # --- 2. PROCESAR MAESTRO 'FLOTA ACTUAL' ---
-                placas_despacho_validas = None
-                try:
-                    df_flota_actual = pd.read_excel(archivo_flota, sheet_name="FLOTA ACTUAL")
-                    df_flota_actual.columns = df_flota_actual.columns.astype(str).str.strip().str.upper()
-                    
-                    if 'PLACA' in df_flota_actual.columns and 'RUTA' in df_flota_actual.columns:
-                        df_flota_actual['PLACA'] = df_flota_actual['PLACA'].astype(str).str.strip().str.upper()
-                        df_flota_actual['RUTA'] = df_flota_actual['RUTA'].astype(str).str.strip().str.upper()
-                        
-                        rutas_operativas = ['ORIENTE', 'CENTRO', 'OCCIDENTE']
-                        df_solo_despacho = df_flota_actual[df_flota_actual['RUTA'].isin(rutas_operativas)]
-                        placas_despacho_validas = set(df_solo_despacho['PLACA'].unique())
-                        
-                        registros_log.append(f"✅ 'FLOTA ACTUAL' procesada. Vehículos autorizados para Despacho: {len(placas_despacho_validas)}.")
-                except: pass
+            df_desp = df_raw.copy()
+            df_desp['Fecha'] = df_desp['FECHA'].replace(r'^\s*$', pd.NA, regex=True)
+            df_desp['Fecha'] = pd.to_datetime(df_desp['Fecha'], dayfirst=True, errors='coerce')
+            df_desp = df_desp.dropna(subset=['Fecha'])
 
-                # --- 3. PROCESAR KILOMETRAJE ---
-                try:
-                    df_flota_raw = pd.read_excel(archivo_flota, sheet_name="BASE DE DATOS")
-                    df_flota_raw.columns = df_flota_raw.columns.astype(str).str.strip().str.upper() 
-                    df_flota_raw = df_flota_raw.loc[:, ~df_flota_raw.columns.str.contains('^UNNAMED')]
-                    
-                    df_flota_raw['FECHAS'] = pd.to_datetime(df_flota_raw['FECHAS'], dayfirst=True, errors='coerce')
-                    df_flota_raw['FECHAS'] = df_flota_raw['FECHAS'].ffill() 
-                    df_flota_raw = df_flota_raw.dropna(subset=['FECHAS'])
-                    
-                    columnas_id = ['FECHAS', 'DIA', 'MES']
-                    columnas_id_existentes = [col for col in columnas_id if col in df_flota_raw.columns]
-                    columnas_placas = [col for col in df_flota_raw.columns if col not in columnas_id_existentes]
-                    
-                    df_flota = df_flota_raw.melt(id_vars=columnas_id_existentes, value_vars=columnas_placas, var_name='PLACA', value_name='KILOMETROS')
-                    df_flota['KILOMETROS'] = pd.to_numeric(df_flota['KILOMETROS'], errors='coerce').fillna(0)
-                    df_flota['Num_Semana'] = df_flota['FECHAS'].dt.isocalendar().week
-                    df_flota['Ano_Calc'] = df_flota['FECHAS'].dt.isocalendar().year
-                    
-                    df_km_sem = df_flota[(df_flota['Num_Semana'] == num_sem) & (df_flota['Ano_Calc'] == ano_sel)].copy()
-                    
-                    if placas_despacho_validas is not None:
-                        km_brutos = df_km_sem['KILOMETROS'].sum()
-                        df_km_sem['PLACA'] = df_km_sem['PLACA'].astype(str).str.strip().str.upper()
-                        df_km_sem = df_km_sem[df_km_sem['PLACA'].isin(placas_despacho_validas)].copy()
-                        registros_log.append(f"🎯 KMs Netos de Despacho calculados: {df_km_sem['KILOMETROS'].sum():,.2f} Kms.")
-                except Exception as e:
-                    st.error(f"Error procesando el archivo de Kilometraje: {e}")
-                    st.stop()
+            df_desp['Region_Macro'] = df_desp['REGION'].astype(str).str.strip().str.upper()
+            df_desp['SubRegion'] = df_desp['DESPACHOS'].astype(str).str.strip().str.upper()
 
-                if df_sem.empty and df_km_sem.empty:
-                    st.warning(f"No hay registros de despachos ni kilometraje para la Semana {int(num_sem)} en el Año {ano_sel}.")
-                else:
+            for col in ['CUBIERTOS', 'BULTOS', 'KILOMETROS']:
+                df_desp[col] = pd.to_numeric(df_desp[col], errors='coerce').fillna(0)
+
+            registros_log.append(f"✅ Hoja MONITOREO_DESPACHOS leída directamente de Google Sheets. Filas totales: {len(df_desp)}")
+
+            df_desp['Num_Semana'] = df_desp['Fecha'].dt.isocalendar().week
+            df_desp['Ano_Calc'] = df_desp['Fecha'].dt.isocalendar().year
+
+            df_sem = df_desp[(df_desp['Num_Semana'] == num_sem) & (df_desp['Ano_Calc'] == ano_sel)].copy()
+            registros_log.append(f"📊 Registros totales de despacho (Semana {int(num_sem)}): {len(df_sem)}")
+
+            if df_sem.empty:
+                st.warning(f"No hay registros de despachos para la Semana {int(num_sem)} en el Año {ano_sel}.")
+                st.markdown("---")
+                st.subheader("📋 Registro de Auditoría (Log de Procesamiento)")
+                for log_msg in registros_log:
+                    if "❌" in log_msg: st.error(log_msg)
+                    elif "⚠️" in log_msg: st.warning(log_msg)
+                    elif "✅" in log_msg: st.success(log_msg)
+                    else: st.info(log_msg)
+                st.stop()
+
+            df_sem['Pedidos'] = df_sem['CUBIERTOS']
+            df_sem['Bultos'] = df_sem['BULTOS']
+            df_sem['SubRegion_Clean'] = df_sem.apply(lambda x: asignar_subregion(x['SubRegion'], x['Region_Macro']), axis=1)
+
+            registros_log.append(f"🎯 Total Pedidos Cubiertos: {f_p(df_sem['Pedidos'].sum())} | Bultos: {f_p(df_sem['Bultos'].sum())} | Kms: {df_sem['KILOMETROS'].sum():,.2f}")
+
+            if True:
+                if True:
                     # --- 4. CONSOLIDACIÓN DE DATOS DIARIOS ---
-                    df_diario_desp = df_sem.groupby(df_sem['Fecha'].dt.date).agg({'Pedidos': 'sum', 'Bultos': 'sum'}).reset_index()
-                    df_diario_desp.rename(columns={'Fecha': 'Date'}, inplace=True)
-                    df_diario_desp['Date'] = pd.to_datetime(df_diario_desp['Date']).dt.date
-                    
-                    df_diario_km = df_km_sem.groupby(df_km_sem['FECHAS'].dt.date).agg({'KILOMETROS': 'sum'}).reset_index()
-                    df_diario_km.rename(columns={'FECHAS': 'Date'}, inplace=True)
-                    df_diario_km['Date'] = pd.to_datetime(df_diario_km['Date']).dt.date
+                    df_diario = df_sem.groupby(df_sem['Fecha'].dt.date).agg({'Pedidos': 'sum', 'Bultos': 'sum', 'KILOMETROS': 'sum'}).reset_index()
+                    df_diario.rename(columns={'Fecha': 'Date'}, inplace=True)
+                    df_diario['Date'] = pd.to_datetime(df_diario['Date']).dt.date
+                    df_diario = df_diario.sort_values('Date')
 
-                    df_diario = pd.merge(df_diario_desp, df_diario_km, on='Date', how='outer').fillna(0).sort_values('Date')
-                    
                     total_pedidos = df_diario['Pedidos'].sum()
                     total_bultos = df_diario['Bultos'].sum()
                     total_kms = df_diario['KILOMETROS'].sum()
