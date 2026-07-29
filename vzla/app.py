@@ -471,8 +471,9 @@ def procesar_excel_base(df, fecha_buscada):
 
     # 3. Exclusiones obligatorias
     df_filtrado = df_filtrado[~df_filtrado[col_chofer].astype(str).str.contains('RETIRO POR OFICINA|RETIRAR|GOTICA', case=False, na=False)]
-    mask_tigre = df_filtrado.astype(str).apply(lambda x: x.str.contains('EL TIGRE', case=False, na=False)).any(axis=1)
-    df_filtrado = df_filtrado[~mask_tigre]
+    # Rutas ignoradas (busca en cualquier columna): EL TIGRE y PARIGUAN
+    mask_ruta = df_filtrado.astype(str).apply(lambda x: x.str.contains(r'EL TIGRE|PARIGU[AÁ]N', case=False, na=False, regex=True)).any(axis=1)
+    df_filtrado = df_filtrado[~mask_ruta]
 
     df_filtrado[col_bultos] = pd.to_numeric(df_filtrado[col_bultos], errors='coerce').fillna(0)
 
@@ -908,6 +909,13 @@ with tab2:
                         }}
                         </script>
                         """, height=55)
+
+                        # --- BOTÓN CON HIPERVÍNCULO A LA HOJA DE GOOGLE (donde se pega el resultado) ---
+                        st.link_button(
+                            "📗 Abrir hoja de cálculo (Google Sheets)",
+                            "https://docs.google.com/spreadsheets/d/1tFqiPWbAMffIUFCNNMDYhBqGFIOXBP7mIBH0LF67Z4A/edit?gid=1514179061#gid=1514179061",
+                            use_container_width=True
+                        )
 
                         html_verde = generar_html_tabla_verde(resumen_verde)
                         altura_verde = 200 + (len(resumen_verde) * 35)
