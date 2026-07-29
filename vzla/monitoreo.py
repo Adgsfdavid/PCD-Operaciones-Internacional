@@ -415,39 +415,58 @@ def procesar_texto_oriente(texto):
 def procesar_excel_region(file, hojas_posibles, region_nombre):
     try:
         xl = pd.ExcelFile(file)
-        hoja_target = xl.sheet_names[0] 
+        hoja_target = xl.sheet_names[0]
+        # Elegir la PRIMERA hoja posible que exista (y detenerse: evita quedarse con hojas
+        # secundarias que contengan la misma palabra, ej. 'ORIENTE SUR (2)' en vez de 'RESUMEN')
+        encontrada = False
         for hp in hojas_posibles:
             for s in xl.sheet_names:
                 if hp.upper() in s.upper():
                     hoja_target = s
+                    encontrada = True
                     break
+            if encontrada:
+                break
+
         df_raw = pd.read_excel(file, sheet_name=hoja_target, header=None)
         mapa_idx = {'ITEM': -1, 'UNIDAD': -1, 'CHOFER': -1, 'AYUDANTE': -1, 'DESPACHOS': -1, 
                     'CUBRIR': -1, 'CUBIERTOS': -1, 'PENDIENTES': -1, 'BULTOS': -1}
+
+        # 1) Localizar la FILA REAL de encabezados: la que contiene 'CHOFER'.
+        #    Así ignoramos filas de título/banner de arriba (ej. 'RUTA ORIENTE') que ensuciaban la detección.
         row_start = -1
         for r in range(min(50, len(df_raw))):
             for c in range(len(df_raw.columns)):
                 val = str(df_raw.iloc[r, c]).upper().strip()
-                if val in ['NAN', 'NONE', 'NAT', '']: continue
-                if ('ITEM' in val or 'Nº' in val or 'N°' in val) and mapa_idx['ITEM'] == -1: mapa_idx['ITEM'] = c
-                elif ('UNIDAD' in val or 'PLACA' in val or 'VEHICUL' in val or 'CAMION' in val or 'TRANSPORTE' in val) and mapa_idx['UNIDAD'] == -1: mapa_idx['UNIDAD'] = c
-                elif ('CHOFER' in val or 'CHÓFER' in val or 'CONDUCTOR' in val) and mapa_idx['CHOFER'] == -1: 
-                    mapa_idx['CHOFER'] = c
-                    if row_start == -1: row_start = r  
-                elif ('AYUDANTE' in val or 'ESCOLTA' in val) and mapa_idx['AYUDANTE'] == -1: mapa_idx['AYUDANTE'] = c
-                elif ('DESPACHO' in val or 'RUTA' in val or 'DESTINO' in val or 'ZONA' in val) and 'HORA' not in val and mapa_idx['DESPACHOS'] == -1: mapa_idx['DESPACHOS'] = c
-                elif ('CUBRIR' in val or 'ASIGNAD' in val or 'PROGRAMAD' in val) and mapa_idx['CUBRIR'] == -1: mapa_idx['CUBRIR'] = c
-                elif ('CUBIERT' in val or 'ENTREGAD' in val or 'VISITAD' in val) and mapa_idx['CUBIERTOS'] == -1: mapa_idx['CUBIERTOS'] = c
-                elif ('PENDIENT' in val or 'RECHAZO' in val or 'NO ENTREGAD' in val) and mapa_idx['PENDIENTES'] == -1: mapa_idx['PENDIENTES'] = c
-                elif ('BULTO' in val or 'CAJA' in val or 'PIEZA' in val) and mapa_idx['BULTOS'] == -1: mapa_idx['BULTOS'] = c
+                if 'CHOFER' in val or 'CHÓFER' in val or 'CONDUCTOR' in val:
+                    row_start = r
+                    break
+            if row_start != -1:
+                break
+        if row_start == -1:
+            return None, f"No se encontró la palabra 'CHOFER' en la hoja {hoja_target}."
 
+        # 2) Mapear las columnas SOLO desde esa fila de encabezados
+        for c in range(len(df_raw.columns)):
+            val = str(df_raw.iloc[row_start, c]).upper().strip()
+            if val in ['NAN', 'NONE', 'NAT', '']: continue
+            if ('ITEM' in val or 'Nº' in val or 'N°' in val) and mapa_idx['ITEM'] == -1: mapa_idx['ITEM'] = c
+            elif ('UNIDAD' in val or 'PLACA' in val or 'VEHICUL' in val or 'CAMION' in val or 'TRANSPORTE' in val) and mapa_idx['UNIDAD'] == -1: mapa_idx['UNIDAD'] = c
+            elif ('CHOFER' in val or 'CHÓFER' in val or 'CONDUCTOR' in val) and mapa_idx['CHOFER'] == -1: mapa_idx['CHOFER'] = c
+            elif ('AYUDANTE' in val or 'ESCOLTA' in val) and mapa_idx['AYUDANTE'] == -1: mapa_idx['AYUDANTE'] = c
+            elif ('DESPACHO' in val or 'RUTA' in val or 'DESTINO' in val or 'ZONA' in val) and 'HORA' not in val and 'FUERA' not in val and mapa_idx['DESPACHOS'] == -1: mapa_idx['DESPACHOS'] = c
+            elif ('CUBRIR' in val or 'ASIGNAD' in val or 'PROGRAMAD' in val) and mapa_idx['CUBRIR'] == -1: mapa_idx['CUBRIR'] = c
+            elif ('CUBIERT' in val or 'ENTREGAD' in val or 'VISITAD' in val) and mapa_idx['CUBIERTOS'] == -1: mapa_idx['CUBIERTOS'] = c
+            elif ('PENDIENT' in val or 'RECHAZO' in val or 'NO ENTREGAD' in val) and mapa_idx['PENDIENTES'] == -1: mapa_idx['PENDIENTES'] = c
+            elif ('BULTO' in val or 'CAJA' in val or 'PIEZA' in val) and mapa_idx['BULTOS'] == -1: mapa_idx['BULTOS'] = c
+
+        # Respaldo: si no encontró 'Cubrir', buscar una columna 'CLIENTES' en la misma fila
         if mapa_idx['CUBRIR'] == -1:
-            for r in range(min(50, len(df_raw))):
-                for c in range(len(df_raw.columns)):
-                    val = str(df_raw.iloc[r, c]).upper().strip()
-                    if 'CLIENTES' in val and 'PENDIENT' not in val and 'CUBIERT' not in val and 'ENTREG' not in val:
-                        mapa_idx['CUBRIR'] = c
-                        break
+            for c in range(len(df_raw.columns)):
+                val = str(df_raw.iloc[row_start, c]).upper().strip()
+                if 'CLIENTES' in val and 'PENDIENT' not in val and 'CUBIERT' not in val and 'ENTREG' not in val:
+                    mapa_idx['CUBRIR'] = c
+                    break
         if mapa_idx['CHOFER'] == -1: return None, f"No se encontró la palabra 'CHOFER' en la hoja {hoja_target}."
             
         df_data = df_raw.iloc[row_start+1:].reset_index(drop=True)
