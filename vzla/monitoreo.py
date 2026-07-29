@@ -1092,8 +1092,7 @@ with tab1:
 
         with col1:
             st.markdown("### 🟠 ORIENTE")
-            st.caption("Copia la tabla desde Excel (desde ITEM hasta BULTOS) y pégala abajo.")
-            txt_oriente = st.text_area("📋 Pegar datos de Oriente:", height=150)
+            f_oriente = st.file_uploader("📂 Subir Excel ORIENTE", type=["xlsx", "xls", "xlsm"], key="ori")
         with col2:
             st.markdown("### 🟢 OCCIDENTE")
             f_occidente = st.file_uploader("📂 Subir Excel OCCIDENTE", type=["xlsx", "xls", "xlsm"], key="occ")
@@ -1112,8 +1111,8 @@ with tab1:
                     if msj_km != "OK": st.warning(msj_km)
                     else: st.success("✅ Kilometraje cargado exitosamente en memoria.")
                 
-                if txt_oriente:
-                    df_oriente, msj_or = procesar_texto_oriente(txt_oriente)
+                if f_oriente:
+                    df_oriente, msj_or = procesar_excel_region(f_oriente, ["RESUMEN", "ORIENTE"], "Oriente")
                     if df_oriente is not None:
                         df_oriente = aplicar_kilometraje(df_oriente, dict_km, "Oriente")
                         df_oriente['Region'] = "ORIENTE"
