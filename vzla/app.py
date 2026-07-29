@@ -402,17 +402,19 @@ def obtener_listines_unicos(serie):
                 conjunto_listines.add(p_limpio)
     return sorted(list(conjunto_listines))
 
-def procesar_excel_base(df, fecha_buscada):
-    # 1. LIMPIEZA BRUTAL Y AUTODETECCIÓN DE CABECERAS
+def _normalizar_df_fechas(df):
+    """Limpia cabeceras y normaliza la columna 'FECHA DE LISTIN' a texto dd/mm/yyyy.
+    Devuelve (df, estado). Sirve tanto para extraer las fechas disponibles como para filtrar."""
     def limpiar_cols(columnas):
         cols = [str(c).upper().replace('\n', ' ').replace('\r', ' ').replace('\xa0', ' ').strip() for c in columnas]
         cols = [" ".join(c.split()) for c in cols]
         cols = [c.replace('Á','A').replace('É','E').replace('Í','I').replace('Ó','O').replace('Ú','U') for c in cols]
         return cols
 
+    df = df.copy()
     df.columns = limpiar_cols(df.columns)
-    
-    # El Sabueso
+
+    # El Sabueso: buscar la fila de cabecera real si viene con basura arriba
     if 'FECHA DE LISTIN' not in df.columns and 'CHOFER' not in df.columns:
         for i, row in df.iterrows():
             fila_str = " ".join(row.astype(str).str.upper())
@@ -425,9 +427,34 @@ def procesar_excel_base(df, fecha_buscada):
         cols_detectadas = ", ".join(df.columns.tolist()[:10])
         return None, f"Error: No encontré la columna 'FECHA DE LISTIN'. Columnas detectadas: {cols_detectadas}..."
 
-    # 2. Filtrar por fecha exacta
+    # Normalizar a dd/mm/yyyy (dayfirst=True para fechas escritas como texto tipo 02/7/2026)
     df['FECHA DE LISTIN'] = pd.to_datetime(df['FECHA DE LISTIN'], errors='coerce', dayfirst=True).dt.strftime('%d/%m/%Y')
-    fecha_str = fecha_buscada.strftime('%d/%m/%Y')
+    return df, "OK"
+
+def extraer_fechas_disponibles(df):
+    """Devuelve la lista de fechas reales (dd/mm/yyyy) presentes en el Excel, de la más reciente a la más antigua."""
+    df_norm, estado = _normalizar_df_fechas(df)
+    if df_norm is None:
+        return []
+    fechas = [f for f in df_norm['FECHA DE LISTIN'].dropna().unique().tolist() if f and str(f) != 'NaT']
+    def _key(s):
+        try:
+            return datetime.strptime(s, '%d/%m/%Y')
+        except Exception:
+            return datetime.min
+    return sorted(fechas, key=_key, reverse=True)
+
+def procesar_excel_base(df, fecha_buscada):
+    # 1. Limpieza de cabeceras + normalización de fechas (helper compartido)
+    df, estado = _normalizar_df_fechas(df)
+    if df is None:
+        return None, estado
+
+    # 2. Filtrar por fecha exacta. Acepta objeto date/datetime o texto 'dd/mm/yyyy'
+    if hasattr(fecha_buscada, 'strftime'):
+        fecha_str = fecha_buscada.strftime('%d/%m/%Y')
+    else:
+        fecha_str = str(fecha_buscada).strip()
     df_filtrado = df[df['FECHA DE LISTIN'] == fecha_str].copy()
 
     if df_filtrado.empty:
@@ -777,11 +804,14 @@ with tab2:
     st.info("Sube el archivo general del mes, selecciona la fecha, y genera la tabla verde referencial para los supervisores.")
     
     col_excel1, col_excel2 = st.columns(2)
-    with col_excel1:
-        fecha_filtro = st.date_input("📅 ¿Qué fecha de listín deseas auditar?")
     with col_excel2:
         archivo_subido = st.file_uploader("📂 Sube el Excel de Despachos", type=["xlsx", "xls"])
-        
+
+    if archivo_subido is None:
+        with col_excel1:
+            st.date_input("📅 ¿Qué fecha de listín deseas auditar?", format="DD/MM/YYYY", disabled=True)
+            st.caption("⬅️ Sube el Excel primero para elegir entre las fechas reales del archivo.")
+
     if archivo_subido is not None:
         with st.spinner("Procesando archivo blindado..."):
             try:
@@ -796,9 +826,25 @@ with tab2:
                             raise e_xls
                 else:
                     df_base = pd.read_excel(archivo_subido)
-                
+
+                # Leer las fechas REALES que trae el Excel para que el usuario elija (evita el lío día/mes)
+                fechas_disponibles = extraer_fechas_disponibles(df_base)
+                with col_excel1:
+                    if fechas_disponibles:
+                        hoy_str = datetime.now().strftime('%d/%m/%Y')
+                        idx_def = fechas_disponibles.index(hoy_str) if hoy_str in fechas_disponibles else 0
+                        fecha_filtro = st.selectbox(
+                            "📅 ¿Qué fecha de listín deseas auditar?",
+                            fechas_disponibles,
+                            index=idx_def,
+                            help="Estas son las fechas reales encontradas en el Excel. Elige una y no tienes que adivinar el orden día/mes."
+                        )
+                    else:
+                        fecha_filtro = st.date_input("📅 ¿Qué fecha de listín deseas auditar?", format="DD/MM/YYYY")
+                        st.caption("⚠️ No pude leer las fechas del archivo; usa el calendario (formato Día/Mes/Año).")
+
                 resumen_verde, estado_excel = procesar_excel_base(df_base, fecha_filtro)
-                
+
                 if resumen_verde is not None:
                     st.success("¡Datos filtrados y agrupados con éxito!")
                     
@@ -823,7 +869,46 @@ with tab2:
                             <button onclick="dbv()" style="background:#28a745;color:#fff;border:none;padding:10px 20px;border-radius:5px;cursor:pointer;font-weight:bold;">⬇️ Descargar Tabla Verde</button>
                         </div>
                         """, height=50)
-                        
+
+                        # --- BOTÓN COPIAR TEXTO (solo datos: sin títulos ni totales) ---
+                        _lineas_copia = []
+                        for _, _row in resumen_verde.iterrows():
+                            _lineas_copia.append(
+                                f"{_row['CHOFER']}\t{_row['Cant_Listines']}\t{_row['Num_Listines']}\t{_row['Farmacias']}\t{_row['Bultos']}"
+                            )
+                        _texto_copia = "\n".join(_lineas_copia)
+                        _texto_js = json.dumps(_texto_copia)
+                        components.html(f"""
+                        <div style="text-align:right; margin-bottom:10px; font-family: Arial, sans-serif;">
+                            <button onclick="copiarTablaVerde()" style="background:#1d6f42;color:#fff;border:none;padding:10px 20px;border-radius:5px;cursor:pointer;font-weight:bold;">📋 Copiar texto (para Excel)</button>
+                            <span id="copia-ok" style="display:none; color:#1d6f42; font-weight:bold; margin-left:8px;">✓ Copiado</span>
+                        </div>
+                        <script>
+                        function copiarTablaVerde() {{
+                            var txt = {_texto_js};
+                            function ok() {{
+                                var s = document.getElementById('copia-ok');
+                                s.style.display = 'inline';
+                                setTimeout(function(){{ s.style.display='none'; }}, 1800);
+                            }}
+                            if (navigator.clipboard && navigator.clipboard.writeText) {{
+                                navigator.clipboard.writeText(txt).then(ok, function(){{ fallback(txt, ok); }});
+                            }} else {{
+                                fallback(txt, ok);
+                            }}
+                        }}
+                        function fallback(txt, cb) {{
+                            var ta = document.createElement('textarea');
+                            ta.value = txt;
+                            ta.style.position = 'fixed'; ta.style.left = '-9999px';
+                            document.body.appendChild(ta);
+                            ta.focus(); ta.select();
+                            try {{ document.execCommand('copy'); }} catch(e) {{}}
+                            document.body.removeChild(ta); cb();
+                        }}
+                        </script>
+                        """, height=55)
+
                         html_verde = generar_html_tabla_verde(resumen_verde)
                         altura_verde = 200 + (len(resumen_verde) * 35)
                         components.html(html_verde, height=altura_verde, scrolling=True)
