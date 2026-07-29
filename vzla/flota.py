@@ -247,32 +247,54 @@ def procesar_texto_planificadas(texto):
     datos = []
     fecha_def = datetime.now().strftime("%d/%m/%Y")
     
-    for linea in lineas:
-        linea = linea.strip()
+    for linea_raw in lineas:
+        linea = linea_raw.strip()
         if not linea or "UNIDAD" in linea.upper() or "ACTIVIDAD" in linea.upper(): continue
         
-        linea = re.sub(r'\s+', ' ', linea)
+        # Detectar el separador REAL: TAB (pegado desde Excel) o pipe '|'. NO colapsar tabs.
+        cols = None
+        if '\t' in linea_raw:
+            cols = [c.strip() for c in linea_raw.split('\t')]
+        elif '|' in linea:
+            cols = [c.strip() for c in linea.split('|')]
         
-        if '|' in linea:
-            partes = [p.strip() for p in linea.split('|') if p.strip()]
-            f_match = re.search(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', partes[0])
+        if cols is not None:
+            # Quitar columnas totalmente vacías en los extremos
+            while cols and cols[0] == '': cols.pop(0)
+            while cols and cols[-1] == '': cols.pop()
+            if len(cols) < 2: continue
+            
+            # Fecha: si la primera columna tiene fecha, se usa; si no, la del día
+            f_match = re.search(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', cols[0])
             if f_match:
                 f_val = f_match.group(0)
-                partes[0] = partes[0].replace(f_val, '').strip()
+                fila = cols[1:]
             else:
                 f_val = fecha_def
-            if not partes[0] and len(partes) > 1: partes.pop(0)
-            unidad = normalizar_unidad(partes[0]) if len(partes)>0 else ""
-            act = " - ".join(partes[1:-1]) if len(partes)>2 else (partes[1] if len(partes)>1 else "")
-            mec = partes[-1] if len(partes)>1 else "Sin asignar"
+                fila = cols
+            
+            # fila = [UNIDAD, ACTIVIDAD..., MECÁNICO]
+            if len(fila) >= 3:
+                unidad = fila[0]
+                mec = fila[-1]
+                act = " - ".join([x for x in fila[1:-1] if x])
+            elif len(fila) == 2:
+                unidad, act, mec = fila[0], fila[1], "Sin asignar"
+            else:
+                unidad, act, mec = fila[0], "", "Sin asignar"
+            
+            unidad = normalizar_unidad(unidad) or unidad
+            mec = mec.title() if mec and mec != "Sin asignar" else "Sin asignar"
             datos.append({"Fecha": f_val, "Unidad": unidad, "Actividad": act, "Mecánico": mec})
         else:
+            # Respaldo: texto sin tabs ni '|' (heurística por espacios)
             f_val = fecha_def
             m_fecha = re.search(r'^(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\s+', linea)
             if m_fecha:
                 f_val = m_fecha.group(1)
                 linea = linea[m_fecha.end():].strip()
             
+            linea = re.sub(r'\s+', ' ', linea)
             partes = linea.split()
             if len(partes) < 2: continue
             
@@ -282,7 +304,6 @@ def procesar_texto_planificadas(texto):
                 unidad = posible_unidad
             
             linea_resto = linea.replace(partes[0], "", 1).replace(partes[1], "", 1).strip()
-            
             p_resto = linea_resto.split()
             if len(p_resto) >= 3:
                 mec = f"{p_resto[-2]} {p_resto[-1]}"
@@ -296,37 +317,71 @@ def procesar_texto_planificadas(texto):
     if not datos: return pd.DataFrame([{"Fecha": fecha_def, "Unidad": "", "Actividad": "", "Mecánico": ""}])
     return pd.DataFrame(datos)
 
+def normalizar_condicion(cond):
+    """Reduce cualquier texto de condición a solo 3 valores:
+    OPERATIVO, PENDIENTE o EN PROCESO. Todo lo demás (REALIZADO, NO OPERATIVO,
+    vacío o cualquier otra escritura) se convierte en EN PROCESO."""
+    c = str(cond).upper().strip()
+    if 'PENDIENTE' in c:
+        return "PENDIENTE"
+    if 'OPERATIVO' in c and 'NO OPERATIVO' not in c and 'NO-OPERATIVO' not in c and 'INOPERATIVO' not in c:
+        return "OPERATIVO"
+    return "EN PROCESO"
+
+def _orden_condicion(cond):
+    # Operativo primero; el resto abajo
+    return {"OPERATIVO": 0, "EN PROCESO": 1, "PENDIENTE": 2}.get(str(cond).upper().strip(), 3)
+
 def procesar_texto_realizadas(texto):
     lineas = texto.split('\n')
     datos = []
     fecha_def = datetime.now().strftime("%d/%m/%Y")
     
-    for linea in lineas:
-        linea = linea.strip()
-        if not linea or "UNIDAD" in linea.upper() or "CONDICIÓN" in linea.upper(): continue
+    for linea_raw in lineas:
+        linea = linea_raw.strip()
+        if not linea or "UNIDAD" in linea.upper() or "CONDICIÓN" in linea.upper() or "CONDICION" in linea.upper(): continue
         
-        linea = re.sub(r'\s+', ' ', linea)
+        # Detectar separador REAL: TAB (pegado desde Excel) o pipe '|'. NO colapsar tabs.
+        cols = None
+        if '\t' in linea_raw:
+            cols = [c.strip() for c in linea_raw.split('\t')]
+        elif '|' in linea:
+            cols = [c.strip() for c in linea.split('|')]
         
-        if '|' in linea:
-            partes = [p.strip() for p in linea.split('|') if p.strip()]
-            f_match = re.search(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', partes[0])
+        if cols is not None:
+            while cols and cols[0] == '': cols.pop(0)
+            while cols and cols[-1] == '': cols.pop()
+            if len(cols) < 2: continue
+            
+            f_match = re.search(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', cols[0])
             if f_match:
                 f_val = f_match.group(0)
-                partes[0] = partes[0].replace(f_val, '').strip()
+                fila = cols[1:]
             else:
                 f_val = fecha_def
-            if not partes[0] and len(partes) > 1: partes.pop(0)
-            unidad = normalizar_unidad(partes[0]) if len(partes)>0 else ""
-            act = " - ".join(partes[1:-1]) if len(partes)>2 else (partes[1] if len(partes)>1 else "")
-            cond = partes[-1] if len(partes)>1 else "OPERATIVO"
-            datos.append({"Fecha": f_val, "Unidad": unidad, "Resumen Actividad": act, "Condición": cond.upper()})
+                fila = cols
+            
+            # fila = [UNIDAD, RESUMEN..., CONDICIÓN]
+            if len(fila) >= 3:
+                unidad = fila[0]
+                cond = fila[-1]
+                act = " - ".join([x for x in fila[1:-1] if x])
+            elif len(fila) == 2:
+                unidad, act, cond = fila[0], fila[1], "OPERATIVO"
+            else:
+                unidad, act, cond = fila[0], "", "OPERATIVO"
+            
+            unidad = normalizar_unidad(unidad) or unidad
+            datos.append({"Fecha": f_val, "Unidad": unidad, "Resumen Actividad": act, "Condición": normalizar_condicion(cond)})
         else:
+            # Respaldo: texto sin tabs ni '|' (heurística por espacios)
             f_val = fecha_def
             m_fecha = re.search(r'^(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\s+', linea)
             if m_fecha:
                 f_val = m_fecha.group(1)
                 linea = linea[m_fecha.end():].strip()
             
+            linea = re.sub(r'\s+', ' ', linea)
             partes = linea.split()
             if len(partes) < 2: continue
             
@@ -336,7 +391,6 @@ def procesar_texto_realizadas(texto):
                 unidad = posible_unidad
             
             linea_resto = linea.replace(partes[0], "", 1).replace(partes[1], "", 1).strip()
-            
             linea_up = linea_resto.upper()
             cond = ""
             for kw in ["OPERATIVO", "REALIZADO", "EN PROCESO", "PENDIENTE"]:
@@ -344,15 +398,17 @@ def procesar_texto_realizadas(texto):
                     cond = kw
                     linea_resto = linea_resto[:len(linea_resto)-len(kw)].strip()
                     break
-            
-            if not cond: cond = "OPERATIVO"
             if linea_resto.endswith("-") or linea_resto.endswith("|"):
                 linea_resto = linea_resto[:-1].strip()
                 
-            datos.append({"Fecha": f_val, "Unidad": unidad, "Resumen Actividad": linea_resto, "Condición": cond})
+            datos.append({"Fecha": f_val, "Unidad": unidad, "Resumen Actividad": linea_resto, "Condición": normalizar_condicion(cond)})
             
     if not datos: return pd.DataFrame([{"Fecha": fecha_def, "Unidad": "", "Resumen Actividad": "", "Condición": ""}])
-    return pd.DataFrame(datos)
+    df = pd.DataFrame(datos)
+    # Ordenar: OPERATIVO primero, lo demás abajo
+    df['_ord'] = df['Condición'].apply(_orden_condicion)
+    df = df.sort_values(by='_ord', kind='stable').drop(columns=['_ord']).reset_index(drop=True)
+    return df
 
 # ==========================================
 # LÓGICA DE EXCEL DE GASTOS
@@ -816,12 +872,10 @@ def html_pizarra_estatus_dinamico(tipo_reporte, fecha, activas_resumen, inactiva
 # ==========================================
 st.title("🚛 PCD - Ecosistema de Flota y Logística")
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "📝 Planificadas", 
     "🔧 Realizadas", 
     "📊 Histórico", 
-    "💰 Carga Gastos", 
-    "📄 Inf. Gastos",
     "⛽ Combustible",
     "📈 Rep. Combustible",
     "🚚🛰️ Estatus y GPS",
@@ -956,587 +1010,9 @@ with tab3:
         col3_k.metric("Efectividad de taller", f"{efectividad}%")
 
 # ---------------------------------------------------------
-# TAB 4: 💰 CONTROL DE GASTOS (EXCEL)
+# TAB 4: ⛽ CONTROL DE COMBUSTIBLE (3 TANQUES)
 # ---------------------------------------------------------
 with tab4:
-    st.header("📥 Carga y procesamiento de gastos")
-    
-    col_opt1, col_opt2 = st.columns(2)
-    modo_carga = col_opt1.radio("⚙️ Modo de procesamiento:", ["📆 Carga Diaria", "🗓️ Carga Mensual (Masiva)"], horizontal=True)
-    filtro_categoria_t4 = col_opt2.radio("🔍 Categoría a mostrar / guardar:", ["🌐 Todo Incluido", "🚛 Solo Flota (Vehículos)", "🏢 Solo Stock / Taller / Otros"], horizontal=True)
-    
-    st.info("Sube el Excel de gastos. La tabla y gráficos de abajo se ajustarán a la categoría que elijas.")
-    
-    col_g1, col_g2 = st.columns([1, 2])
-    
-    with col_g1:
-        archivo_excel = st.file_uploader("📂 Subir Excel de Gastos", type=["xlsx", "xls"])
-        
-        if archivo_excel:
-            try:
-                xl = pd.ExcelFile(archivo_excel)
-                hoja_objetivo = xl.sheet_names[0] 
-                for sheet in xl.sheet_names:
-                    if "CONTROL" in sheet.upper() or "ORDEN" in sheet.upper() or "SERVICIO" in sheet.upper():
-                        hoja_objetivo = sheet
-                        break
-                        
-                df_excel_bruto = pd.read_excel(archivo_excel, sheet_name=hoja_objetivo) 
-                df_procesado_total = procesar_excel_gastos(df_excel_bruto)
-                
-                if modo_carga == "📆 Carga Diaria":
-                    fecha_gasto = st.date_input("📅 Selecciona la fecha a evaluar", datetime.now())
-                    fecha_str_gasto = fecha_gasto.strftime("%d/%m/%Y")
-                    df_pre_filtrado = df_procesado_total[df_procesado_total['Fecha_Registro'] == fecha_str_gasto]
-                else:
-                    df_procesado_total['Mes_Str'] = df_procesado_total['Fecha_Registro'].str[3:] 
-                    meses_disp_excel = sorted(df_procesado_total['Mes_Str'].unique())
-                    if not meses_disp_excel:
-                        df_pre_filtrado = pd.DataFrame()
-                    else:
-                        mes_seleccionado = st.selectbox("📅 Selecciona el Mes a cargar", meses_disp_excel)
-                        df_pre_filtrado = df_procesado_total[df_procesado_total['Mes_Str'] == mes_seleccionado].drop(columns=['Mes_Str'])
-                
-                excluidos = ["USO MECANICO", "STOCK", "NO DEFINIDO", "CIUDAD DROTACA"]
-                if not df_pre_filtrado.empty:
-                    mask_flota = df_pre_filtrado['UNIDAD'].str.upper().apply(lambda x: not any(exc in x for exc in excluidos))
-                    if filtro_categoria_t4 == "🚛 Solo Flota (Vehículos)":
-                        df_filtrado = df_pre_filtrado[mask_flota]
-                    elif filtro_categoria_t4 == "🏢 Solo Stock / Taller / Otros":
-                        df_filtrado = df_pre_filtrado[~mask_flota]
-                    else:
-                        df_filtrado = df_pre_filtrado
-                else:
-                    df_filtrado = df_pre_filtrado
-
-                st.session_state['df_gastos_actual'] = df_filtrado
-                
-                if df_filtrado.empty:
-                    st.warning("⚠️ No hay datos para la fecha/mes o categoría seleccionada.")
-                else:
-                    st.success(f"✅ Se cargaron {len(df_filtrado)} ítems listos para la revisión.")
-                    
-            except Exception as e:
-                st.error(f"Error al leer el Excel. Detalle: {e}")
-                
-    if 'df_gastos_actual' in st.session_state and not st.session_state['df_gastos_actual'].empty:
-        df_g = st.session_state['df_gastos_actual']
-        
-        with col_g2:
-            st.subheader(f"✏️ Revisión de Gastos ({filtro_categoria_t4.split(' ')[1]})")
-            df_g_edit = st.data_editor(df_g, num_rows="dynamic", use_container_width=True)
-            
-            if st.button("💾 Guardar Gastos en Base de Datos (Sheets)", type="primary"):
-                with st.spinner("Guardando registro financiero..."):
-                    df_g_save = df_g_edit.copy()
-                    dias_semana, meses_ano = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"], ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
-                    dias, semanas, meses = [], [], []
-                    
-                    for f_str in df_g_save['Fecha_Registro']:
-                        try:
-                            obj_fecha = datetime.strptime(f_str, "%d/%m/%Y")
-                            fecha_shift = obj_fecha + timedelta(days=2)
-                            dias.append(dias_semana[obj_fecha.weekday()])
-                            semanas.append(f"Semana {fecha_shift.isocalendar()[1]}")
-                            meses.append(meses_ano[obj_fecha.month - 1])
-                        except:
-                            dias.append(""); semanas.append(""); meses.append("")
-                            
-                    df_g_save['Dia'] = dias
-                    df_g_save['Semana'] = semanas
-                    df_g_save['Mes'] = meses
-                    
-                    guardar_en_google_sheets(df_g_save, "FLOTA_GASTOS")
-                    st.success(f"✅ ¡Guardado exitoso ({len(df_g_save)} ítems) en la pestaña FLOTA_GASTOS!")
-        
-        if modo_carga == "📆 Carga Diaria":
-            st.markdown("---")
-            col_w, col_p = st.columns([1, 2])
-            with col_w:
-                st.subheader("📱 WhatsApp (Resumen Diario)")
-                st.code(generar_ws_gastos(df_g_edit, fecha_str_gasto, filtro_categoria_t4.split(' ', 1)[1]), language="markdown")
-            with col_p:
-                st.subheader("📸 Pizarra Gráfica de Gastos")
-                components.html(html_pizarra_gastos(df_g_edit, fecha_str_gasto, filtro_categoria_t4.split(' ', 1)[1]), height=600, scrolling=True)
-        else:
-            st.markdown("---")
-            st.info("💡 **Información:** La Pizarra Gráfica y el reporte de WhatsApp se ocultan durante la carga mensual masiva. Dirígete a la pestaña **'Informe de Gastos (PDF)'** para visualizar la auditoría completa.")
-
-# ---------------------------------------------------------
-# TAB 5: 📄 INFORME DE GASTOS GERENCIAL PDF
-# ---------------------------------------------------------
-with tab5:
-    st.header("📑 Generador de Informe de Gastos (PDF)")
-    
-    if st.button("🔄 Descargar Base de Datos de Gastos", key="btn_desc_gastos"):
-        with st.spinner("Conectando con la bóveda financiera..."):
-            st.session_state['db_gastos'] = extraer_datos_sheets("FLOTA_GASTOS")
-            st.success("¡Data Financiera Descargada!")
-            
-    if 'db_gastos' in st.session_state and not st.session_state['db_gastos'].empty:
-        db_g = st.session_state['db_gastos']
-        
-        def limpiar_monto_sheets(val):
-            if pd.isna(val) or val == '': return 0.0
-            if isinstance(val, (int, float)): return float(val)
-            val_str = str(val).replace('$', '').replace('Bs.S', '').replace('Bs.', '').replace(' ', '').strip()
-            if ',' in val_str and '.' in val_str:
-                if val_str.rfind(',') > val_str.rfind('.'):
-                    val_str = val_str.replace('.', '').replace(',', '.')
-                else:
-                    val_str = val_str.replace(',', '')
-            elif ',' in val_str:
-                val_str = val_str.replace(',', '.')
-            try: return float(val_str)
-            except: return 0.0
-            
-        db_g['TOTAL $'] = db_g['TOTAL $'].apply(limpiar_monto_sheets)
-        db_g['Fecha_DT'] = pd.to_datetime(db_g['Fecha_Registro'], format='%d/%m/%Y', errors='coerce')
-        
-        col_f1, col_f2 = st.columns([1, 1])
-        rango_fechas = col_f1.date_input("📅 Rango de Fechas a Evaluar (Desde - Hasta):", [])
-        filtro_categoria_t5 = col_f2.selectbox("🔍 Categoría a evaluar:", ["🚛 Solo Flota (Vehículos)", "🏢 Solo Stock / Taller / Otros", "🌐 Todo Incluido"], index=0, key="cat_gasto_pdf")
-        
-        nivel_detalle = st.radio("🔍 Formato del Reporte Detallado:", 
-            ["📊 Resumen Ejecutivo (Agrupado por Unidad - Recomendado)", 
-             "📝 Detalle Cronológico Completo (Todos los gastos sin cortes)"], horizontal=True)
-        
-        if len(rango_fechas) == 2:
-            f_inicio, f_fin = rango_fechas
-            db_g_filt_pre = db_g[(db_g['Fecha_DT'].dt.date >= f_inicio) & (db_g['Fecha_DT'].dt.date <= f_fin)]
-            
-            excluidos = ["USO MECANICO", "STOCK", "NO DEFINIDO", "CIUDAD DROTACA"]
-            mask_flota_t5 = db_g_filt_pre['UNIDAD'].str.upper().apply(lambda x: not any(exc in x for exc in excluidos))
-            
-            if filtro_categoria_t5 == "🚛 Solo Flota (Vehículos)":
-                db_g_filt = db_g_filt_pre[mask_flota_t5]
-                titulo_evaluacion = "Flota Drotaca"
-            elif filtro_categoria_t5 == "🏢 Solo Stock / Taller / Otros":
-                db_g_filt = db_g_filt_pre[~mask_flota_t5]
-                titulo_evaluacion = "Stock y Otros"
-            else:
-                db_g_filt = db_g_filt_pre
-                titulo_evaluacion = "Todo Incluido"
-            
-            if db_g_filt.empty:
-                st.warning(f"⚠️ No hay registros guardados en este rango de fechas para esta categoría.")
-            else:
-                st.markdown("---")
-                g_total = db_g_filt['TOTAL $'].sum()
-                g_items = len(db_g_filt)
-                rango_str = f"{f_inicio.strftime('%d/%m/%Y')} al {f_fin.strftime('%d/%m/%Y')}"
-                
-                # --- PÁGINA 1: RESUMEN GENERAL ---
-                resumen_html = ""
-                df_tipo = db_g_filt.groupby('TIPO').agg({'TOTAL $':'sum', 'UNIDAD':'count'}).reset_index()
-                df_tipo.rename(columns={'UNIDAD':'COMPRAS'}, inplace=True)
-                df_tipo = df_tipo.sort_values(by='TOTAL $', ascending=False)
-                
-                for _, r in df_tipo.iterrows():
-                    pct = (r['TOTAL $'] / g_total * 100) if g_total > 0 else 0
-                    resumen_html += f"""
-                    <div style='margin-bottom: 8px; font-size: 15px; border-bottom: 1px dashed #ccc; padding-bottom: 8px;'>
-                        <b style='color: #1a237e;'>{str(r['TIPO']).title()}:</b> ${r['TOTAL $']:,.2f} 
-                        <span style='color: #d32f2f; font-weight: bold;'>({pct:.1f}%)</span> 
-                        <span style='color: #555; float: right;'>{r['COMPRAS']} gastos registrados</span>
-                    </div>
-                    """
-                    
-                top_unidades_html = ""
-                df_top = db_g_filt.groupby('UNIDAD')['TOTAL $'].sum().reset_index().sort_values(by='TOTAL $', ascending=False).head(10)
-                for idx, r in df_top.iterrows():
-                    top_unidades_html += f"""
-                    <tr style='background-color: {"#f8f9fa" if idx % 2 == 0 else "#ffffff"};'>
-                        <td style='padding: 10px; border-bottom: 1px solid #ddd; font-weight: bold; color: #1a237e;'>{r['UNIDAD']}</td>
-                        <td style='padding: 10px; border-bottom: 1px solid #ddd; text-align: right; color: #d32f2f; font-weight: bold;'>${r['TOTAL $']:,.2f}</td>
-                    </tr>
-                    """
-
-                logo = obtener_logo_base64()
-                if logo:
-                    area_logo = f'<div style="background-color: #1a237e; padding: 12px 20px; border-radius: 8px; display: flex; align-items: center; justify-content: center;"><img src="{logo}" style="max-height: 55px; max-width: 180px; object-fit: contain;"></div>'
-                else:
-                    area_logo = f'<div style="background-color: #1a237e; padding: 12px 20px; border-radius: 8px; display: flex; align-items: center; justify-content: center;"><span style="font-size:24px; color: white; font-weight: bold;">📄 Reporte</span></div>'
-                
-                page1_html = f"""
-                <div class="pdf-page" style="width: 800px; height: 1120px; margin: 0 auto 30px auto; background: white; padding: 40px; box-sizing: border-box; box-shadow: 0 0 10px rgba(0,0,0,0.1); font-family: Arial, sans-serif; position: relative;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #1a237e; padding-bottom: 15px; margin-bottom: 25px;">
-                        <div>{area_logo}</div>
-                        <div style="text-align: right;">
-                            <h1 style="margin: 0; color: #1a237e; font-size: 24px; text-transform: uppercase;">Informe de gastos de flota</h1>
-                            <p style="margin: 5px 0 0; color: #555; font-size: 14px;">Periodo: {rango_str} | Cat: {titulo_evaluacion}</p>
-                        </div>
-                    </div>
-                    
-                    <div style="background-color: #f1f3f4; border-left: 5px solid #1a237e; padding: 20px; margin-bottom: 30px; display: flex; justify-content: space-around;">
-                        <div style="text-align: center;">
-                            <p style="margin: 0; font-size: 14px; color: #555; font-weight: bold;">Gasto total evaluado</p>
-                            <h2 style="margin: 5px 0 0; color: #d32f2f; font-size: 32px;">${g_total:,.2f}</h2>
-                        </div>
-                        <div style="text-align: center;">
-                            <p style="margin: 0; font-size: 14px; color: #555; font-weight: bold;">Total gastos procesados</p>
-                            <h2 style="margin: 5px 0 0; color: #1a237e; font-size: 32px;">{g_items}</h2>
-                        </div>
-                    </div>
-                    
-                    <h3 style="color: #1a237e; border-bottom: 2px solid #1a237e; padding-bottom: 5px; margin-top: 0;">1. Distribución del gasto (Resumen)</h3>
-                    <div style="margin-bottom: 40px; padding: 10px;">
-                        {resumen_html}
-                    </div>
-                    
-                    <h3 style="color: #1a237e; border-bottom: 2px solid #1a237e; padding-bottom: 5px;">2. Top 10 de gasto por unidad / departamento</h3>
-                    <table style="width: 100%; border-collapse: collapse; font-size: 15px; margin-bottom: 30px;">
-                        <thead>
-                            <tr style="background-color: #1a237e; color: white;">
-                                <th style="padding: 12px; text-align: left;">Placa / Unidad / Departamento</th>
-                                <th style="padding: 12px; text-align: right;">Gasto Total ($)</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {top_unidades_html}
-                        </tbody>
-                    </table>
-                </div>
-                """
-
-                # --- SECCIÓN MEDIA ---
-                df_semanas_chart = db_g_filt.groupby('Semana').agg({
-                    'TOTAL $': 'sum',
-                    'Fecha_DT': ['min', 'max']
-                }).reset_index()
-                df_semanas_chart.columns = ['Semana', 'TOTAL $', 'Fecha_Min', 'Fecha_Max']
-                df_semanas_chart = df_semanas_chart.sort_values('Fecha_Min')
-                
-                semanas_ordenadas = df_semanas_chart['Semana'].tolist()
-                
-                pages_medio_html = ""
-                contador_paginas_medio = 0
-                
-                if "Resumen Ejecutivo" in nivel_detalle:
-                    MAX_FILAS = 15 
-                    for sem in semanas_ordenadas:
-                        if contador_paginas_medio >= 9: break 
-                        
-                        df_sem = db_g_filt[db_g_filt['Semana'] == sem]
-                        if df_sem.empty: continue
-                        total_sem = df_sem['TOTAL $'].sum()
-                        
-                        min_date = df_sem['Fecha_DT'].min().strftime('%d/%m/%Y')
-                        max_date = df_sem['Fecha_DT'].max().strftime('%d/%m/%Y')
-                        etiqueta_semana = f"{sem.replace('Semana ', 'Semana ')} ({min_date} al {max_date})"
-                        
-                        df_procesar = df_sem.groupby(['UNIDAD', 'TIPO']).agg({'TOTAL $': 'sum', 'ITEM': 'count'}).reset_index().sort_values(by='TOTAL $', ascending=False)
-                        chunks = [df_procesar[i:i+MAX_FILAS] for i in range(0, df_procesar.shape[0], MAX_FILAS)]
-                        
-                        for idx, chunk in enumerate(chunks):
-                            if contador_paginas_medio >= 9: break
-                            filas_trans = ""
-                            for _, r in chunk.iterrows():
-                                filas_trans += f"""
-                                <tr style="border-bottom: 1px solid #eee; background-color: #ffffff;">
-                                    <td style="padding: 10px 8px; font-size: 12px; font-weight: bold; color: #1a237e;">{r['UNIDAD']}</td>
-                                    <td style="padding: 10px 8px; font-size: 11px; color: #555;">{str(r['TIPO']).title()}</td>
-                                    <td style="padding: 10px 8px; font-size: 11px; color: #333; text-align: center;">{r['ITEM']} gastos procesados</td>
-                                    <td style="padding: 10px 8px; font-size: 12px; font-weight: bold; color: #d32f2f; text-align: right;">${r['TOTAL $']:,.2f}</td>
-                                </tr>
-                                """
-                            
-                            indicador_pag = f" (Parte {idx+1}/{len(chunks)})" if len(chunks) > 1 else ""
-                            
-                            pages_medio_html += f"""
-                            <div class="pdf-page" style="width: 800px; height: 1120px; margin: 0 auto 30px auto; background: white; padding: 40px; box-sizing: border-box; box-shadow: 0 0 10px rgba(0,0,0,0.1); font-family: Arial, sans-serif; position: relative;">
-                                <div style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 3px solid #1a237e; padding-bottom: 10px; margin-bottom: 20px;">
-                                    <div>
-                                        <h2 style="margin: 0; color: #1a237e;">Resumen: {etiqueta_semana}{indicador_pag}</h2>
-                                        <p style="margin: 3px 0 0; color: #888; font-size: 12px;">Agrupado por unidad y tipo</p>
-                                    </div>
-                                    <div style="text-align: right;">
-                                        <p style="margin: 0; color: #555; font-size: 14px;">Total invertido (semana)</p>
-                                        <h3 style="margin: 0; color: #d32f2f; font-size: 20px;">${total_sem:,.2f}</h3>
-                                    </div>
-                                </div>
-                                <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
-                                    <thead>
-                                        <tr style="background-color: #f1f3f4; color: #1a237e; font-size: 11px; border-bottom: 2px solid #1a237e;">
-                                            <th style="padding: 10px 5px; text-align: left; width: 35%;">Unidad</th>
-                                            <th style="padding: 10px 5px; text-align: left; width: 25%;">Tipo de gasto</th>
-                                            <th style="padding: 10px 5px; text-align: center; width: 20%;">Cant. gastos</th>
-                                            <th style="padding: 10px 5px; text-align: right; width: 20%;">Total USD</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>{filas_trans}</tbody>
-                                </table>
-                            </div>
-                            """
-                            contador_paginas_medio += 1
-                else:
-                    MAX_FILAS = 18 
-                    for sem in semanas_ordenadas:
-                        if contador_paginas_medio >= 9: break
-                        
-                        df_sem = db_g_filt[db_g_filt['Semana'] == sem].sort_values(by=['Fecha_DT', 'UNIDAD'])
-                        if df_sem.empty: continue
-                        total_sem = df_sem['TOTAL $'].sum()
-                        
-                        min_date = df_sem['Fecha_DT'].min().strftime('%d/%m/%Y')
-                        max_date = df_sem['Fecha_DT'].max().strftime('%d/%m/%Y')
-                        etiqueta_semana = f"{sem.replace('Semana ', 'Semana ')} ({min_date} al {max_date})"
-                        
-                        chunks = [df_sem[i:i+MAX_FILAS] for i in range(0, df_sem.shape[0], MAX_FILAS)]
-                        
-                        for idx, chunk in enumerate(chunks):
-                            if contador_paginas_medio >= 9: break
-                            filas_trans = ""
-                            for _, r in chunk.iterrows():
-                                item_puro = str(r['ITEM']).strip().capitalize()
-                                filas_trans += f"""
-                                <tr style="border-bottom: 1px solid #eee; background-color: #ffffff;">
-                                    <td style="padding: 8px 4px; font-size: 10px; color: #333; text-align: center;">{r['Fecha_Registro']}</td>
-                                    <td style="padding: 8px 4px; font-size: 10px; font-weight: bold; color: #1a237e; white-space: normal; word-wrap: break-word;">{r['UNIDAD']}</td>
-                                    <td style="padding: 8px 4px; font-size: 9px; color: #555; white-space: normal; word-wrap: break-word;">{str(r['TIPO']).title()}</td>
-                                    <td style="padding: 8px 4px; font-size: 10px; color: #333; white-space: normal; word-wrap: break-word;">{item_puro}</td>
-                                    <td style="padding: 8px 4px; font-size: 11px; font-weight: bold; color: #d32f2f; text-align: right;">${r['TOTAL $']:,.2f}</td>
-                                </tr>
-                                """
-                                
-                            indicador_pag = f" (Parte {idx+1}/{len(chunks)})" if len(chunks) > 1 else ""
-                                
-                            pages_medio_html += f"""
-                            <div class="pdf-page" style="width: 800px; height: 1120px; margin: 0 auto 30px auto; background: white; padding: 40px; box-sizing: border-box; box-shadow: 0 0 10px rgba(0,0,0,0.1); font-family: Arial, sans-serif; position: relative;">
-                                <div style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 3px solid #1a237e; padding-bottom: 10px; margin-bottom: 20px;">
-                                    <div>
-                                        <h2 style="margin: 0; color: #1a237e;">Detalle: {etiqueta_semana}{indicador_pag}</h2>
-                                        <p style="margin: 3px 0 0; color: #888; font-size: 12px;">Gastos completos sin cortes</p>
-                                    </div>
-                                    <div style="text-align: right;">
-                                        <p style="margin: 0; color: #555; font-size: 14px;">Total invertido (semana)</p>
-                                        <h3 style="margin: 0; color: #d32f2f; font-size: 20px;">${total_sem:,.2f}</h3>
-                                    </div>
-                                </div>
-                                
-                                <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
-                                    <thead>
-                                        <tr style="background-color: #f1f3f4; color: #1a237e; font-size: 11px; border-bottom: 2px solid #1a237e;">
-                                            <th style="padding: 8px 4px; text-align: center; width: 10%;">Fecha</th>
-                                            <th style="padding: 8px 4px; text-align: left; width: 17%;">Unidad</th>
-                                            <th style="padding: 8px 4px; text-align: left; width: 15%;">Tipo</th>
-                                            <th style="padding: 8px 4px; text-align: left; width: 45%;">Gasto / Descripción</th>
-                                            <th style="padding: 8px 4px; text-align: right; width: 13%;">Total USD</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {filas_trans}
-                                    </tbody>
-                                </table>
-                            </div>
-                            """
-                            contador_paginas_medio += 1
-
-                # --- PÁGINAS FINALES: ANÁLISIS POR MODELO Y PLACAS ---
-                def extraer_modelo(unidad_str):
-                    partes = str(unidad_str).strip().split(' ', 1)
-                    return partes[1] if len(partes) > 1 else unidad_str
-                    
-                db_g_filt['MODELO_FAMILIA'] = db_g_filt['UNIDAD'].apply(extraer_modelo)
-                
-                # 3. Modelos
-                df_modelos = db_g_filt.groupby('MODELO_FAMILIA').agg({
-                    'UNIDAD': lambda x: ', '.join(sorted(list(set([str(p).split(' ')[0] for p in x])))),
-                    'TOTAL $': 'sum'
-                }).reset_index()
-                
-                unidades_unicas_count = db_g_filt.groupby('MODELO_FAMILIA')['UNIDAD'].nunique().reset_index(name='CANT_UNIDADES')
-                df_modelos = pd.merge(df_modelos, unidades_unicas_count, on='MODELO_FAMILIA')
-                df_modelos = df_modelos.sort_values('TOTAL $', ascending=False)
-                
-                MAX_FILAS_MOD = 18
-                chunks_mod = [df_modelos[i:i+MAX_FILAS_MOD] for i in range(0, df_modelos.shape[0], MAX_FILAS_MOD)]
-                page_modelos_html = ""
-                
-                for idx, chunk in enumerate(chunks_mod):
-                    filas_modelos_html = ""
-                    for _, r in chunk.iterrows():
-                        filas_modelos_html += f"""
-                        <tr style="border-bottom: 1px solid #ddd; background-color: #ffffff;">
-                            <td style="padding: 12px 5px; font-size: 14px; font-weight: bold; color: #1a237e;">{str(r['MODELO_FAMILIA']).title()}</td>
-                            <td style="padding: 12px 5px; font-size: 14px; color: #555; text-align: center;">{r['CANT_UNIDADES']}</td>
-                            <td style="padding: 12px 5px; font-size: 12px; color: #333; max-width: 280px; white-space: normal; word-wrap: break-word;">{r['UNIDAD']}</td>
-                            <td style="padding: 12px 5px; font-size: 14px; font-weight: bold; color: #d32f2f; text-align: right;">${r['TOTAL $']:,.2f}</td>
-                        </tr>
-                        """
-                        
-                    ind_mod = f" (Parte {idx+1}/{len(chunks_mod)})" if len(chunks_mod) > 1 else ""
-
-                    page_modelos_html += f"""
-                    <div class="pdf-page" style="width: 800px; height: 1120px; margin: 0 auto 30px auto; background: white; padding: 40px; box-sizing: border-box; box-shadow: 0 0 10px rgba(0,0,0,0.1); font-family: Arial, sans-serif; position: relative;">
-                        <div style="border-bottom: 3px solid #1a237e; padding-bottom: 10px; margin-bottom: 30px;">
-                            <h2 style="margin: 0; color: #1a237e;">3. Análisis de gastos por modelo{ind_mod}</h2>
-                            <p style="margin: 3px 0 0; color: #888; font-size: 13px;">Agrupación de gastos según categoría de vehículos</p>
-                        </div>
-                        
-                        <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
-                            <thead>
-                                <tr style="background-color: #1a237e; color: white; font-size: 12px;">
-                                    <th style="padding: 12px 5px; text-align: left; width: 25%;">Modelo / Categoría</th>
-                                    <th style="padding: 12px 5px; text-align: center; width: 15%;">N° Unidades</th>
-                                    <th style="padding: 12px 5px; text-align: left; width: 40%;">Placas Involucradas</th>
-                                    <th style="padding: 12px 5px; text-align: right; width: 20%;">Total USD</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {filas_modelos_html}
-                            </tbody>
-                        </table>
-                    </div>
-                    """
-
-                # 4. Placas Individuales
-                df_placas = db_g_filt.groupby(['MODELO_FAMILIA', 'UNIDAD'])['TOTAL $'].sum().reset_index()
-                df_placas = df_placas.sort_values(by=['MODELO_FAMILIA', 'TOTAL $'], ascending=[True, False])
-                
-                MAX_FILAS_PLACAS = 18
-                chunks_placas = [df_placas[i:i+MAX_FILAS_PLACAS] for i in range(0, df_placas.shape[0], MAX_FILAS_PLACAS)]
-                page_placas_html = ""
-                
-                for idx, chunk in enumerate(chunks_placas):
-                    filas_placas = ""
-                    modelo_actual = ""
-                    for _, r in chunk.iterrows():
-                        if r['MODELO_FAMILIA'] != modelo_actual:
-                            filas_placas += f"""
-                            <tr style="background-color: #e8eaf6;">
-                                <td colspan="3" style="padding: 8px 5px; font-size: 12px; font-weight: bold; color: #1a237e;">▶ {str(r['MODELO_FAMILIA']).title()}</td>
-                            </tr>
-                            """
-                            modelo_actual = r['MODELO_FAMILIA']
-                            
-                        filas_placas += f"""
-                        <tr style="border-bottom: 1px solid #ddd; background-color: #ffffff;">
-                            <td style="padding: 8px 5px 8px 25px; font-size: 12px; color: #555; white-space: normal; word-wrap: break-word;">{str(r['MODELO_FAMILIA']).title()}</td>
-                            <td style="padding: 8px 5px; font-size: 13px; font-weight: bold; color: #333; white-space: normal; word-wrap: break-word;">{r['UNIDAD']}</td>
-                            <td style="padding: 8px 5px; font-size: 13px; font-weight: bold; color: #d32f2f; text-align: right;">${r['TOTAL $']:,.2f}</td>
-                        </tr>
-                        """
-                        
-                    ind_pla = f" (Parte {idx+1}/{len(chunks_placas)})" if len(chunks_placas) > 1 else ""
-                        
-                    page_placas_html += f"""
-                    <div class="pdf-page" style="width: 800px; height: 1120px; margin: 0 auto 30px auto; background: white; padding: 40px; box-sizing: border-box; box-shadow: 0 0 10px rgba(0,0,0,0.1); font-family: Arial, sans-serif; position: relative;">
-                        <div style="border-bottom: 3px solid #1a237e; padding-bottom: 10px; margin-bottom: 30px;">
-                            <h2 style="margin: 0; color: #1a237e;">4. Análisis de gastos por placa{ind_pla}</h2>
-                            <p style="margin: 3px 0 0; color: #888; font-size: 13px;">Desglose individual agrupado por modelo</p>
-                        </div>
-                        
-                        <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
-                            <thead>
-                                <tr style="background-color: #1a237e; color: white; font-size: 12px;">
-                                    <th style="padding: 12px 5px; text-align: left; width: 30%;">Modelo</th>
-                                    <th style="padding: 12px 5px; text-align: left; width: 40%;">Placa / Unidad</th>
-                                    <th style="padding: 12px 5px; text-align: right; width: 30%;">Gasto total ($)</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {filas_placas}
-                            </tbody>
-                        </table>
-                    </div>
-                    """
-
-                # --- PÁGINA 5: GRÁFICO EVOLUTIVO POR SEMANA ---
-                max_gasto_chart = df_semanas_chart['TOTAL $'].max() if not df_semanas_chart.empty and df_semanas_chart['TOTAL $'].max() > 0 else 1
-                
-                filas_chart_html = ""
-                for _, r in df_semanas_chart.iterrows():
-                    ancho_bar = (r['TOTAL $'] / max_gasto_chart) * 100
-                    ancho_bar = max(ancho_bar, 1) 
-                    
-                    min_d = r['Fecha_Min'].strftime('%d/%m/%Y')
-                    max_d = r['Fecha_Max'].strftime('%d/%m/%Y')
-                    etiqueta_bar = f"{str(r['Semana']).replace('Semana ', 'Semana ')} <span style='font-size:12px; color:#555;'>({min_d} al {max_d})</span>"
-
-                    filas_chart_html += f"""
-                    <div style="margin-bottom: 30px;">
-                        <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 16px; font-weight: bold; color: #1a237e; margin-bottom: 8px;">
-                            <span>{etiqueta_bar}</span>
-                            <span style="color: #d32f2f;">${r['TOTAL $']:,.2f}</span>
-                        </div>
-                        <div style="background-color: #e0e0e0; border-radius: 8px; width: 100%; height: 35px; overflow: hidden; box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);">
-                            <div style="background-color: #1a237e; width: {ancho_bar}%; height: 100%; border-radius: 8px;"></div>
-                        </div>
-                    </div>
-                    """
-                    
-                page_grafico_html = f"""
-                <div class="pdf-page" style="width: 800px; height: 1120px; margin: 0 auto 30px auto; background: white; padding: 40px; box-sizing: border-box; box-shadow: 0 0 10px rgba(0,0,0,0.1); font-family: Arial, sans-serif; position: relative;">
-                    <div style="border-bottom: 3px solid #1a237e; padding-bottom: 10px; margin-bottom: 40px;">
-                        <h2 style="margin: 0; color: #1a237e;">5. Gráfico: Gastos por semana</h2>
-                        <p style="margin: 3px 0 0; color: #888; font-size: 13px;">Evolución del impacto financiero durante el periodo evaluado</p>
-                    </div>
-                    
-                    <div style="padding: 30px; background-color: #f8f9fa; border-radius: 10px; border: 1px solid #eee;">
-                        {filas_chart_html}
-                    </div>
-                </div>
-                """
-
-                # --- ENSAMBLADOR FINAL DEL PDF ---
-                reporte_completo_html = f"""
-                <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-                <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-                
-                <div style="text-align: center; margin-bottom: 25px;">
-                    <button id="btn-pdf" onclick="descargarPDFMulti()" style="background-color: #d32f2f; color: white; border: none; padding: 15px 30px; border-radius: 8px; cursor: pointer; font-size: 18px; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.2); transition: 0.3s;">
-                        ⬇️ GENERAR Y DESCARGAR PDF (Estándar Gerencial: Máx 16 Págs)
-                    </button>
-                </div>
-                
-                <div id="informe-pdf-container" style="background-color: #e0e0e0; padding: 20px; border-radius: 10px;">
-                    {page1_html}
-                    {pages_medio_html}
-                    {page_modelos_html}
-                    {page_placas_html}
-                    {page_grafico_html}
-                </div>
-                
-                <script>
-                async function descargarPDFMulti() {{
-                    const btn = document.getElementById('btn-pdf');
-                    const oldText = btn.innerText;
-                    btn.innerText = "⏳ GENERANDO PDF... (ESTO PUEDE TARDAR UNOS SEGUNDOS)";
-                    btn.style.backgroundColor = "#555";
-                    btn.disabled = true;
-                    
-                    try {{
-                        const {{ jsPDF }} = window.jspdf;
-                        const pages = document.querySelectorAll('.pdf-page');
-                        const doc = new jsPDF('p', 'pt', 'a4'); 
-                        const pdfWidth = doc.internal.pageSize.getWidth();
-                        const pdfHeight = doc.internal.pageSize.getHeight();
-                        
-                        for (let i = 0; i < pages.length; i++) {{
-                            if (i > 0) doc.addPage();
-                            const canvas = await html2canvas(pages[i], {{ scale: 2, useCORS: true }});
-                            const imgData = canvas.toDataURL('image/png');
-                            doc.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-                        }}
-                        
-                        doc.save('Informe_Gastos_Flota.pdf');
-                    }} catch (error) {{
-                        alert("Hubo un error al generar el PDF: " + error);
-                    }} finally {{
-                        btn.innerText = oldText;
-                        btn.style.backgroundColor = "#d32f2f";
-                        btn.disabled = false;
-                    }}
-                }}
-                </script>
-                """
-                components.html(reporte_completo_html, height=1200, scrolling=True)
-
-# ---------------------------------------------------------
-# TAB 6: ⛽ CONTROL DE COMBUSTIBLE (3 TANQUES)
-# ---------------------------------------------------------
-with tab6:
     st.header("⛽ Módulo de Reserva de Combustible")
     
     col_comb1, col_comb2 = st.columns([1, 1.5])
@@ -1602,9 +1078,9 @@ with tab6:
             components.html(html_pizarra_combustible_3t(df_edit_c, st.session_state.get('img_comb_1_b64'), st.session_state.get('img_comb_2_b64'), st.session_state.get('img_comb_3_b64')), height=850, scrolling=True)
 
 # ---------------------------------------------------------
-# TAB 7: 📈 REPORTE DE COMBUSTIBLE (PDF)
+# TAB 5: 📈 REPORTE DE COMBUSTIBLE (PDF)
 # ---------------------------------------------------------
-with tab7:
+with tab5:
     st.header("📈 Informe Gerencial de Combustible (PDF)")
     
     if st.button("🔄 Sincronizar Base de Datos de Combustible", type="primary", key="btn_sync_comb"):
@@ -1727,9 +1203,9 @@ with tab7:
                 components.html(pdf_combustible, height=900, scrolling=True)
 
 # ---------------------------------------------------------
-# TAB 8: 🚚🛰️ ESTATUS Y GPS UNIFICADO (NUEVO DINAMICO)
+# TAB 6: 🚚🛰️ ESTATUS Y GPS UNIFICADO (NUEVO DINAMICO)
 # ---------------------------------------------------------
-with tab8:
+with tab6:
     st.header("🚚🛰️ Control Operativo y Satelital")
     
     tipo_reporte = st.radio("🎯 Selecciona el tipo de reporte a generar:", 
@@ -1862,9 +1338,9 @@ with tab8:
 
 
 # ---------------------------------------------------------
-# TAB 9: 📊 REPORTE DE ESTATUS INTEGRADO (PDF)
+# TAB 7: 📊 REPORTE DE ESTATUS INTEGRADO (PDF)
 # ---------------------------------------------------------
-with tab9:
+with tab7:
     st.header("📊 Informe Gerencial Integrado (Mecánica + GPS)")
     
     if st.button("🔄 Sincronizar Base de Datos Integrada", type="primary", key="btn_sync_int"):
