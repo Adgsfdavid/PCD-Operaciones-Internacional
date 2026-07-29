@@ -11,6 +11,8 @@ import streamlit.components.v1 as components
 import gspread
 import textwrap
 import traceback
+import html as _html
+import json as _json
 from google.oauth2.service_account import Credentials
 
 # ==========================================
@@ -94,6 +96,34 @@ def generar_ws_gastos(df, fecha_evaluada, tipo_categoria="Todo Incluido"):
     for _, row in resumen_tipo.iterrows():
         msg += f"▪️ {row['TIPO'].title()}: ${row['TOTAL $']:,.2f}\n"
     msg += "\n✅ *Pizarra de desglose financiero adjunta.*"
+    return msg
+
+def generar_mensaje_cambio_guardia(df):
+    """Arma el mensaje de cambio de guardia con el modelo exacto del usuario.
+    El Total se calcula solo como la suma de los 3 tanques."""
+    if df.empty: return ""
+    r = df.iloc[0]
+    t1 = float(r['Tanque_1_50K'])
+    t2 = float(r['Tanque_2_12K'])
+    t3 = float(r['Tanque_3_7K'])
+    total_tanques = t1 + t2 + t3
+    def fmt(v):
+        # Separador de miles con punto, estilo del modelo (11500 -> 11.500)
+        return f"{float(v):,.0f}".replace(",", ".")
+    de_str = str(r['De']).title()
+    para_str = str(r['Para']).title()
+    msg = "DROGUERÍA DROTACA\n"
+    msg += f"DE: {de_str}\n"
+    msg += f"PARA: {para_str}\n"
+    msg += f"{r['Fecha']}\n\n"
+    msg += "CAMBIO DE GUARDIA 🔄\n\n"
+    msg += f"{fmt(r['Gasoil_Bidones'])} Lts de gasoil en bidones \n\n"
+    msg += "Gasolina:\n"
+    msg += f"{fmt(r['Gasolina_Bidones'])} Lts\n\n"
+    msg += f"{fmt(t1)} Lts Tanque 1 Negro ⬛ \n"
+    msg += f"{fmt(t2)} Lts Tanque 2 Naranja 🟧\n"
+    msg += f"{fmt(t3)} Lts Tanque 3 Pequeño 🟧\n\n"
+    msg += f"Total: {fmt(total_tanques)}"
     return msg
 
 def generar_ws_combustible(df):
@@ -1014,68 +1044,105 @@ with tab3:
 # ---------------------------------------------------------
 with tab4:
     st.header("⛽ Módulo de Reserva de Combustible")
-    
+
     col_comb1, col_comb2 = st.columns([1, 1.5])
-    
+
     with col_comb1:
-        st.info("Pega el reporte de cambio de guardia y sube los avales fotográficos de los tanques.")
-        txt_comb = st.text_area("Pega WhatsApp de Combustible:", height=200)
-        
-        st.write("📸 Sube las fotos de los tanques:")
+        st.markdown("### 📝 Datos del cambio de guardia")
+        st.caption("Edita los campos directamente. El Total y la pizarra se ajustan solos. Las fotos quedan igual.")
+
+        c_de = st.text_input("DE:", value="Franluis Pulve", key="comb_de")
+        c_para = st.text_input("PARA:", value="Giovanni Marmoto", key="comb_para")
+        c_fecha = st.date_input("Fecha:", datetime.now(), key="comb_fecha")
+
+        st.markdown("**Reserva en bidones**")
+        cb1, cb2 = st.columns(2)
+        with cb1: c_gasoil_b = st.number_input("Gasoil en bidones (Lts)", min_value=0.0, value=3480.0, step=10.0, key="comb_gasoilb")
+        with cb2: c_gasolina = st.number_input("Gasolina (Lts)", min_value=0.0, value=2180.0, step=10.0, key="comb_gasolina")
+
+        st.markdown("**Tanques (gasoil)**")
+        c_t1 = st.number_input("Tanque 1 Negro (Lts)", min_value=0.0, value=11500.0, step=100.0, key="comb_t1")
+        c_t2 = st.number_input("Tanque 2 Naranja (Lts)", min_value=0.0, value=11000.0, step=100.0, key="comb_t2")
+        c_t3 = st.number_input("Tanque 3 Pequeno (Lts)", min_value=0.0, value=0.0, step=100.0, key="comb_t3")
+
+        total_tanques_form = c_t1 + c_t2 + c_t3
+        st.metric("Total (suma de los 3 tanques)", f"{total_tanques_form:,.0f} Lts")
+
+        st.write("Sube las fotos de los tanques:")
         ci1, ci2, ci3 = st.columns(3)
-        with ci1: img_comb1 = st.file_uploader("Tanque 1 (50K)", type=["png", "jpg", "jpeg"])
-        with ci2: img_comb2 = st.file_uploader("Tanque 2 (12K)", type=["png", "jpg", "jpeg"])
-        with ci3: img_comb3 = st.file_uploader("Tanque 3 (7.85K)", type=["png", "jpg", "jpeg"])
-        
-        btn_comb = st.button("⚡ Extraer y Calcular", type="primary", use_container_width=True)
-        
-    if btn_comb and txt_comb:
-        st.session_state['df_combustible'] = procesar_texto_combustible(txt_comb)
-        st.session_state['img_comb_1_b64'] = base64.b64encode(img_comb1.getvalue()).decode() if img_comb1 else None
-        st.session_state['img_comb_2_b64'] = base64.b64encode(img_comb2.getvalue()).decode() if img_comb2 else None
-        st.session_state['img_comb_3_b64'] = base64.b64encode(img_comb3.getvalue()).decode() if img_comb3 else None
-            
-    if 'df_combustible' in st.session_state:
-        with col_comb2:
-            st.subheader("✏️ Verificación de Datos")
-            st.caption("Ajusta los litros de los tanques según lo que marque la foto.")
-            df_edit_c = st.data_editor(st.session_state['df_combustible'], num_rows="dynamic", use_container_width=True, hide_index=True)
-            
-            if st.button("💾 Guardar en Sheets", use_container_width=True):
-                with st.spinner("Guardando en la bóveda..."):
-                    df_to_save = df_edit_c.copy()
-                    
-                    dias_semana, meses_ano = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"], ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
-                    dias, semanas, meses, d_proy = [], [], [], []
-                    
-                    for i, r in df_to_save.iterrows():
-                        total_t = float(r['Tanque_1_50K']) + float(r['Tanque_2_12K']) + float(r['Tanque_3_7K'])
-                        d_proy.append(int(total_t / 1500) if total_t > 0 else 0)
-                        try:
-                            obj_fecha = datetime.strptime(str(r['Fecha']), "%d/%m/%Y")
-                            fecha_shift = obj_fecha + timedelta(days=2)
-                            dias.append(dias_semana[obj_fecha.weekday()])
-                            semanas.append(f"Semana {fecha_shift.isocalendar()[1]}")
-                            meses.append(meses_ano[obj_fecha.month - 1])
-                        except:
-                            dias.append(""); semanas.append(""); meses.append("")
-                            
-                    df_to_save['Total_Tanques'] = [float(r['Tanque_1_50K']) + float(r['Tanque_2_12K']) + float(r['Tanque_3_7K']) for _, r in df_to_save.iterrows()]
-                    df_to_save['Dias_Proyectados'] = d_proy
-                    df_to_save['Dia'] = dias
-                    df_to_save['Semana'] = semanas
-                    df_to_save['Mes'] = meses
-                    
-                    guardar_en_google_sheets(df_to_save, "FLOTA_COMBUSTIBLE")
-                    st.success("✅ Reserva guardada con éxito en FLOTA_COMBUSTIBLE.")
-            
-            st.markdown("---")
-            st.subheader("📱 Mensaje de Estatus")
-            st.code(generar_ws_combustible(df_edit_c), language="markdown")
-            
-            st.markdown("---")
-            st.subheader("📸 Pizarra de Monitoreo")
-            components.html(html_pizarra_combustible_3t(df_edit_c, st.session_state.get('img_comb_1_b64'), st.session_state.get('img_comb_2_b64'), st.session_state.get('img_comb_3_b64')), height=850, scrolling=True)
+        with ci1: img_comb1 = st.file_uploader("Tanque 1 (50K)", type=["png", "jpg", "jpeg"], key="imgc1")
+        with ci2: img_comb2 = st.file_uploader("Tanque 2 (12K)", type=["png", "jpg", "jpeg"], key="imgc2")
+        with ci3: img_comb3 = st.file_uploader("Tanque 3 (7.85K)", type=["png", "jpg", "jpeg"], key="imgc3")
+
+    # Construir el registro en vivo desde el formulario
+    df_edit_c = pd.DataFrame([{
+        "Fecha": c_fecha.strftime("%d/%m/%Y"),
+        "De": c_de, "Para": c_para,
+        "Gasolina_Bidones": float(c_gasolina), "Gasoil_Bidones": float(c_gasoil_b),
+        "Tanque_1_50K": float(c_t1), "Tanque_2_12K": float(c_t2), "Tanque_3_7K": float(c_t3)
+    }])
+    img1_b64 = base64.b64encode(img_comb1.getvalue()).decode() if img_comb1 else None
+    img2_b64 = base64.b64encode(img_comb2.getvalue()).decode() if img_comb2 else None
+    img3_b64 = base64.b64encode(img_comb3.getvalue()).decode() if img_comb3 else None
+
+    with col_comb2:
+        if st.button("💾 Guardar en Sheets", use_container_width=True):
+            with st.spinner("Guardando en la boveda..."):
+                df_to_save = df_edit_c.copy()
+                dias_semana, meses_ano = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"], ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+                dias, semanas, meses, d_proy = [], [], [], []
+                for i, r in df_to_save.iterrows():
+                    total_t = float(r['Tanque_1_50K']) + float(r['Tanque_2_12K']) + float(r['Tanque_3_7K'])
+                    d_proy.append(int(total_t / 1500) if total_t > 0 else 0)
+                    try:
+                        obj_fecha = datetime.strptime(str(r['Fecha']), "%d/%m/%Y")
+                        fecha_shift = obj_fecha + timedelta(days=2)
+                        dias.append(dias_semana[obj_fecha.weekday()])
+                        semanas.append(f"Semana {fecha_shift.isocalendar()[1]}")
+                        meses.append(meses_ano[obj_fecha.month - 1])
+                    except:
+                        dias.append(""); semanas.append(""); meses.append("")
+                df_to_save['Total_Tanques'] = [float(r['Tanque_1_50K']) + float(r['Tanque_2_12K']) + float(r['Tanque_3_7K']) for _, r in df_to_save.iterrows()]
+                df_to_save['Dias_Proyectados'] = d_proy
+                df_to_save['Dia'] = dias
+                df_to_save['Semana'] = semanas
+                df_to_save['Mes'] = meses
+                guardar_en_google_sheets(df_to_save, "FLOTA_COMBUSTIBLE")
+                st.success("✅ Reserva guardada con éxito en FLOTA_COMBUSTIBLE.")
+
+        st.markdown("---")
+        st.subheader("📋 Mensaje Cambio de Guardia")
+        st.caption("Se arma solo con los datos de arriba. El Total se ajusta al cambiar los tanques.")
+        _msg_cg = generar_mensaje_cambio_guardia(df_edit_c)
+        _msg_cg_js = _json.dumps(_msg_cg)
+        components.html(f"""
+        <div style="font-family: Arial, sans-serif;">
+          <textarea id="cg-text" readonly style="width:100%; height:300px; padding:12px; border:1px solid #444; border-radius:8px; background:#0e1117; color:#fafafa; font-size:14px; resize:vertical; box-sizing:border-box; white-space:pre-wrap;">{_html.escape(_msg_cg)}</textarea>
+          <button onclick="copiarCG()" style="margin-top:8px; width:100%; background:#25D366; color:#fff; border:none; padding:11px 18px; border-radius:8px; cursor:pointer; font-weight:bold; font-size:14px;">📋 Copiar mensaje</button>
+          <span id="cg-ok" style="display:none; color:#25D366; font-weight:bold; margin-left:8px;">✓ Copiado</span>
+        </div>
+        <script>
+        function copiarCG() {{
+            var t = document.getElementById('cg-text');
+            var txt = {_msg_cg_js};
+            function ok() {{ var s=document.getElementById('cg-ok'); s.style.display='inline'; setTimeout(function(){{s.style.display='none';}},1800); }}
+            if (navigator.clipboard && navigator.clipboard.writeText) {{
+                navigator.clipboard.writeText(txt).then(ok, function(){{ t.removeAttribute('readonly'); t.focus(); t.select(); document.execCommand('copy'); t.setAttribute('readonly','readonly'); ok(); }});
+            }} else {{
+                t.removeAttribute('readonly'); t.focus(); t.select(); document.execCommand('copy'); t.setAttribute('readonly','readonly'); ok();
+            }}
+        }}
+        </script>
+        """, height=400)
+
+        st.markdown("---")
+        st.subheader("📱 Mensaje de Estatus")
+        st.code(generar_ws_combustible(df_edit_c), language="markdown")
+
+        st.markdown("---")
+        st.subheader("📸 Pizarra de Monitoreo")
+        components.html(html_pizarra_combustible_3t(df_edit_c, img1_b64, img2_b64, img3_b64), height=850, scrolling=True)
+
 
 # ---------------------------------------------------------
 # TAB 5: 📈 REPORTE DE COMBUSTIBLE (PDF)
