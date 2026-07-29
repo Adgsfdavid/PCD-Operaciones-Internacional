@@ -12,6 +12,8 @@ import gspread
 from google.oauth2.service_account import Credentials
 import textwrap
 import traceback
+import html as _html
+import json as _json
 
 # CONFIGURACIÓN INICIAL
 
@@ -299,21 +301,89 @@ def extraer_apertura(texto):
     elif "recorrido" in texto.lower(): datos["Observaciones"] = "Recorrido por pasillos y almacén. Todo en orden."
     return pd.DataFrame([datos])
 
+def normalizar_hora_cierre(raw):
+    """
+    Normaliza cualquier variante de hora a formato 'H:MM PM' (en mayúscula, con espacio).
+    Casos que corrige: 8:35pm, 8:35 Pm, 08:35 m, 08:35 p, 6:20M, 08:35, etc.
+    Devuelve una tupla: (hora_normalizada, hay_alerta)
+      - hay_alerta = True cuando NO se encontró una hora válida (ej: '✅ *DPTO* PM' sin hora).
+        En ese caso devuelve '00 PM' (que puede significar que el dpto no laboró ese día).
+    """
+    if raw is None:
+        return "00 PM", True
+    s = str(raw).upper().strip()
+    # Quitar marcas invisibles y puntos sueltos
+    s = s.replace('\u200e', '').replace('\u200f', '').replace('.', '')
+
+    # Buscar el patrón de hora (acepta ':', '.', espacio o nada entre H y MM)
+    m = re.search(r'(\d{1,2})[:\s]?(\d{2})', s)
+    if not m:
+        # No hay hora (ej: solo 'PM', 'AM' o vacío) -> alerta
+        return "00 PM", True
+
+    h = int(m.group(1))
+    mi = int(m.group(2))
+
+    # Determinar AM / PM. Cualquier letra suelta ('M', 'P', 'm', 'p') = PM (cierre nocturno).
+    if 'AM' in s or re.search(r'\bA\b', s):
+        ampm = 'AM'
+    else:
+        ampm = 'PM'  # PM por defecto (P, M, PM o nada -> PM)
+
+    if h == 0 or h > 23:
+        return "00 PM", True
+
+    if h > 12:  # formato 24h -> pasar a 12h
+        h -= 12
+        ampm = 'PM'
+
+    return f"{h}:{mi:02d} {ampm}", False
+
+
 def extraer_cierre_drotaca(texto):
     fecha = datetime.now().strftime("%d/%m/%Y")
     m_fecha = re.search(r'(\d{1,2}/\d{1,2}/\d{2,4})', texto)
     if m_fecha: fecha = m_fecha.group(1)
     departamentos = []
+    alertas = []
     for linea in texto.split('\n'):
-        if '✅' in linea:
-            partes = linea.split('✅')[-1].strip()
-            m = re.search(r'(.*?)\s+(\d{1,2}:\d{2}\s*[APap]?[Mm]?)', partes)
-            if m: departamentos.append({"Fecha": fecha, "Departamento": m.group(1).strip(), "Hora Salida": m.group(2).strip()})
+        if '✅' not in linea:
+            continue
+        # Texto luego del check, limpiando marcas invisibles
+        partes = linea.split('✅')[-1]
+        partes = partes.replace('\u200e', '').replace('\u200f', '').strip()
+
+        # Separar el nombre del departamento (entre asteriscos) del resto (la hora)
+        m_dpto = re.search(r'\*(.+?)\*', partes)
+        if m_dpto:
+            dpto = m_dpto.group(1)
+            resto = partes[m_dpto.end():].strip()
+        else:
+            # Sin asteriscos: cortar en el primer dígito o letra de hora
+            m_corte = re.search(r'\d', partes)
+            if m_corte:
+                dpto = partes[:m_corte.start()]
+                resto = partes[m_corte.start():].strip()
+            else:
+                dpto = partes
+                resto = ""
+
+        # Pulir espacios sobrantes del nombre del departamento
+        dpto = re.sub(r'[*]', '', dpto)
+        dpto = re.sub(r'\s+', ' ', dpto).strip()
+        if not dpto:
+            continue
+
+        hora_norm, alerta = normalizar_hora_cierre(resto)
+        if alerta:
+            alertas.append(dpto)
+        departamentos.append({"Fecha": fecha, "Departamento": dpto, "Hora Salida": hora_norm})
+
     df = pd.DataFrame(departamentos)
     if not df.empty:
         df['Orden'] = df['Hora Salida'].apply(parsear_hora_para_orden)
         df = df.sort_values(by='Orden').drop(columns=['Orden']).reset_index(drop=True)
-    return df
+    return df, alertas
 
 def extraer_cierre_juanita(texto):
     fecha = datetime.now().strftime("%d/%m/%Y")
@@ -759,6 +829,48 @@ def html_personal_cierre(df):
     return f"""<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script><div style="text-align:right; margin-bottom:15px;"><button onclick="descargarPersonal()" style="background:#1a237e;color:#fff;border:none;padding:10px 20px;border-radius:5px;cursor:pointer;font-weight:bold;font-size:14px;">⬇️ Descargar Asignación</button></div><div id="pizarra-personal" style="font-family: Arial, sans-serif; width: 600px; margin: auto; background-color: #fff; border: 2px solid #1a237e; border-radius: 10px; overflow: hidden;"><div style="background-color: #1a237e; color: white; padding: 20px; display: flex; align-items: center; justify-content: space-between;">{area_logo}<div style="text-align: right;"><h2 style="margin: 0; font-size: 20px;">ASIGNACIÓN DE CIERRE DROTACA</h2><p style="margin: 5px 0 0; font-size: 14px; opacity: 0.9;">Fecha: {df['Fecha'].iloc[0] if not df.empty else ''}</p></div></div><div style="padding: 20px;"><table style="width: 100%; border-collapse: collapse;"><thead><tr style="background-color: #e8eaf6; color: #1a237e; font-size: 14px; font-weight: bold;"><th style="padding: 10px; text-align: left;">ÁREA ASIGNADA</th><th style="padding: 10px; text-align: left;">PERSONAL DE GUARDIA</th></tr></thead><tbody>{filas}</tbody></table></div></div><script>function descargarPersonal() {{ html2canvas(document.getElementById('pizarra-personal'), {{scale: 2}}).then(canvas => {{ var link = document.createElement('a'); link.download = 'Personal_Cierre.png'; link.href = canvas.toDataURL(); link.click(); }}); }}</script>"""
 
 # ==========================================
+# CAJA WHATSAPP CON BOTÓN DE COPIAR (1 CLICK)
+# ==========================================
+def html_caja_whatsapp(mensaje):
+    mensaje = "" if mensaje is None else str(mensaje)
+    texto_html = _html.escape(mensaje)
+    texto_js = _json.dumps(mensaje)
+    return f"""
+    <div style="font-family: Arial, sans-serif;">
+      <textarea id="ws-text" readonly
+        style="width:100%; height:180px; padding:10px; border:1px solid #444; border-radius:8px;
+               background:#0e1117; color:#fafafa; font-size:13px; resize:vertical; box-sizing:border-box;
+               white-space:pre-wrap;">{texto_html}</textarea>
+      <div style="display:flex; align-items:center; gap:10px; margin-top:8px;">
+        <button onclick="copiarWS()"
+          style="background:#25D366; color:#fff; border:none; padding:10px 18px; border-radius:8px;
+                 cursor:pointer; font-weight:bold; font-size:14px; flex:1;">📋 Copiar mensaje completo</button>
+        <span id="ws-ok" style="display:none; color:#25D366; font-weight:bold; white-space:nowrap;">✓ Copiado</span>
+      </div>
+    </div>
+    <script>
+    function copiarWS() {{
+        var t = document.getElementById('ws-text');
+        var txt = {texto_js};
+        function done() {{
+            var ok = document.getElementById('ws-ok');
+            ok.style.display = 'inline';
+            setTimeout(function(){{ ok.style.display='none'; }}, 1800);
+        }}
+        if (navigator.clipboard && navigator.clipboard.writeText) {{
+            navigator.clipboard.writeText(txt).then(done, function(){{
+                t.removeAttribute('readonly'); t.focus(); t.select();
+                document.execCommand('copy'); t.setAttribute('readonly','readonly'); done();
+            }});
+        }} else {{
+            t.removeAttribute('readonly'); t.focus(); t.select();
+            document.execCommand('copy'); t.setAttribute('readonly','readonly'); done();
+        }}
+    }}
+    </script>
+    """
+
+# ==========================================
 # INTERFAZ PRINCIPAL
 # ==========================================
 st.title("🛡️ PCD - Control y Seguridad Integral")
@@ -790,26 +902,54 @@ with tab1:
                     st.session_state['ws_msg'] = generar_ws_rol_guardia(df_seg, tipo_reporte, vac_info)
                 else: st.error(f"❌ Error leyendo el PDF. Detalle: {status}")
             elif texto_seguridad:
+                # Reiniciar alertas en cada procesamiento
+                st.session_state['seg_alertas'] = []
                 if tipo_reporte == "Cierre Drotaca 2.0":
-                    df_seg = extraer_cierre_drotaca(texto_seguridad)
+                    df_seg, alertas_dro = extraer_cierre_drotaca(texto_seguridad)
                     st.session_state['seg_tipo'], st.session_state['seg_data'], st.session_state['ws_msg'] = "CIERRE_DROTACA", df_seg, generar_ws_cierre_drotaca(df_seg)
+                    st.session_state['seg_alertas'] = alertas_dro
+                    st.session_state['seg_fecha_ref'] = df_seg['Fecha'].iloc[0] if not df_seg.empty else ""
                 elif tipo_reporte == "Cierre Juanita":
                     df_seg, h_cierre, oficiales = extraer_cierre_juanita(texto_seguridad)
                     st.session_state['seg_tipo'], st.session_state['seg_data'] = "CIERRE_JUANITA", df_seg
                     st.session_state['seg_meta'] = {"hora": h_cierre, "ofi": oficiales}
                     st.session_state['ws_msg'] = generar_ws_cierre_juanita(df_seg, h_cierre, oficiales)
+                    st.session_state['seg_fecha_ref'] = df_seg['Fecha'].iloc[0] if not df_seg.empty else ""
                 elif tipo_reporte == "Apertura Drotaca 2.0":
                     df_seg = extraer_apertura(texto_seguridad)
                     st.session_state['seg_tipo'], st.session_state['seg_data'], st.session_state['ws_msg'] = "APERTURA", df_seg, generar_ws_apertura(df_seg)
+                    st.session_state['seg_fecha_ref'] = df_seg['Fecha'].iloc[0] if not df_seg.empty else ""
                 elif tipo_reporte == "Personal Cierre Drotaca":
                     df_seg = extraer_personal_cierre(texto_seguridad)
                     st.session_state['seg_tipo'], st.session_state['seg_data'], st.session_state['ws_msg'] = "PERSONAL_CIERRE", df_seg, generar_ws_personal_cierre(df_seg)
+                    st.session_state['seg_fecha_ref'] = df_seg['Fecha'].iloc[0] if not df_seg.empty else ""
 
     if st.session_state.get('seg_data') is not None:
         with col2:
             st.subheader("✏️ Revisión de Datos")
+
+            # Alerta de departamentos sin hora válida (solo Cierre Drotaca 2.0)
+            if st.session_state['seg_tipo'] == "CIERRE_DROTACA" and st.session_state.get('seg_alertas'):
+                st.warning(
+                    "⚠️ Estos departamentos venían **sin hora** y se marcaron como **'00 PM'** "
+                    "(puede significar que no laboraron ese día). Revísalos: "
+                    + ", ".join(st.session_state['seg_alertas'])
+                )
+
             df_editado = st.data_editor(st.session_state['seg_data'], num_rows="dynamic", use_container_width=True, hide_index=True)
-            
+
+            # --- CASCADA DE FECHA: al cambiar la 1ª fecha, se corren todas ---
+            if (st.session_state['seg_tipo'] in ["CIERRE_DROTACA", "CIERRE_JUANITA", "PERSONAL_CIERRE"]
+                    and not df_editado.empty and 'Fecha' in df_editado.columns):
+                nueva_fecha = str(df_editado['Fecha'].iloc[0]).strip()
+                fecha_ref = str(st.session_state.get('seg_fecha_ref', '')).strip()
+                if nueva_fecha and nueva_fecha != fecha_ref:
+                    df_editado = df_editado.copy()
+                    df_editado['Fecha'] = nueva_fecha
+                    st.session_state['seg_data'] = df_editado
+                    st.session_state['seg_fecha_ref'] = nueva_fecha
+                    st.rerun()
+
             if st.button("💾 Guardar en Bitácora (Sheets)", use_container_width=True):
                 with st.spinner("Guardando en Google Sheets..."):
                     
@@ -864,7 +1004,22 @@ with tab1:
             
             st.markdown("---")
             st.subheader("📱 Mensaje WhatsApp")
-            st.text_area("Copiar texto:", st.session_state.get('ws_msg', ''), height=180)
+
+            # Regenerar el mensaje desde la tabla EDITADA para que refleje fechas/horas actuales
+            tipo_actual = st.session_state['seg_tipo']
+            if tipo_actual == "CIERRE_DROTACA":
+                ws_actual = generar_ws_cierre_drotaca(df_editado)
+            elif tipo_actual == "CIERRE_JUANITA":
+                meta = st.session_state.get('seg_meta', {"hora": "N/A", "ofi": []})
+                ws_actual = generar_ws_cierre_juanita(df_editado, meta.get('hora', 'N/A'), meta.get('ofi', []))
+            elif tipo_actual == "PERSONAL_CIERRE":
+                ws_actual = generar_ws_personal_cierre(df_editado)
+            elif tipo_actual == "APERTURA":
+                ws_actual = generar_ws_apertura(df_editado)
+            else:
+                ws_actual = st.session_state.get('ws_msg', '')
+
+            components.html(html_caja_whatsapp(ws_actual), height=270)
 
             st.markdown("---")
             st.subheader("📸 Generar Imagen")
