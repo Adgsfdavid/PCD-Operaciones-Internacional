@@ -931,10 +931,20 @@ def extraer_tabla_de_imagen(img, api_key):
             break
     raise RuntimeError(f"No se pudo extraer la tabla: {ultimo_error}")
 
+def es_fila_total(fila):
+    """True si la fila es un renglón de totales (ej. 'TOTAL COMIDAS', 'TOTAL GENERAL')."""
+    if not fila:
+        return False
+    primera = str(fila[0]).upper().strip()
+    return primera.startswith("TOTAL")
+
 def tabla_a_texto_tabulado(filas):
-    """Convierte la lista de filas en texto separado por TAB (para pegar en Excel/otras pestañas)."""
+    """Convierte la lista de filas en texto separado por TAB (para pegar en Excel/otras pestañas).
+    Omite las filas de totales (ej. 'TOTAL COMIDAS')."""
     lineas = []
     for fila in filas:
+        if es_fila_total(fila):
+            continue
         celdas = ["" if c is None else str(c) for c in fila]
         lineas.append("\t".join(celdas))
     return "\n".join(lineas)
@@ -1683,10 +1693,10 @@ with tab8:
                 st.warning("La IA no devolvió filas para esta imagen.")
                 continue
 
-            # Vista previa como tabla
+            # Vista previa como tabla (sin la fila de totales)
             try:
                 encabezados = [str(c) for c in filas[0]]
-                cuerpo = filas[1:]
+                cuerpo = [f for f in filas[1:] if not es_fila_total(f)]
                 df_prev = pd.DataFrame(cuerpo, columns=encabezados)
                 st.dataframe(df_prev, use_container_width=True, hide_index=True)
             except Exception:
