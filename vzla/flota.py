@@ -898,18 +898,84 @@ def html_pizarra_estatus_dinamico(tipo_reporte, fecha, activas_resumen, inactiva
     """
 
 # ==========================================
+# EXTRACCIÓN DE TABLAS DESDE IMAGEN (GEMINI)
+# ==========================================
+def extraer_tabla_de_imagen(img, api_key):
+    """Envía la imagen a Gemini y devuelve (titulo, filas). filas = lista de listas (la 1ª es el encabezado)."""
+    import google.generativeai as genai
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel('gemini-2.5-flash',
+                                  generation_config={"response_mime_type": "application/json"})
+    prompt = """
+    You are an expert data extraction tool. Analyze the image.
+    Extract the main title and the table data EXACTLY as shown, preserving empty cells as empty strings ("").
+    Do not invent or fill in missing values. Keep the same number of columns in every row.
+    Return a JSON object with EXACTLY two keys:
+    1. 'titulo': A string with the main overarching title of the document. If none exists, return an empty string.
+    2. 'data': A 2D array (list of lists) representing the table rows and columns. The first list is the headers.
+    """
+    ultimo_error = None
+    for intento in range(3):
+        try:
+            response = model.generate_content([prompt, img])
+            parsed = _json.loads(response.text)
+            titulo = parsed.get("titulo", "")
+            data = parsed.get("data", [])
+            return titulo, data
+        except Exception as e:
+            ultimo_error = e
+            if "503" in str(e) and intento < 2:
+                import time as _time
+                _time.sleep(5)
+                continue
+            break
+    raise RuntimeError(f"No se pudo extraer la tabla: {ultimo_error}")
+
+def tabla_a_texto_tabulado(filas):
+    """Convierte la lista de filas en texto separado por TAB (para pegar en Excel/otras pestañas)."""
+    lineas = []
+    for fila in filas:
+        celdas = ["" if c is None else str(c) for c in fila]
+        lineas.append("\t".join(celdas))
+    return "\n".join(lineas)
+
+def html_caja_copiar(texto, uid):
+    """Caja de texto de solo lectura con botón de copiar (1 clic)."""
+    texto = "" if texto is None else str(texto)
+    return f"""
+    <div style="font-family: Arial, sans-serif;">
+      <textarea id="cp-{uid}" readonly style="width:100%; height:220px; padding:10px; border:1px solid #444; border-radius:8px; background:#0e1117; color:#fafafa; font-size:13px; resize:vertical; box-sizing:border-box; white-space:pre;">{_html.escape(texto)}</textarea>
+      <button onclick="copiar_{uid}()" style="margin-top:8px; width:100%; background:#25D366; color:#fff; border:none; padding:11px 18px; border-radius:8px; cursor:pointer; font-weight:bold; font-size:14px;">📋 Copiar texto (para Excel / otras pestañas)</button>
+      <span id="ok-{uid}" style="display:none; color:#25D366; font-weight:bold; margin-left:8px;">✓ Copiado</span>
+    </div>
+    <script>
+    function copiar_{uid}() {{
+        var t = document.getElementById('cp-{uid}');
+        var txt = {_json.dumps(texto)};
+        function ok() {{ var s=document.getElementById('ok-{uid}'); s.style.display='inline'; setTimeout(function(){{s.style.display='none';}},1800); }}
+        if (navigator.clipboard && navigator.clipboard.writeText) {{
+            navigator.clipboard.writeText(txt).then(ok, function(){{ t.removeAttribute('readonly'); t.focus(); t.select(); document.execCommand('copy'); t.setAttribute('readonly','readonly'); ok(); }});
+        }} else {{
+            t.removeAttribute('readonly'); t.focus(); t.select(); document.execCommand('copy'); t.setAttribute('readonly','readonly'); ok();
+        }}
+    }}
+    </script>
+    """
+
+# ==========================================
 # INTERFAZ PRINCIPAL Y TABS (ACTUALIZADAS)
 # ==========================================
 st.title("🚛 PCD - Ecosistema de Flota y Logística")
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "📝 Planificadas", 
     "🔧 Realizadas", 
     "📊 Histórico", 
     "⛽ Combustible",
     "📈 Rep. Combustible",
     "🚚🛰️ Estatus y GPS",
-    "📊 Rep. Estatus Integrado"
+    "📊 Rep. Estatus Integrado",
+    "🖼️ Imagen a Datos"
 ])
 
 # ---------------------------------------------------------
@@ -1553,3 +1619,80 @@ with tab7:
                 </script>
                 """
                 components.html(pdf_estatus_int, height=1200, scrolling=True)
+
+# ---------------------------------------------------------
+# TAB 8: 🖼️ IMAGEN A DATOS (EXTRACCIÓN CON IA)
+# ---------------------------------------------------------
+with tab8:
+    st.header("🖼️ Imagen a Datos")
+    st.caption("Sube 1 o varias imágenes de tablas (comensales, planificado, realizado...). La IA extrae la tabla y te da el texto listo para copiar con un clic y pegar en Excel o en las otras pestañas.")
+
+    # Clave API de Gemini: primero de secrets, si no, se pide aquí
+    api_key_gemini = ""
+    try:
+        api_key_gemini = st.secrets["GEMINI_API_KEY"]
+    except Exception:
+        try:
+            api_key_gemini = st.secrets["gemini"]["api_key"]
+        except Exception:
+            api_key_gemini = ""
+    if not api_key_gemini:
+        api_key_gemini = st.text_input("🔑 Clave API de Gemini", type="password",
+                                       help="Pégala aquí, o guárdala en secrets como GEMINI_API_KEY para no escribirla cada vez.")
+
+    imgs_subidas = st.file_uploader("📷 Sube las imágenes de las tablas",
+                                    type=["png", "jpg", "jpeg", "webp"],
+                                    accept_multiple_files=True, key="img2data")
+
+    procesar = st.button("⚡ Extraer datos de las imágenes", type="primary", use_container_width=True)
+
+    if procesar:
+        if not api_key_gemini:
+            st.error("Falta la clave API de Gemini.")
+        elif not imgs_subidas:
+            st.warning("Sube al menos una imagen.")
+        else:
+            try:
+                import PIL.Image
+            except Exception:
+                st.error("Falta la librería Pillow (PIL) en el servidor. Instala 'Pillow' y 'google-generativeai'.")
+                st.stop()
+
+            resultados = []
+            for idx, archivo in enumerate(imgs_subidas):
+                with st.spinner(f"Analizando imagen {idx+1} de {len(imgs_subidas)}: {archivo.name}..."):
+                    try:
+                        img = PIL.Image.open(archivo)
+                        titulo, filas = extraer_tabla_de_imagen(img, api_key_gemini)
+                        resultados.append({"nombre": archivo.name, "titulo": titulo, "filas": filas, "error": None})
+                    except Exception as e:
+                        resultados.append({"nombre": archivo.name, "titulo": "", "filas": [], "error": str(e)})
+            st.session_state['img2data_res'] = resultados
+
+    if 'img2data_res' in st.session_state and st.session_state['img2data_res']:
+        st.markdown("---")
+        for i, res in enumerate(st.session_state['img2data_res']):
+            st.subheader(f"📄 {res['nombre']}")
+            if res['error']:
+                st.error(f"No se pudo procesar: {res['error']}")
+                continue
+            if res['titulo']:
+                st.markdown(f"**Título detectado:** {res['titulo']}")
+            filas = res['filas']
+            if not filas:
+                st.warning("La IA no devolvió filas para esta imagen.")
+                continue
+
+            # Vista previa como tabla
+            try:
+                encabezados = [str(c) for c in filas[0]]
+                cuerpo = filas[1:]
+                df_prev = pd.DataFrame(cuerpo, columns=encabezados)
+                st.dataframe(df_prev, use_container_width=True, hide_index=True)
+            except Exception:
+                st.info("No se pudo mostrar la vista previa en tabla, pero el texto para copiar está abajo.")
+
+            # Texto tabulado + botón de copiar
+            texto_tab = tabla_a_texto_tabulado(filas)
+            components.html(html_caja_copiar(texto_tab, f"img{i}"), height=320)
+            st.markdown("---")
