@@ -16,3 +16,4 @@ fpdf
 google-auth
 geopy
 fpdf2
+google-generativeai
