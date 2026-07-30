@@ -276,18 +276,25 @@ def generar_analisis_python(df_datos, tiempos, texto_original):
     if extras_list:
         seccion_extras = "\n\n⚠️ *ENCOMIENDAS Y REPOSICIONES:*\n" + "\n\n".join(extras_list)
 
-    mensaje = f"""Buenas tardes Gerente, adjunto el reporte de salidas de hoy.
+    # Fecha del listín para el encabezado (dd/mm/yyyy)
+    fecha_hdr = datetime.now().strftime("%d/%m/%Y")
+    m_fh = re.search(r'\d{2}/\d{2}/\d{4}', str(tiempos.get('Fecha_Reporte', '')))
+    if m_fh:
+        fecha_hdr = m_fh.group(0)
 
-⏱️ *TIEMPOS OPERATIVOS:*
-* Primer listín registrado: {t_1}
-* Último listín registrado: {t_2}
-* Inicio de tráfico: {t_3}
-* Culminación de tráfico: {t_4}
+    mensaje = f"""*FECHA DE LISTIN {fecha_hdr}*
 
-{auditoria}
+⏱️ TIEMPOS OPERATIVOS:
 
-🏆 *DATOS RELEVANTES:*
+ Primer listín registrado: *{t_1}*
+ Último listín registrado: *{t_2}*
+
+Inicio de tráfico: *{t_3}*
+Culminación de tráfico: *{t_4}*
+
+🏆 DATOS RELEVANTES:
 Las rutas con mayor volumen de bultos son:
+
 {top_rutas_str.strip()}{seccion_extras}"""
 
     return mensaje
