@@ -478,8 +478,8 @@ def procesar_excel_base(df, fecha_buscada):
 
     # 3. Exclusiones obligatorias
     df_filtrado = df_filtrado[~df_filtrado[col_chofer].astype(str).str.contains('RETIRO POR OFICINA|RETIRAR|GOTICA', case=False, na=False)]
-    # Rutas ignoradas (busca en cualquier columna): EL TIGRE y PARIGUAN
-    mask_ruta = df_filtrado.astype(str).apply(lambda x: x.str.contains(r'EL TIGRE|PARIGU[AÁ]N', case=False, na=False, regex=True)).any(axis=1)
+    # Rutas ignoradas (busca en cualquier columna): EL TIGRE y PARIAGUAN/PARIGUAN (todas las variantes)
+    mask_ruta = df_filtrado.astype(str).apply(lambda x: x.str.contains(r'EL TIGRE|PAR[IA]{1,2}GU[AÁ]N', case=False, na=False, regex=True)).any(axis=1)
     df_filtrado = df_filtrado[~mask_ruta]
 
     df_filtrado[col_bultos] = pd.to_numeric(df_filtrado[col_bultos], errors='coerce').fillna(0)
