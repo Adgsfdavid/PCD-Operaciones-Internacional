@@ -237,18 +237,16 @@ def html_pizarra_velocidad(resumen, top, fecha_txt, umbral, uid="vel"):
 
 def texto_velocidad(resumen, top, fecha_txt, umbral):
     total_ex = int(resumen["Excesos"].sum()) if not resumen.empty else 0
-    L = [f"*EXCESOS DE VELOCIDAD {fecha_txt}*", f"(mayor a {umbral} km/h)", "",
-         f"📊 TOTAL: {total_ex} excesos · {len(resumen)} placas", "", "🏎️ *POR PLACA:*", ""]
-    medallas = {0: "🥇", 1: "🥈", 2: "🥉"}
+    L = [f"🚨 *EXCESOS DE VELOCIDAD {fecha_txt}*", f"(mayor a {umbral} km/h)", "",
+         f"TOTAL: {total_ex} excesos · {len(resumen)} placas", "", "*POR PLACA:*", ""]
     if resumen.empty:
         L.append("Sin excesos.")
     else:
         for i, (_, r) in enumerate(resumen.iterrows()):
-            marca = medallas.get(i, f"{i+1})")
-            L.append(f"{marca} *{su(r['Unidad'])}* — {int(r['Excesos'])} excesos · máx {int(r['VelMax'])}")
+            L.append(f"{i+1}. *{su(r['Unidad'])}* — {int(r['Excesos'])} excesos · máx {int(r['VelMax'])}")
             ch, rt = su(r["Chofer"]), su(r["Ruta"])
             if ch or rt:
-                L.append("    👤 " + " · ".join([x for x in [ch, rt] if x]))
+                L.append("   " + " · ".join([x for x in [ch, rt] if x]))
             L.append("")
     L.append("🔝 *TOP EXCESOS:*")
     L.append("")
