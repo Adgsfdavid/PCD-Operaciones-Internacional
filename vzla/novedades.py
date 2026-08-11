@@ -1,29 +1,27 @@
 # ==========================================
 # Archivo: novedades.py
-# Módulo: Novedades y Status Diario (Sheet nuevo, separado)
-# PARTE 1: Novedades de Despacho / Encomiendas / Novedades por Ruta
+# Modulo: Novedades y Status Diario (Sheet nuevo, separado)
+# VISOR DE SOLO LECTURA - el personal escribe en el Google Sheet;
+# aqui solo se ve el resultado consolidado.
 # ==========================================
 import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
 import textwrap
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
 
 # ==========================================
-# CONFIGURACIÓN
+# CONFIGURACION
 # ==========================================
-# ID del Google Sheet NUEVO (separado del principal)
 SHEET_ID = "1D7w0ABnnatGd83TpJHFeVxxLOKRqoBBFbM9FyYYdFEg"
 
-# Definición de las 5 hojas y sus encabezados exactos.
-# (Status_Dia e Historial_Status se crean ya para tener todo listo; se usan en la Parte 2 y 3.)
 HOJAS = {
-    "Novedades_Despacho": ["ID", "FECHA RECLAMO", "FECHA ATENCIÓN", "CLIENTE/FARMACIA", "CÓDIGO",
+    "Novedades_Despacho": ["FECHA RECLAMO", "FECHA ATENCIÓN", "CLIENTE/FARMACIA", "CÓDIGO",
                             "RUTA", "MOLÉCULA", "CANTIDAD", "NOVEDAD", "CONTEXTO", "ESTADO", "REGISTRADO POR"],
-    "Encomiendas": ["ID", "FECHA", "DÍA", "MES", "MOVIMIENTO", "RUTA", "UNIDAD", "CHOFER",
+    "Encomiendas": ["FECHA", "MOVIMIENTO", "RUTA", "UNIDAD", "CHOFER",
                     "AYUDANTE", "TIPO DE ENCOMIENDA", "DETALLE", "REGISTRADO POR"],
-    "Novedades_Ruta": ["ID", "FECHA", "DÍA", "MES", "RUTA", "UNIDAD", "CHOFER", "AYUDANTE",
+    "Novedades_Ruta": ["FECHA", "RUTA", "UNIDAD", "CHOFER", "AYUDANTE",
                        "TIPO DE NOVEDAD", "DESCRIPCIÓN", "REGISTRADO POR"],
     "Status_Dia": ["ZONA", "UNIDAD", "CHOFER", "AYUDANTE", "RUTA/DESPACHO", "HORA",
                    "UBICACIÓN ACTUAL", "STATUS"],
@@ -31,12 +29,18 @@ HOJAS = {
                          "RUTA/DESPACHO", "HORA", "UBICACIÓN", "STATUS"],
 }
 
+COL_FECHA = {
+    "Novedades_Despacho": "FECHA RECLAMO",
+    "Encomiendas": "FECHA",
+    "Novedades_Ruta": "FECHA",
+}
+
 DIAS_SEMANA = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 MESES_ANO = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
              "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
 # ==========================================
-# CONEXIÓN A GOOGLE SHEETS (mismo patrón que el resto del proyecto)
+# CONEXION A GOOGLE SHEETS
 # ==========================================
 @st.cache_resource
 def obtener_cliente_sheets():
@@ -54,7 +58,6 @@ def abrir_libro():
     return obtener_cliente_sheets().open_by_key(SHEET_ID)
 
 def asegurar_estructura(libro):
-    """Crea las hojas que falten con sus encabezados. Solo la primera vez."""
     existentes = {w.title: w for w in libro.worksheets()}
     for nombre, cols in HOJAS.items():
         if nombre not in existentes:
@@ -64,7 +67,6 @@ def asegurar_estructura(libro):
             ws = existentes[nombre]
             if not ws.row_values(1):
                 ws.update([cols])
-    # Eliminar la hoja por defecto vacía ("Hoja 1"/"Sheet1") si sigue ahí
     for basura in ["Hoja 1", "Hoja1", "Sheet1"]:
         if basura in [w.title for w in libro.worksheets()] and basura not in HOJAS:
             try:
@@ -72,16 +74,7 @@ def asegurar_estructura(libro):
             except Exception:
                 pass
 
-def nuevo_id():
-    return datetime.now().strftime("%Y%m%d-%H%M%S")
-
-def dia_y_mes(fecha_obj):
-    return DIAS_SEMANA[fecha_obj.weekday()], MESES_ANO[fecha_obj.month - 1]
-
-def guardar_fila(nombre_hoja, fila_lista):
-    ws = abrir_libro().worksheet(nombre_hoja)
-    ws.append_row(fila_lista, value_input_option="USER_ENTERED")
-
+@st.cache_data(ttl=60, show_spinner=False)
 def leer_hoja_df(nombre_hoja):
     try:
         registros = abrir_libro().worksheet(nombre_hoja).get_all_records()
@@ -90,129 +83,97 @@ def leer_hoja_df(nombre_hoja):
         return pd.DataFrame()
 
 # ==========================================
-# INTERFAZ
+# UTILIDADES
 # ==========================================
-st.title("📝 Novedades y Status Diario")
+def agregar_dia_mes(df, col_fecha):
+    if df.empty or col_fecha not in df.columns:
+        return df
+    def _dia(v):
+        try:
+            d = pd.to_datetime(str(v), dayfirst=True)
+            return DIAS_SEMANA[d.weekday()]
+        except Exception:
+            return ""
+    def _mes(v):
+        try:
+            d = pd.to_datetime(str(v), dayfirst=True)
+            return MESES_ANO[d.month - 1]
+        except Exception:
+            return ""
+    df = df.copy()
+    df.insert(1, "DÍA", df[col_fecha].apply(_dia))
+    df.insert(2, "MES", df[col_fecha].apply(_mes))
+    return df
 
-usuario = str(st.session_state.get("usuario", "-")).upper()
-st.caption(f"Registrando como: **{usuario}**")
+def filtrar_por_dia(df, col_fecha, dia_sel):
+    if df.empty or col_fecha not in df.columns:
+        return df
+    obj = pd.to_datetime(df[col_fecha].astype(str), dayfirst=True, errors="coerce")
+    return df[obj.dt.date == dia_sel]
 
-# Preparar el libro y la estructura (una sola vez por sesión)
+# ==========================================
+# INTERFAZ (VISOR)
+# ==========================================
+st.title("📝 Novedades del Día")
+st.caption("Vista de solo lectura. El personal registra directo en el Google Sheet; aquí ves el consolidado.")
+
 try:
     libro = abrir_libro()
     if not st.session_state.get("nov_estructura_ok", False):
         asegurar_estructura(libro)
         st.session_state["nov_estructura_ok"] = True
 except Exception as e:
-    st.error("No se pudo conectar con el Google Sheet nuevo.")
+    st.error("No se pudo conectar con el Google Sheet de novedades.")
     st.info("Verifica que el Sheet esté compartido como **Editor** con el bot "
             "`bot-pizarra@pcd-drotaca.iam.gserviceaccount.com`.")
     st.exception(e)
     st.stop()
 
+c1, c2, c3 = st.columns([2, 2, 1])
+dia_sel = c1.date_input("📅 Ver día", value=date.today(), format="DD/MM/YYYY")
+ver_todo = c2.checkbox("Ver todo el histórico (ignorar día)")
+if c3.button("🔄 Actualizar", use_container_width=True):
+    st.cache_data.clear()
+    st.rerun()
+
+df_desp = leer_hoja_df("Novedades_Despacho")
+df_enc = leer_hoja_df("Encomiendas")
+df_ruta = leer_hoja_df("Novedades_Ruta")
+
+def preparar(df, hoja):
+    df = agregar_dia_mes(df, COL_FECHA[hoja])
+    if not ver_todo:
+        df = filtrar_por_dia(df, COL_FECHA[hoja], dia_sel)
+    return df
+
+vd = preparar(df_desp, "Novedades_Despacho")
+ve = preparar(df_enc, "Encomiendas")
+vr = preparar(df_ruta, "Novedades_Ruta")
+
+m1, m2, m3 = st.columns(3)
+etiqueta = "histórico" if ver_todo else dia_sel.strftime("%d/%m/%Y")
+m1.metric(f"🚨 Novedades despacho ({etiqueta})", len(vd))
+m2.metric(f"📦 Encomiendas ({etiqueta})", len(ve))
+m3.metric(f"🛞 Novedades por ruta ({etiqueta})", len(vr))
+
+st.markdown("---")
+
 tab1, tab2, tab3 = st.tabs(["🚨 Novedades de Despacho", "📦 Encomiendas", "🛞 Novedades por Ruta"])
 
-# ------------------------------------------
-# TAB 1: NOVEDADES DE DESPACHO
-# ------------------------------------------
 with tab1:
-    st.subheader("🚨 Registrar novedad de despacho")
-    with st.form("form_desp", clear_on_submit=True):
-        c1, c2 = st.columns(2)
-        f_reclamo = c1.date_input("Fecha de reclamo", format="DD/MM/YYYY")
-        ya_atendida = c2.checkbox("¿Ya fue atendida?")
-        f_atencion = c2.date_input("Fecha de atención", format="DD/MM/YYYY", disabled=not ya_atendida)
+    if vd.empty:
+        st.info("Sin novedades de despacho para el filtro seleccionado.")
+    else:
+        st.dataframe(vd.iloc[::-1], use_container_width=True, hide_index=True)
 
-        cliente = st.text_input("Cliente / Farmacia")
-        c3, c4 = st.columns(2)
-        codigo = c3.text_input("Código")
-        ruta = c4.text_input("Ruta")
-        molecula = st.text_input("Molécula / Producto")
-        cantidad = st.text_input("Cantidad")
-        novedad = st.text_input("Novedad (ej: Producto en mal estado)")
-        contexto = st.text_area("Contexto / Detalle")
-
-        if st.form_submit_button("💾 Guardar novedad de despacho", type="primary", use_container_width=True):
-            estado = "Atendida" if ya_atendida else "Pendiente"
-            f_at_str = f_atencion.strftime("%d/%m/%Y") if ya_atendida else ""
-            fila = [nuevo_id(), f_reclamo.strftime("%d/%m/%Y"), f_at_str, cliente, codigo,
-                    ruta, molecula, cantidad, novedad, contexto, estado, usuario]
-            try:
-                guardar_fila("Novedades_Despacho", fila)
-                st.success("✅ Novedad de despacho guardada.")
-            except Exception as e:
-                st.error(f"No se pudo guardar: {e}")
-
-    with st.expander("📄 Ver registros de despacho"):
-        df = leer_hoja_df("Novedades_Despacho")
-        if df.empty:
-            st.info("Aún no hay registros.")
-        else:
-            st.dataframe(df.iloc[::-1], use_container_width=True, hide_index=True)
-
-# ------------------------------------------
-# TAB 2: ENCOMIENDAS (RETIRO / ENTREGA)
-# ------------------------------------------
 with tab2:
-    st.subheader("📦 Registrar retiro / entrega de encomienda")
-    with st.form("form_enc", clear_on_submit=True):
-        c1, c2 = st.columns(2)
-        fecha = c1.date_input("Fecha", format="DD/MM/YYYY")
-        movimiento = c2.selectbox("Movimiento", ["Retiro", "Entrega"])
-        ruta = st.text_input("Ruta")
-        c3, c4 = st.columns(2)
-        unidad = c3.text_input("Unidad")
-        chofer = c4.text_input("Chofer")
-        ayudante = st.text_input("Ayudante")
-        tipo_enc = st.text_input("Tipo de encomienda")
-        detalle = st.text_area("Detalle (opcional)")
+    if ve.empty:
+        st.info("Sin encomiendas para el filtro seleccionado.")
+    else:
+        st.dataframe(ve.iloc[::-1], use_container_width=True, hide_index=True)
 
-        if st.form_submit_button("💾 Guardar encomienda", type="primary", use_container_width=True):
-            dia, mes = dia_y_mes(fecha)
-            fila = [nuevo_id(), fecha.strftime("%d/%m/%Y"), dia, mes, movimiento, ruta,
-                    unidad, chofer, ayudante, tipo_enc, detalle, usuario]
-            try:
-                guardar_fila("Encomiendas", fila)
-                st.success("✅ Encomienda guardada.")
-            except Exception as e:
-                st.error(f"No se pudo guardar: {e}")
-
-    with st.expander("📄 Ver registros de encomiendas"):
-        df = leer_hoja_df("Encomiendas")
-        if df.empty:
-            st.info("Aún no hay registros.")
-        else:
-            st.dataframe(df.iloc[::-1], use_container_width=True, hide_index=True)
-
-# ------------------------------------------
-# TAB 3: NOVEDADES GENERALES POR RUTA
-# ------------------------------------------
 with tab3:
-    st.subheader("🛞 Registrar novedad general por ruta")
-    with st.form("form_ruta", clear_on_submit=True):
-        c1, c2 = st.columns(2)
-        fecha = c1.date_input("Fecha", format="DD/MM/YYYY", key="f_ruta")
-        ruta = c2.text_input("Ruta")
-        c3, c4 = st.columns(2)
-        unidad = c3.text_input("Unidad")
-        chofer = c4.text_input("Chofer")
-        ayudante = st.text_input("Ayudante")
-        tipo_nov = st.text_input("Tipo de novedad")
-        descripcion = st.text_area("Descripción")
-
-        if st.form_submit_button("💾 Guardar novedad por ruta", type="primary", use_container_width=True):
-            dia, mes = dia_y_mes(fecha)
-            fila = [nuevo_id(), fecha.strftime("%d/%m/%Y"), dia, mes, ruta, unidad,
-                    chofer, ayudante, tipo_nov, descripcion, usuario]
-            try:
-                guardar_fila("Novedades_Ruta", fila)
-                st.success("✅ Novedad por ruta guardada.")
-            except Exception as e:
-                st.error(f"No se pudo guardar: {e}")
-
-    with st.expander("📄 Ver registros por ruta"):
-        df = leer_hoja_df("Novedades_Ruta")
-        if df.empty:
-            st.info("Aún no hay registros.")
-        else:
-            st.dataframe(df.iloc[::-1], use_container_width=True, hide_index=True)
+    if vr.empty:
+        st.info("Sin novedades por ruta para el filtro seleccionado.")
+    else:
+        st.dataframe(vr.iloc[::-1], use_container_width=True, hide_index=True)
