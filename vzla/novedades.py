@@ -10,6 +10,7 @@ from google.oauth2.service_account import Credentials
 import textwrap
 import html as _html
 import json as _json
+import re
 import pandas as pd
 from datetime import datetime, date
 
@@ -20,11 +21,11 @@ SHEET_ID = "1D7w0ABnnatGd83TpJHFeVxxLOKRqoBBFbM9FyYYdFEg"
 
 HOJAS = {
     "Novedades_Despacho": ["FECHA RECLAMO", "FECHA ATENCIÓN", "CLIENTE/FARMACIA", "CÓDIGO",
-                            "RUTA", "MOLÉCULA", "CANTIDAD", "NOVEDAD", "CONTEXTO", "ESTADO", "REGISTRADO POR"],
+                            "RUTA", "MOLÉCULA", "CANTIDAD", "NOVEDAD", "CONTEXTO", "ESTADO", "REGISTRADO POR", "HORA"],
     "Encomiendas": ["FECHA", "MOVIMIENTO", "RUTA", "UNIDAD", "CHOFER",
-                    "AYUDANTE", "TIPO DE ENCOMIENDA", "DETALLE", "REGISTRADO POR"],
+                    "AYUDANTE", "TIPO DE ENCOMIENDA", "DETALLE", "REGISTRADO POR", "HORA"],
     "Novedades_Ruta": ["FECHA", "RUTA", "UNIDAD", "CHOFER", "AYUDANTE",
-                       "TIPO DE NOVEDAD", "DESCRIPCIÓN", "REGISTRADO POR"],
+                       "TIPO DE NOVEDAD", "DESCRIPCIÓN", "REGISTRADO POR", "HORA"],
     "Status_Dia": ["ZONA", "UNIDAD", "CHOFER", "AYUDANTE", "RUTA/DESPACHO", "HORA",
                    "UBICACIÓN ACTUAL", "STATUS"],
     "Historial_Status": ["FECHA", "HORA DE CORTE", "ZONA", "UNIDAD", "CHOFER", "AYUDANTE",
@@ -125,10 +126,17 @@ def asegurar_estructura(libro):
             ws.update([cols]); creadas.append(nombre)
         else:
             ws = existentes[nombre]
-            if not ws.row_values(1):
+            header = ws.row_values(1)
+            if not header:
                 ws.update([cols]); reparadas.append(nombre)
             else:
-                ya.append(nombre)
+                # Agregar al FINAL las columnas que falten (ej. HORA) sin mover las existentes
+                faltantes = [c for c in cols if c not in header]
+                if faltantes:
+                    ws.update([header + faltantes])
+                    reparadas.append(nombre)
+                else:
+                    ya.append(nombre)
     for basura in ["Hoja 1", "Hoja1", "Sheet1"]:
         if basura in [w.title for w in libro.worksheets()] and basura not in HOJAS:
             try: libro.del_worksheet(libro.worksheet(basura))
@@ -242,16 +250,49 @@ def _fecha_efectiva(df, hoja):
         return rec.where(rec.str.strip() != "", ate)
     return col(COL_FECHA[hoja])
 
+def _hora_a_minutos(v):
+    """Convierte '09:24 AM', '9:24am', '14:30', '08:00 p. m.', etc. a minutos desde medianoche. None si no hay."""
+    t = str(v).strip().upper().replace(".", "").replace(" ", "")
+    if not t or t == "NAN":
+        return None
+    m = re.search(r'(\d{1,2}):(\d{2})', t)
+    if m:
+        h, mi = int(m.group(1)), int(m.group(2))
+    else:
+        m2 = re.search(r'(\d{1,2})([AP])M', t)
+        if not m2:
+            return None
+        h, mi = int(m2.group(1)), 0
+    if 'PM' in t and h != 12:
+        h += 12
+    if 'AM' in t and h == 12:
+        h = 0
+    if h > 23:
+        h = 23
+    return h * 60 + mi
+
 def preparar_hoja(df, hoja, dia_sel, ver_todo):
-    """Agrega DÍA/MES (desde la fecha efectiva) y filtra por día si corresponde."""
+    """Agrega DÍA/MES (desde la fecha efectiva), filtra por día y ORDENA por fecha+hora."""
     if df.empty:
         return df
-    obj = pd.to_datetime(_fecha_efectiva(df, hoja), dayfirst=True, errors="coerce")
+    fecha_obj = pd.to_datetime(_fecha_efectiva(df, hoja), dayfirst=True, errors="coerce")
+    if "HORA" in df.columns:
+        minutos = df["HORA"].apply(_hora_a_minutos)
+    else:
+        minutos = pd.Series([None] * len(df), index=df.index)
+    # Clave de orden = fecha (a medianoche) + minutos de la hora
+    base = fecha_obj.dt.normalize()
+    orden = base + pd.to_timedelta(minutos.fillna(1439).astype(float), unit="m")
+
     out = df.copy()
-    out.insert(0, "MES", obj.dt.month.map(lambda m: MESES_ANO[int(m) - 1] if pd.notna(m) else ""))
-    out.insert(0, "DÍA", obj.dt.weekday.map(lambda w: DIAS_SEMANA[int(w)] if pd.notna(w) else ""))
+    out.insert(0, "MES", fecha_obj.dt.month.map(lambda m: MESES_ANO[int(m) - 1] if pd.notna(m) else ""))
+    out.insert(0, "DÍA", fecha_obj.dt.weekday.map(lambda w: DIAS_SEMANA[int(w)] if pd.notna(w) else ""))
+    out["__orden__"] = orden.values
+
     if not ver_todo:
-        out = out[obj.dt.date == dia_sel]
+        out = out[fecha_obj.dt.date.values == dia_sel]
+
+    out = out.sort_values("__orden__", na_position="last").drop(columns="__orden__")
     return out
 
 def cols_status(df):
@@ -407,24 +448,27 @@ def html_caja_copiar(texto, uid):
     """
 
 def texto_novedades(dia_str, vd, ve, vr):
+    def pre_hora(r):
+        h = su(r.get("HORA", ""))
+        return f"{h} · " if h else ""
     L = [f"*NOVEDADES DEL DÍA {dia_str}*", ""]
     L.append(f"🚨 *DESPACHO ({len(vd)}):*")
     if vd.empty: L.append("Sin novedades.")
     else:
         for _, r in vd.iterrows():
-            L.append(f"• {up(r.get('RUTA',''))} · {up(r.get('NOVEDAD',''))} · {up(r.get('CLIENTE/FARMACIA',''))} — {up(r.get('CONTEXTO',''))}")
+            L.append(f"• {pre_hora(r)}{su(r.get('RUTA',''))} · {su(r.get('NOVEDAD',''))} · {su(r.get('CLIENTE/FARMACIA',''))} — {su(r.get('CONTEXTO',''))}")
     L.append("")
     L.append(f"📦 *ENCOMIENDAS ({len(ve)}):*")
     if ve.empty: L.append("Sin encomiendas.")
     else:
         for _, r in ve.iterrows():
-            L.append(f"• {up(r.get('MOVIMIENTO',''))} · {up(r.get('RUTA',''))} · {up(r.get('TIPO DE ENCOMIENDA',''))} — {up(r.get('DETALLE',''))}")
+            L.append(f"• {pre_hora(r)}{su(r.get('MOVIMIENTO',''))} · {su(r.get('RUTA',''))} · {su(r.get('TIPO DE ENCOMIENDA',''))} — {su(r.get('DETALLE',''))}")
     L.append("")
     L.append(f"🛞 *NOVEDADES POR RUTA ({len(vr)}):*")
     if vr.empty: L.append("Sin novedades.")
     else:
         for _, r in vr.iterrows():
-            L.append(f"• {up(r.get('RUTA',''))} · {up(r.get('TIPO DE NOVEDAD',''))} — {up(r.get('DESCRIPCIÓN',''))}")
+            L.append(f"• {pre_hora(r)}{su(r.get('RUTA',''))} · {su(r.get('TIPO DE NOVEDAD',''))} — {su(r.get('DESCRIPCIÓN',''))}")
     return "\n".join(L)
 
 # ==========================================
@@ -556,11 +600,11 @@ with nov_tab:
 
     t1, t2, t3, t4 = st.tabs(["🚨 Despacho", "📦 Encomiendas", "🛞 Por Ruta", "📱 Texto WhatsApp"])
     with t1:
-        st.dataframe(a_mayusculas(vd).iloc[::-1], use_container_width=True, hide_index=True) if not vd.empty else st.info("Sin registros.")
+        st.dataframe(a_mayusculas(vd), use_container_width=True, hide_index=True) if not vd.empty else st.info("Sin registros.")
     with t2:
-        st.dataframe(a_mayusculas(ve).iloc[::-1], use_container_width=True, hide_index=True) if not ve.empty else st.info("Sin registros.")
+        st.dataframe(a_mayusculas(ve), use_container_width=True, hide_index=True) if not ve.empty else st.info("Sin registros.")
     with t3:
-        st.dataframe(a_mayusculas(vr).iloc[::-1], use_container_width=True, hide_index=True) if not vr.empty else st.info("Sin registros.")
+        st.dataframe(a_mayusculas(vr), use_container_width=True, hide_index=True) if not vr.empty else st.info("Sin registros.")
     with t4:
         import streamlit.components.v1 as components
         dia_txt = "TODO EL HISTÓRICO" if ver_todo else dia_sel.strftime("%d/%m/%Y")
