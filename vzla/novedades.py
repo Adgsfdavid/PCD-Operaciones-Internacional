@@ -230,6 +230,30 @@ def filtrar_por_dia(df, col_fecha, dia_sel):
 # Diccionario normalizado ruta->zona (para auto-asignar zona por ruta)
 NORM_MAPEO = {norm(k): v for k, v in MAPEO_ZONAS_REFERENCIAL.items()}
 
+def _fecha_efectiva(df, hoja):
+    """Serie de fechas para filtrar. En Despacho usa FECHA RECLAMO; si está vacía, FECHA ATENCIÓN."""
+    n = len(df)
+    vacio = pd.Series([""] * n, index=df.index)
+    def col(nombre):
+        return df[nombre].astype(str) if nombre in df.columns else vacio
+    if hoja == "Novedades_Despacho":
+        rec = col("FECHA RECLAMO").apply(lambda x: "" if str(x).strip().lower() in ("", "nan") else str(x))
+        ate = col("FECHA ATENCIÓN").apply(lambda x: "" if str(x).strip().lower() in ("", "nan") else str(x))
+        return rec.where(rec.str.strip() != "", ate)
+    return col(COL_FECHA[hoja])
+
+def preparar_hoja(df, hoja, dia_sel, ver_todo):
+    """Agrega DÍA/MES (desde la fecha efectiva) y filtra por día si corresponde."""
+    if df.empty:
+        return df
+    obj = pd.to_datetime(_fecha_efectiva(df, hoja), dayfirst=True, errors="coerce")
+    out = df.copy()
+    out.insert(0, "MES", obj.dt.month.map(lambda m: MESES_ANO[int(m) - 1] if pd.notna(m) else ""))
+    out.insert(0, "DÍA", obj.dt.weekday.map(lambda w: DIAS_SEMANA[int(w)] if pd.notna(w) else ""))
+    if not ver_todo:
+        out = out[obj.dt.date == dia_sel]
+    return out
+
 def cols_status(df):
     """Garantiza las columnas exactas de Status_Dia, en orden, como texto."""
     if df is None or df.empty:
@@ -348,6 +372,20 @@ def texto_resumen_pizarra(df, zonas, titulo):
     for est in ["DESPACHO", "RETORNO", "RESGUARDO"]:
         c, pct = conteo[est]
         L.append(f"{STATUS_DOT[est]} {STATUS_LABEL[est]}: {c} ({pct}%)")
+    return "\n".join(L)
+
+def texto_cierre(df_status, dia_str, vd, ve, vr):
+    """Reporte de texto que incluye TODO: status (2 bloques) + novedades del día."""
+    L = [f"*CIERRE DEL DÍA {dia_str}*", ""]
+    for zonas, tit in [(ZONAS_DESPACHO, "STATUS DESPACHO"), (ZONAS_EXTRA, "STATUS TRANSBORDO Y ENCOMIENDAS")]:
+        total, conteo = resumen_status(df_status, zonas)
+        L.append(f"🚦 *{tit}* (total {total})")
+        for est in ["DESPACHO", "RETORNO", "RESGUARDO"]:
+            c, pct = conteo[est]
+            L.append(f"{STATUS_DOT[est]} {STATUS_LABEL[est]}: {c} ({pct}%)")
+        L.append("")
+    L.append("───────────────")
+    L.append(texto_novedades(dia_str, vd, ve, vr))
     return "\n".join(L)
 
 def html_caja_copiar(texto, uid):
@@ -503,10 +541,7 @@ with nov_tab:
     df_ruta = leer_hoja_df("Novedades_Ruta")
 
     def preparar(df, hoja):
-        df = agregar_dia_mes(df, COL_FECHA[hoja])
-        if not ver_todo:
-            df = filtrar_por_dia(df, COL_FECHA[hoja], dia_sel)
-        return df
+        return preparar_hoja(df, hoja, dia_sel, ver_todo)
 
     vd = preparar(df_desp, "Novedades_Despacho")
     ve = preparar(df_enc, "Encomiendas")
@@ -535,19 +570,43 @@ with nov_tab:
 # CIERRE 6:20 pm (guardar histórico)
 # ------------------------------------------
 with cierre_tab:
-    st.subheader("📤 Cierre del día (6:20 pm)")
-    st.caption("Guarda una foto del status actual en la hoja Historial_Status con la fecha y la hora de corte.")
-    df_actual = leer_hoja_df("Status_Dia")
-    st.write(f"Unidades en el status actual: **{len(df_actual)}**")
-    if not df_actual.empty:
-        st.dataframe(a_mayusculas(df_actual), use_container_width=True, hide_index=True)
+    st.subheader("📤 Cierre del día — Reporte completo (6:20 pm)")
+    st.caption("Incluye TODO: las 2 imágenes de status + el texto con status y novedades del día. "
+               "Al final, guarda la foto definitiva en Historial_Status.")
+    import streamlit.components.v1 as components
 
-    if st.button("📅 Guardar cierre en el historial", type="primary", use_container_width=True):
-        if df_actual.empty:
+    dia_cierre = st.date_input("📅 Fecha del cierre", value=date.today(), format="DD/MM/YYYY", key="dia_cierre")
+    if st.button("🔄 Actualizar datos del cierre", key="refresh_cierre"):
+        st.cache_data.clear(); st.rerun()
+
+    df_status = cols_status(leer_hoja_df("Status_Dia"))
+    vd = preparar_hoja(leer_hoja_df("Novedades_Despacho"), "Novedades_Despacho", dia_cierre, False)
+    ve = preparar_hoja(leer_hoja_df("Encomiendas"), "Encomiendas", dia_cierre, False)
+    vr = preparar_hoja(leer_hoja_df("Novedades_Ruta"), "Novedades_Ruta", dia_cierre, False)
+
+    nd = len(df_status[df_status["ZONA"].apply(norm).isin([norm(z) for z in ZONAS_DESPACHO])]) if not df_status.empty else 0
+    ne = len(df_status[df_status["ZONA"].apply(norm).isin([norm(z) for z in ZONAS_EXTRA])]) if not df_status.empty else 0
+
+    st.markdown("#### 🖼️ Imagen 1 — Despacho")
+    components.html(html_pizarra_status(df_status, ZONAS_DESPACHO, "CIERRE — DESPACHO", "cdesp"),
+                    height=int(320 + max(1, nd) * 44), scrolling=True)
+    st.markdown("#### 🖼️ Imagen 2 — Transbordo + Encomiendas")
+    components.html(html_pizarra_status(df_status, ZONAS_EXTRA, "CIERRE — TRANSBORDO Y ENCOMIENDAS", "cextra"),
+                    height=int(320 + max(1, ne) * 44), scrolling=True)
+
+    st.markdown("#### 📱 Texto completo del cierre (status + novedades)")
+    dia_txt = dia_cierre.strftime("%d/%m/%Y")
+    components.html(html_caja_copiar(texto_cierre(df_status, dia_txt, vd, ve, vr), "cierre_txt"), height=460)
+
+    st.markdown("---")
+    st.write(f"Unidades en el status actual: **{len(df_status)}**  ·  "
+             f"Novedades del día → despacho: **{len(vd)}**, encomiendas: **{len(ve)}**, ruta: **{len(vr)}**")
+    if st.button("📅 Guardar cierre en el historial (definitivo)", type="primary", use_container_width=True):
+        if df_status.empty:
             st.warning("No hay filas en Status_Dia para guardar.")
         else:
             try:
-                guardar_cierre(df_actual)
+                guardar_cierre(df_status)
                 st.cache_data.clear()
                 st.success("✅ Cierre guardado en Historial_Status.")
             except Exception as e:
