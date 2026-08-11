@@ -44,6 +44,59 @@ MESES_ANO = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
              "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
 # ==========================================
+# MAPEO PREDETERMINADO DE RUTAS -> ZONA
+# (Se usa como plantilla al abrir. Tú borras/añades filas desde la app.)
+# ==========================================
+MAPEO_ZONAS_REFERENCIAL = {
+    # ---- CENTRO ----
+    'CARACAS 1': 'Centro',
+    'CARACAS 2': 'Centro',
+    'CARACAS 3': 'Centro',
+    'CARACAS 4-5': 'Centro',
+    'ARAGUA 1': 'Centro',
+    'ARAGUA 2-SAN JUAN': 'Centro',
+    # ---- CENTRO-OCCIDENTE ----
+    'CARABOBO 1': 'Centro-Occidente',
+    'CARABOBO 2 - COJEDES': 'Centro-Occidente',
+    'CARABOBO 3': 'Centro-Occidente',
+    # ---- OCCIDENTE ----
+    'LARA 1 - PORTUGUESA 1': 'Occidente',
+    'LARA 2 - YARACUY': 'Occidente',
+    'PORTUGUESA 2 - BARINAS 1-2': 'Occidente',
+    'BARINAS 3': 'Occidente',
+    'CORO': 'Occidente',
+    'MARACAIBO 1': 'Occidente',
+    'MARACAIBO 2': 'Occidente',
+    'CABIMAS-CIUDAD OJEDA': 'Occidente',
+    'MERIDA 1-TRUJILLO-PORTUGUESA 3': 'Occidente',
+    'MERIDA 2-TACHIRA': 'Occidente',
+    # ---- ORIENTE ----
+    'MATURIN-PUNTA DE MATA': 'Oriente',
+    'BARCELONA - CLARINES': 'Oriente',
+    'PUERTO ORDAZ - SAN FELIX UPATA': 'Oriente',
+    'CARÚPANO-GUIRIA': 'Oriente',
+    'TUMEREMO': 'Oriente',
+    'BOLIVAR': 'Oriente',
+    'DELTA AMACURO': 'Oriente',
+    'ANACO-CANTAURA': 'Oriente',
+    'GUARICO': 'Oriente',
+    'CUMANA - CUMANACOA': 'Oriente',
+    'NUEVA ESPARTA': 'Oriente',
+    'EL TIGRE': 'Oriente',
+    # ---- TRANSBORDO ----
+    'TRANSBORDO CENTRO OCCIDENTE - IDA': 'Transbordo',
+    'TRANSBORDO CENTRO OCCIDENTE - RETORNO': 'Transbordo',
+    'TRANSBORDO CENTRO / FALCON - IDA': 'Transbordo',
+    'TRANSBORDO CENTRO / FALCON - RETORNO': 'Transbordo',
+    'TRANSBORDO CENTRO - IDA': 'Transbordo',
+    'TRANSBORDO CENTRO - RETORNO': 'Transbordo',
+    'TRANSBORDO OCCIDENTE - IDA': 'Transbordo',
+    'TRANSBORDO OCCIDENTE - RETORNO': 'Transbordo',
+    'TRANSBORDO CARACAS - IDA': 'Transbordo',
+    'TRANSBORDO CARACAS - RETORNO': 'Transbordo',
+}
+
+# ==========================================
 # CONEXION A GOOGLE SHEETS
 # ==========================================
 @st.cache_resource
@@ -140,6 +193,38 @@ def filtrar_por_dia(df, col_fecha, dia_sel):
     if df.empty or col_fecha not in df.columns: return df
     obj = pd.to_datetime(df[col_fecha].astype(str), dayfirst=True, errors="coerce")
     return df[obj.dt.date == dia_sel]
+
+# Diccionario normalizado ruta->zona (para auto-asignar zona por ruta)
+NORM_MAPEO = {norm(k): v for k, v in MAPEO_ZONAS_REFERENCIAL.items()}
+
+def cols_status(df):
+    """Garantiza las columnas exactas de Status_Dia, en orden, como texto."""
+    if df is None or df.empty:
+        df = pd.DataFrame(columns=HOJAS["Status_Dia"])
+    df = df.copy()
+    for c in HOJAS["Status_Dia"]:
+        if c not in df.columns:
+            df[c] = ""
+    return df[HOJAS["Status_Dia"]].fillna("").astype(str)
+
+def plantilla_status():
+    """Tabla base con TODAS las rutas del mapeo (para no escribir de cero)."""
+    filas = []
+    for ruta, zona in MAPEO_ZONAS_REFERENCIAL.items():
+        filas.append({"ZONA": zona, "UNIDAD": "", "CHOFER": "", "AYUDANTE": "",
+                      "RUTA/DESPACHO": ruta, "HORA": "", "UBICACIÓN ACTUAL": "", "STATUS": ""})
+    return cols_status(pd.DataFrame(filas))
+
+def autozona(df):
+    """Rellena la ZONA vacía según la RUTA/DESPACHO usando el mapeo."""
+    df = cols_status(df)
+    def _fz(row):
+        z = str(row.get("ZONA", "")).strip()
+        if z:
+            return z
+        return NORM_MAPEO.get(norm(row.get("RUTA/DESPACHO", "")), z)
+    df["ZONA"] = df.apply(_fz, axis=1)
+    return df
 
 # ==========================================
 # PIZARRA (IMAGEN) Y CAJA DE COPIAR
@@ -285,44 +370,63 @@ pizarra_tab, nov_tab, cierre_tab = st.tabs(["🚦 Status del Día", "🚨 Noveda
 # ------------------------------------------
 with pizarra_tab:
     st.subheader("🚦 Pizarra de Status del Día")
-    st.caption("Puedes llenar/editar aquí o directo en la hoja Status_Dia. Zonas de despacho: Centro, "
-               "Centro-Occidente, Occidente, Oriente. Extra: Transbordo y Encomiendas.")
+    st.caption("Al abrir carga tu último borrador guardado en Status_Dia. Si está vacío, carga la plantilla "
+               "con todas las rutas. Borra/edita las que no apliquen hoy y guarda tu borrador.")
 
-    if st.button("🔄 Traer del Sheet", key="refresh_status"):
+    import streamlit.components.v1 as components
+
+    # Cargar la base la primera vez: lo guardado en el Sheet, o la plantilla si está vacío
+    if "status_df" not in st.session_state:
+        base = leer_hoja_df("Status_Dia")
+        st.session_state["status_df"] = cols_status(base) if not base.empty else plantilla_status()
+    st.session_state.setdefault("status_ver", 0)
+
+    b1, b2 = st.columns(2)
+    if b1.button("🔄 Traer lo guardado del Sheet", use_container_width=True):
+        base = leer_hoja_df("Status_Dia")
+        st.session_state["status_df"] = cols_status(base) if not base.empty else plantilla_status()
+        st.session_state["status_ver"] += 1
         st.cache_data.clear(); st.rerun()
-
-    df_status = leer_hoja_df("Status_Dia")
-    if df_status.empty:
-        df_status = pd.DataFrame(columns=HOJAS["Status_Dia"])
-    for c in HOJAS["Status_Dia"]:
-        if c not in df_status.columns: df_status[c] = ""
-    df_status = df_status[HOJAS["Status_Dia"]]
+    if b2.button("📋 Cargar plantilla de rutas (predeterminado)", use_container_width=True):
+        st.session_state["status_df"] = plantilla_status()
+        st.session_state["status_ver"] += 1
+        st.rerun()
 
     edit = st.data_editor(
-        df_status, num_rows="dynamic", use_container_width=True, hide_index=True,
+        st.session_state["status_df"], num_rows="dynamic", use_container_width=True, hide_index=True,
         column_config={
             "ZONA": st.column_config.SelectboxColumn("ZONA", options=ZONAS_TODAS, required=False),
             "STATUS": st.column_config.SelectboxColumn("STATUS", options=STATUS_OPC, required=False),
-        }, key="editor_status"
+        }, key=f"editor_status_{st.session_state['status_ver']}"
     )
 
-    if st.button("💾 Guardar status en el Sheet", type="primary", use_container_width=True):
+    a1, a2 = st.columns(2)
+    if a1.button("🧭 Auto-asignar zonas por ruta", use_container_width=True):
+        st.session_state["status_df"] = autozona(edit)
+        st.session_state["status_ver"] += 1
+        st.rerun()
+    if a2.button("💾 Guardar en Status_Dia (borrador de trabajo)", type="primary", use_container_width=True):
         try:
             guardar_status(edit)
+            st.session_state["status_df"] = cols_status(edit)
             st.cache_data.clear()
-            st.success("✅ Status guardado en el Sheet.")
+            st.success("✅ Borrador guardado en Status_Dia. Al recargar saldrá como lo dejaste.")
         except Exception as e:
             st.error(f"No se pudo guardar: {e}")
 
+    st.info("ℹ️ Este botón es tu **borrador**. El cierre definitivo (Historial) está en la pestaña "
+            "«📤 Cierre 6:20 pm», solo cuando estés 100% seguro.")
+
     st.markdown("---")
     st.markdown("### 🖼️ Imagen 1 — Despacho por zonas")
-    import streamlit.components.v1 as components
-    alto1 = 260 + max(1, len(edit[edit["ZONA"].apply(norm).isin([norm(z) for z in ZONAS_DESPACHO])])) * 42
-    components.html(html_pizarra_status(edit, ZONAS_DESPACHO, "PIZARRA DE STATUS — DESPACHO", "desp"), height=int(alto1), scrolling=True)
+    n1 = len(edit[edit["ZONA"].apply(norm).isin([norm(z) for z in ZONAS_DESPACHO])]) if not edit.empty and "ZONA" in edit.columns else 0
+    components.html(html_pizarra_status(edit, ZONAS_DESPACHO, "PIZARRA DE STATUS — DESPACHO", "desp"),
+                    height=int(300 + max(1, n1) * 44), scrolling=True)
 
     st.markdown("### 🖼️ Imagen 2 — Transbordo + Encomiendas")
-    alto2 = 260 + max(1, len(edit[edit["ZONA"].apply(norm).isin([norm(z) for z in ZONAS_EXTRA])])) * 42
-    components.html(html_pizarra_status(edit, ZONAS_EXTRA, "PIZARRA DE STATUS — TRANSBORDO Y ENCOMIENDAS", "extra"), height=int(alto2), scrolling=True)
+    n2 = len(edit[edit["ZONA"].apply(norm).isin([norm(z) for z in ZONAS_EXTRA])]) if not edit.empty and "ZONA" in edit.columns else 0
+    components.html(html_pizarra_status(edit, ZONAS_EXTRA, "PIZARRA DE STATUS — TRANSBORDO Y ENCOMIENDAS", "extra"),
+                    height=int(300 + max(1, n2) * 44), scrolling=True)
 
 # ------------------------------------------
 # NOVEDADES (visor + texto WhatsApp)
