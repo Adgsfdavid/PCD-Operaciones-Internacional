@@ -37,7 +37,10 @@ ZONAS_TODAS = ["Centro", "Centro-Occidente", "Occidente", "Oriente", "Transbordo
 ZONAS_DESPACHO = ["Centro", "Centro-Occidente", "Occidente", "Oriente"]
 ZONAS_EXTRA = ["Transbordo", "Encomiendas"]
 STATUS_OPC = ["Despacho", "Retorno", "Resguardo"]
-STATUS_COLOR = {"DESPACHO": "#1565c0", "RETORNO": "#e65100", "RESGUARDO": "#2e7d32"}
+# Colores nuevos: Despacho=verde, Retorno=azul, Resguardo=rojo
+STATUS_COLOR = {"DESPACHO": "#2e7d32", "RETORNO": "#1565c0", "RESGUARDO": "#c62828"}
+STATUS_LABEL = {"DESPACHO": "DESPACHANDO", "RETORNO": "RETORNANDO", "RESGUARDO": "RESGUARDO"}
+STATUS_DOT = {"DESPACHO": "🟢", "RETORNO": "🔵", "RESGUARDO": "🔴"}
 
 DIAS_SEMANA = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 MESES_ANO = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -169,6 +172,36 @@ def norm(s):
 def up(v):
     return str(v).upper() if isinstance(v, str) else v
 
+def s(v):
+    """Texto seguro: convierte None / NaN a cadena vacía (evita errores con celdas vacías)."""
+    if v is None:
+        return ""
+    try:
+        if isinstance(v, float) and pd.isna(v):
+            return ""
+    except Exception:
+        pass
+    txt = str(v)
+    return "" if txt.strip().lower() == "nan" else txt
+
+def su(v):
+    """Texto seguro en MAYÚSCULA."""
+    return s(v).upper()
+
+def resumen_status(df, zonas):
+    """Cuenta unidades por status dentro de las zonas dadas. Devuelve (total, {STATUS: (cant, pct)})."""
+    if df.empty or "ZONA" not in df.columns:
+        sub = df.iloc[0:0]
+    else:
+        sub = df[df["ZONA"].apply(norm).isin([norm(z) for z in zonas])]
+    total = len(sub)
+    conteo = {}
+    for est in ["DESPACHO", "RETORNO", "RESGUARDO"]:
+        c = int(sub["STATUS"].apply(norm).eq(est).sum()) if total and "STATUS" in sub.columns else 0
+        pct = round(c / total * 100) if total else 0
+        conteo[est] = (c, pct)
+    return total, conteo
+
 def a_mayusculas(df):
     if df.empty: return df
     df = df.copy()
@@ -235,7 +268,8 @@ def badge_status(status):
     return f'<span style="background:{color};color:#fff;padding:3px 12px;border-radius:12px;font-weight:bold;font-size:12px;white-space:nowrap;">{txt}</span>'
 
 def html_pizarra_status(df, zonas, titulo, uid):
-    fecha_txt = datetime.now().strftime("%A, %d/%m/%Y")
+    fecha_txt = datetime.now().strftime("%d/%m/%Y")
+    bd = "border:1px solid #000;"  # borde negro
     total = 0
     cuerpo = ""
     for zona in zonas:
@@ -243,44 +277,57 @@ def html_pizarra_status(df, zonas, titulo, uid):
         if sub.empty:
             continue
         total += len(sub)
-        cuerpo += f"""<tr><td colspan="6" style="background:#0d2b57;color:#fff;font-weight:bold;padding:8px 12px;font-size:14px;">📍 ZONA {_html.escape(zona.upper())} &nbsp;—&nbsp; {len(sub)} unidad(es)</td></tr>"""
+        cuerpo += f"""<tr><td colspan="6" style="{bd}background:#0d2b57;color:#fff;font-weight:bold;padding:8px 12px;font-size:14px;">📍 ZONA {_html.escape(zona.upper())} &nbsp;—&nbsp; {len(sub)} unidad(es)</td></tr>"""
         for i, (_, r) in enumerate(sub.iterrows()):
             fondo = "#f4f6f9" if i % 2 == 0 else "#ffffff"
-            personal = _html.escape(up(r.get("CHOFER", "")))
-            ayud = up(r.get("AYUDANTE", ""))
-            if ayud: personal += f" / {_html.escape(ayud)}"
+            personal = _html.escape(su(r.get("CHOFER", "")))
+            ayud = su(r.get("AYUDANTE", ""))
+            if ayud:  # el ayudante puede estar vacío, no es obligatorio
+                personal += f" / {_html.escape(ayud)}"
             cuerpo += f"""<tr style="background:{fondo};">
-                <td style="padding:8px 10px;font-weight:bold;color:#0d2b57;border-bottom:1px solid #e0e4ea;">{_html.escape(up(r.get('RUTA/DESPACHO','')))}</td>
-                <td style="padding:8px 10px;border-bottom:1px solid #e0e4ea;">{_html.escape(up(r.get('UNIDAD','')))}</td>
-                <td style="padding:8px 10px;border-bottom:1px solid #e0e4ea;font-size:13px;">{personal}</td>
-                <td style="padding:8px 10px;border-bottom:1px solid #e0e4ea;white-space:nowrap;">{_html.escape(up(r.get('HORA','')))}</td>
-                <td style="padding:8px 10px;border-bottom:1px solid #e0e4ea;font-weight:bold;">{_html.escape(up(r.get('UBICACIÓN ACTUAL','')))}</td>
-                <td style="padding:8px 10px;border-bottom:1px solid #e0e4ea;text-align:center;">{badge_status(r.get('STATUS',''))}</td>
+                <td style="{bd}padding:8px 10px;font-weight:bold;color:#0d2b57;">{_html.escape(su(r.get('RUTA/DESPACHO','')))}</td>
+                <td style="{bd}padding:8px 10px;">{_html.escape(su(r.get('UNIDAD','')))}</td>
+                <td style="{bd}padding:8px 10px;font-size:13px;">{personal}</td>
+                <td style="{bd}padding:8px 10px;white-space:nowrap;">{_html.escape(su(r.get('HORA','')))}</td>
+                <td style="{bd}padding:8px 10px;font-weight:bold;">{_html.escape(su(r.get('UBICACIÓN ACTUAL','')))}</td>
+                <td style="{bd}padding:8px 10px;text-align:center;">{badge_status(r.get('STATUS',''))}</td>
             </tr>"""
     if total == 0:
-        cuerpo = """<tr><td colspan="6" style="padding:18px;text-align:center;color:#888;">Sin unidades para estas zonas.</td></tr>"""
+        cuerpo = f"""<tr><td colspan="6" style="{bd}padding:18px;text-align:center;color:#888;">Sin unidades para estas zonas.</td></tr>"""
+
+    # Footer de resumen (conteo + porcentaje por status)
+    _, conteo = resumen_status(df, zonas)
+    chips = ""
+    for est in ["DESPACHO", "RETORNO", "RESGUARDO"]:
+        c, pct = conteo[est]
+        chips += f"""<span style="display:inline-block;margin:0 10px;font-weight:bold;">
+            <span style="color:{STATUS_COLOR[est]};">● </span>{STATUS_LABEL[est]}: {c} ({pct}%)</span>"""
+    footer = f"""<div style="background:#f0f2f5;{bd}padding:10px 14px;font-family:Arial,sans-serif;font-size:14px;color:#1a1a1a;">
+        <b>TOTAL RUTAS / UNIDADES: {total}</b> &nbsp;&nbsp; {chips}
+    </div>"""
 
     return f"""
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <div style="text-align:right;margin-bottom:8px;">
       <button onclick="descargar_{uid}()" style="background:#0d47a1;color:#fff;border:none;padding:10px 18px;border-radius:6px;cursor:pointer;font-weight:bold;">⬇️ Descargar imagen</button>
     </div>
-    <div id="piz-{uid}" style="background:#fff;font-family:Arial,sans-serif;border:1px solid #ccc;border-radius:8px;overflow:hidden;">
-      <div style="background:#0d47a1;color:#fff;padding:14px 16px;">
+    <div id="piz-{uid}" style="background:#fff;font-family:Arial,sans-serif;{bd}overflow:hidden;">
+      <div style="background:#0d47a1;color:#fff;padding:14px 16px;{bd}">
         <div style="font-size:20px;font-weight:bold;">🚦 {_html.escape(titulo)}</div>
-        <div style="font-size:13px;opacity:.9;">Drotaca · PERÍODO: {_html.escape(fecha_txt)} · Total: {total} unidad(es)</div>
+        <div style="font-size:13px;opacity:.9;">Drotaca · {_html.escape(fecha_txt)} · Total: {total} unidad(es)</div>
       </div>
-      <table style="width:100%;border-collapse:collapse;font-size:13px;color:#1a1a1a;">
+      <table style="width:100%;border-collapse:collapse;font-size:13px;color:#1a1a1a;{bd}">
         <tr style="background:#1c3d6e;color:#fff;">
-          <th style="padding:9px 10px;text-align:left;">RUTA / DESPACHO</th>
-          <th style="padding:9px 10px;text-align:left;">UNIDAD</th>
-          <th style="padding:9px 10px;text-align:left;">CHÓFER / AYUDANTE</th>
-          <th style="padding:9px 10px;text-align:left;">HORA</th>
-          <th style="padding:9px 10px;text-align:left;">UBICACIÓN</th>
-          <th style="padding:9px 10px;text-align:center;">STATUS</th>
+          <th style="{bd}padding:9px 10px;text-align:left;">RUTA / DESPACHO</th>
+          <th style="{bd}padding:9px 10px;text-align:left;">UNIDAD</th>
+          <th style="{bd}padding:9px 10px;text-align:left;">CHÓFER / AYUDANTE</th>
+          <th style="{bd}padding:9px 10px;text-align:left;">HORA</th>
+          <th style="{bd}padding:9px 10px;text-align:left;">UBICACIÓN</th>
+          <th style="{bd}padding:9px 10px;text-align:center;">STATUS</th>
         </tr>
         {cuerpo}
       </table>
+      {footer}
     </div>
     <script>
     function descargar_{uid}() {{
@@ -293,6 +340,15 @@ def html_pizarra_status(df, zonas, titulo, uid):
     }}
     </script>
     """
+
+def texto_resumen_pizarra(df, zonas, titulo):
+    fecha_txt = datetime.now().strftime("%d/%m/%Y")
+    total, conteo = resumen_status(df, zonas)
+    L = [f"*{titulo} — {fecha_txt}*", f"TOTAL RUTAS / UNIDADES: {total}", ""]
+    for est in ["DESPACHO", "RETORNO", "RESGUARDO"]:
+        c, pct = conteo[est]
+        L.append(f"{STATUS_DOT[est]} {STATUS_LABEL[est]}: {c} ({pct}%)")
+    return "\n".join(L)
 
 def html_caja_copiar(texto, uid):
     texto = "" if texto is None else str(texto)
@@ -421,12 +477,16 @@ with pizarra_tab:
     st.markdown("### 🖼️ Imagen 1 — Despacho por zonas")
     n1 = len(edit[edit["ZONA"].apply(norm).isin([norm(z) for z in ZONAS_DESPACHO])]) if not edit.empty and "ZONA" in edit.columns else 0
     components.html(html_pizarra_status(edit, ZONAS_DESPACHO, "PIZARRA DE STATUS — DESPACHO", "desp"),
-                    height=int(300 + max(1, n1) * 44), scrolling=True)
+                    height=int(320 + max(1, n1) * 44), scrolling=True)
+    st.caption("📱 Texto para WhatsApp (Despacho):")
+    components.html(html_caja_copiar(texto_resumen_pizarra(edit, ZONAS_DESPACHO, "STATUS DESPACHO"), "txt_desp"), height=250)
 
     st.markdown("### 🖼️ Imagen 2 — Transbordo + Encomiendas")
     n2 = len(edit[edit["ZONA"].apply(norm).isin([norm(z) for z in ZONAS_EXTRA])]) if not edit.empty and "ZONA" in edit.columns else 0
     components.html(html_pizarra_status(edit, ZONAS_EXTRA, "PIZARRA DE STATUS — TRANSBORDO Y ENCOMIENDAS", "extra"),
-                    height=int(300 + max(1, n2) * 44), scrolling=True)
+                    height=int(320 + max(1, n2) * 44), scrolling=True)
+    st.caption("📱 Texto para WhatsApp (Transbordo + Encomiendas):")
+    components.html(html_caja_copiar(texto_resumen_pizarra(edit, ZONAS_EXTRA, "STATUS TRANSBORDO Y ENCOMIENDAS"), "txt_extra"), height=250)
 
 # ------------------------------------------
 # NOVEDADES (visor + texto WhatsApp)
