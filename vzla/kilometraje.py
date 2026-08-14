@@ -77,16 +77,58 @@ def plate(x):
 # ==========================================
 # LECTURA DE EXCEL (cualquiera, incl .xlsm)
 # ==========================================
-def _leer_excel(file):
+def _leer_excel(file, as_str=True):
     nombre = getattr(file, "name", "").lower()
+    dt = str if as_str else None
     if nombre.endswith(".xls"):
         try:
-            return pd.read_excel(file, header=None, dtype=str, engine="xlrd")
+            return pd.read_excel(file, header=None, dtype=dt, engine="xlrd")
         except Exception:
             file.seek(0)
             return pd.read_html(file)[0]
     # xlsx y xlsm -> openpyxl
-    return pd.read_excel(file, header=None, dtype=str, engine="openpyxl")
+    return pd.read_excel(file, header=None, dtype=dt, engine="openpyxl")
+
+def _parse_fecha(v):
+    """Interpreta una celda de encabezado como fecha: fecha real, serial de Excel, texto o 'dd-mes'."""
+    if v is None:
+        return None
+    if isinstance(v, (pd.Timestamp, datetime)):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    # número serie de Excel
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        try:
+            if 20000 <= float(v) <= 80000:
+                return pd.to_datetime(float(v), unit="D", origin="1899-12-30").date()
+        except Exception:
+            pass
+    s = str(v).strip()
+    if not s or s.lower() == "nan":
+        return None
+    if re.fullmatch(r'\d{4,6}(\.0)?', s):  # serial como texto
+        try:
+            return pd.to_datetime(float(s), unit="D", origin="1899-12-30").date()
+        except Exception:
+            pass
+    iso = bool(re.match(r'^\d{4}[-/]\d{1,2}[-/]\d{1,2}', s))  # año primero -> no dayfirst
+    d = pd.to_datetime(s, dayfirst=not iso, errors="coerce")
+    if pd.notna(d):
+        return d.date()
+    meses = {'ene': 1, 'feb': 2, 'mar': 3, 'abr': 4, 'may': 5, 'jun': 6,
+             'jul': 7, 'ago': 8, 'sep': 9, 'set': 9, 'oct': 10, 'nov': 11, 'dic': 12}
+    m = re.search(r'(\d{1,2})[\s\-/]*([a-zA-Zñ]{3,})', s.lower())
+    if m:
+        dia = int(m.group(1)); mes = meses.get(m.group(2)[:3])
+        if mes:
+            am = re.search(r'(20\d{2})', s)
+            anio = int(am.group(1)) if am else datetime.now().year
+            try:
+                return date(anio, mes, dia)
+            except Exception:
+                pass
+    return None
 
 def leer_odometro(file):
     """Devuelve dict UNIDAD -> recorrido (km del odómetro GPS)."""
@@ -114,8 +156,9 @@ def leer_odometro(file):
     return mp
 
 def leer_km_diario(file, fecha_sel):
-    """Devuelve (dict UNIDAD -> km de la fecha, nombre_columna) del archivo de km diario."""
-    raw = _leer_excel(file)
+    """Devuelve (dict UNIDAD -> km de la fecha, etiqueta_columna) del archivo de km diario.
+    Detecta la fecha aunque venga como fecha real, serial de Excel o texto."""
+    raw = _leer_excel(file, as_str=False)
     hrow = None
     for r in range(min(15, len(raw))):
         fila = [str(x).strip().upper() for x in raw.iloc[r].tolist()]
@@ -124,27 +167,24 @@ def leer_km_diario(file, fecha_sel):
             break
     if hrow is None:
         hrow = 0
-    df = raw.iloc[hrow:].reset_index(drop=True)
-    df.columns = [str(c).strip() for c in df.iloc[0].tolist()]
-    df = df.iloc[1:].reset_index(drop=True)
-    col_u = next((c for c in df.columns if str(c).upper() == "UNIDAD"), None)
-    if not col_u:
-        return {}, None
-    # localizar la columna de la fecha seleccionada
-    col_fecha = None
-    for c in df.columns:
-        d = pd.to_datetime(str(c), dayfirst=True, errors="coerce")
-        if pd.notna(d) and d.date() == fecha_sel:
-            col_fecha = c
+    headers = raw.iloc[hrow].tolist()
+    data = raw.iloc[hrow + 1:].reset_index(drop=True)
+
+    col_u_idx = next((i for i, h in enumerate(headers) if str(h).strip().upper() == "UNIDAD"), None)
+    col_f_idx, etiqueta = None, None
+    for i, h in enumerate(headers):
+        if _parse_fecha(h) == fecha_sel:
+            col_f_idx, etiqueta = i, str(h)
             break
-    if col_fecha is None:
+    if col_u_idx is None or col_f_idx is None:
         return {}, None
+
     mp = {}
-    for _, r in df.iterrows():
-        u = plate(r[col_u])
+    for _, row in data.iterrows():
+        u = plate(row.iloc[col_u_idx])
         if u and u != "NAN":
-            mp[u] = to_num(r[col_fecha])
-    return mp, str(col_fecha)
+            mp[u] = to_num(row.iloc[col_f_idx])
+    return mp, etiqueta
 
 def leer_plantilla_sheet(libro):
     ws = buscar_ws(libro, "PLANTIL", "KM")
@@ -219,11 +259,10 @@ def exportar_excel(df):
 # EMPUJE A KM-TABLERO / KM-ODOMETRO
 # ==========================================
 def _fecha_col_index(ws, fecha_sel):
-    """Busca en la fila 1 la columna cuya fecha coincide (dd/mm). Devuelve (indice_1based | None, header)."""
+    """Busca en la fila 1 la columna cuya fecha coincide. Devuelve (indice_1based | None, header)."""
     header = ws.row_values(1)
     for i, h in enumerate(header):
-        d = pd.to_datetime(str(h), dayfirst=True, errors="coerce")
-        if pd.notna(d) and d.date() == fecha_sel:
+        if _parse_fecha(h) == fecha_sel:
             return i + 1, header
     return None, header
 
