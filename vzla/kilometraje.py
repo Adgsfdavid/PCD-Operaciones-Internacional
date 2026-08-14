@@ -218,8 +218,8 @@ def exportar_excel(df):
 # ==========================================
 # EMPUJE A KM-TABLERO / KM-ODOMETRO
 # ==========================================
-def _col_fecha_en_hoja(ws, fecha_sel):
-    """Busca en la fila 1 la columna cuya fecha coincide; devuelve índice (1-based) o None y la fila header."""
+def _fecha_col_index(ws, fecha_sel):
+    """Busca en la fila 1 la columna cuya fecha coincide (dd/mm). Devuelve (indice_1based | None, header)."""
     header = ws.row_values(1)
     for i, h in enumerate(header):
         d = pd.to_datetime(str(h), dayfirst=True, errors="coerce")
@@ -231,31 +231,37 @@ def _col_unidad(header):
     for i, h in enumerate(header):
         if str(h).strip().upper() in ("UNIDAD", "PLACA"):
             return i + 1
-    return 1  # por defecto, primera columna
+    return 2  # por defecto columna B (A=CLASIFICACION, B=UNIDAD, C=TIPO)
 
 def empujar_a_hoja(ws, fecha_sel, valores_por_placa):
-    """Escribe valores_por_placa (dict UNIDAD->valor) en la columna de la fecha. Crea la columna si no existe."""
+    """Escribe valores (dict UNIDAD->valor) en la columna de la fecha, formato '54.888,90 Kms'.
+    La placa se busca en la columna UNIDAD (por defecto B). Si la fecha no existe, crea la columna al final."""
     header = ws.row_values(1)
     col_u = _col_unidad(header)
-    col_fecha, header = _col_fecha_en_hoja(ws, fecha_sel)
+    col_fecha, header = _fecha_col_index(ws, fecha_sel)
     if col_fecha is None:
         col_fecha = len(header) + 1
-        ws.update_cell(1, col_fecha, fecha_sel.strftime("%d/%m/%Y"))
-    # mapa placa -> fila
+        if hasattr(fecha_sel, "day"):
+            etiqueta = f"{fecha_sel.day}/{fecha_sel.month}/{fecha_sel.year}"
+        else:
+            etiqueta = str(fecha_sel)
+        ws.update_cell(1, col_fecha, etiqueta)
+    # mapa placa -> fila (desde la fila 2)
     placas_col = ws.col_values(col_u)
     fila_de = {}
     for idx, p in enumerate(placas_col[1:], start=2):
-        fila_de[plate(p)] = idx
+        if str(p).strip():
+            fila_de[plate(p)] = idx
     from gspread.utils import rowcol_to_a1
     updates = []
-    creadas = 0
     for u, val in valores_por_placa.items():
         if val is None or (isinstance(val, float) and pd.isna(val)):
             continue
         f = fila_de.get(plate(u))
         if f is None:
             continue
-        updates.append({"range": rowcol_to_a1(f, col_fecha), "values": [[fmt_km(val)]]})
+        texto = fmt_km(val) + " Kms"   # respeta tu formato: 54.888,90 Kms
+        updates.append({"range": rowcol_to_a1(f, col_fecha), "values": [[texto]]})
     if updates:
         ws.batch_update(updates, value_input_option="USER_ENTERED")
     return len(updates)
