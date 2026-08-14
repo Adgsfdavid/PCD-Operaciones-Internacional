@@ -216,8 +216,11 @@ def procesar(plantilla, odo_map, ayer_map):
     # Regla: recorrido > 125 y CLASIFICACION != ODOMETRO -> HOY vacío (para llenar manual)
     clasif = df["CLASIFICACION"].fillna("").astype(str).str.upper().str.strip()
     cond = (df["RECORRIDO"] > 125) & (clasif != "ODOMETRO")
-    df.loc[cond, "HOY"] = pd.NA
+    df.loc[cond, "HOY"] = None
     df["TOMAR"] = pd.to_numeric(df["HOY"], errors="coerce") - pd.to_numeric(df["AYER"], errors="coerce")
+    # Columnas numéricas float: los vacíos quedan como NaN (el editor los muestra en blanco, no 'None')
+    for c in ["AYER", "HOY", "RECORRIDO", "TOMAR"]:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
 
 def recalcular_tomar(df):
