@@ -49,12 +49,29 @@ def buscar_ws(libro, *claves):
 # NUMEROS
 # ==========================================
 def to_num(x):
-    """'54.773,54' -> 54773.54 ; '484,00' -> 484.0 ; '1560' -> 1560.0"""
-    s = str(x).replace("Kms", "").strip()
-    if s == "" or s.lower() == "nan":
+    """Lee km en cualquier formato que peguen: 136.454 / 452084 / 282536 km / 195.755 km /
+    136,454 / 55.422,95 / 55,422.95. Devuelve float o None."""
+    if x is None:
         return None
-    if "," in s:
-        s = s.replace(".", "").replace(",", ".")
+    s = str(x).strip().lower()
+    s = re.sub(r'k\s*m?s?\b', '', s)          # quitar 'km' / 'kms'
+    s = re.sub(r'[^0-9.,]', '', s)            # dejar solo dígitos y separadores
+    if s == "":
+        return None
+    has_dot, has_com = "." in s, "," in s
+    if has_dot and has_com:
+        # el separador que aparece de último es el decimal
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")   # europeo: . miles, , decimal
+        else:
+            s = s.replace(",", "")                      # us: , miles, . decimal
+    elif has_com:
+        after = s.split(",")[-1]
+        s = s.replace(",", ".") if (s.count(",") == 1 and len(after) in (1, 2)) else s.replace(",", "")
+    elif has_dot:
+        after = s.split(".")[-1]
+        if not (s.count(".") == 1 and len(after) in (1, 2)):
+            s = s.replace(".", "")                       # puntos = miles
     try:
         return float(s)
     except Exception:
@@ -350,34 +367,64 @@ if st.button("⚙️ Procesar (traer plantilla del Sheet y calcular)", type="pri
             st.exception(e)
 
 if "km_df" in st.session_state:
-    df = st.session_state["km_df"]
+    dffull = st.session_state["km_df"]
+
+    hoy_n = pd.to_numeric(dffull["HOY"], errors="coerce")
+    ayer_n = pd.to_numeric(dffull["AYER"], errors="coerce")
+    tomar_n = pd.to_numeric(dffull["TOMAR"], errors="coerce")
+
+    # KPIs
+    k1, k2, k3 = st.columns(3)
+    k1.metric("🛞 Recorrido total (Σ TOMAR)", fmt_km(tomar_n.sum()) + " km")
+    k2.metric("Unidades", len(dffull))
+    k3.metric("Sin HOY (pendientes)", int(hoy_n.isna().sum()))
 
     # Alertas
-    rec_alto = df[pd.to_numeric(df["RECORRIDO"], errors="coerce") > 1000]["UNIDAD"].tolist()
-    faltan_hoy = df[pd.to_numeric(df["HOY"], errors="coerce").isna()]["UNIDAD"].tolist()
+    rec_alto = dffull[pd.to_numeric(dffull["RECORRIDO"], errors="coerce") > 1000]["UNIDAD"].tolist()
+    retro = dffull[(hoy_n.notna()) & (ayer_n.notna()) & (hoy_n < ayer_n)]["UNIDAD"].tolist()
+    faltan_hoy = dffull[hoy_n.isna()]["UNIDAD"].tolist()
+    if retro:
+        st.error("⛔ HOY es MENOR que AYER (odómetro hacia atrás, revisar): " + ", ".join(retro))
     if rec_alto:
         st.warning("⚠️ Recorrido > 1000 km (revisar): " + ", ".join(rec_alto))
     if faltan_hoy:
-        st.info(f"✏️ {len(faltan_hoy)} unidades quedaron con HOY vacío para que las completes manualmente "
-                "(recorrido > 125 y no son ODOMETRO): " + ", ".join(faltan_hoy))
+        st.info(f"✏️ {len(faltan_hoy)} unidades con HOY vacío para completar (recorrido > 125 y no ODOMETRO): "
+                + ", ".join(faltan_hoy))
 
     st.markdown("#### 2) Edita el HOY que falte (los demás se calculan solos)")
-    st.caption("Edita AYER/HOY/RECORRIDO si hace falta. TOMAR = HOY − AYER se recalcula al pulsar el botón de abajo.")
+    solo_pend = st.checkbox("🔎 Mostrar solo unidades sin HOY (pendientes)")
+    st.caption("Puedes pegar los km como quieras (136.454 · 452084 · 195.755 km · 136,454). "
+               "TOMAR = HOY − AYER se recalcula al pulsar el botón de abajo.")
+
+    vista_edit = dffull[hoy_n.isna()] if solo_pend else dffull
     edit = st.data_editor(
-        df, use_container_width=True, hide_index=True, num_rows="dynamic",
+        vista_edit, use_container_width=True, hide_index=True,
+        num_rows="fixed" if solo_pend else "dynamic",
         column_config={
             "AYER": st.column_config.NumberColumn("AYER", format="%.2f"),
             "HOY": st.column_config.NumberColumn("HOY", format="%.2f"),
             "RECORRIDO": st.column_config.NumberColumn("RECORRIDO", format="%.2f"),
             "TOMAR": st.column_config.NumberColumn("TOMAR (auto)", format="%.2f", disabled=True),
-        }, key="km_editor"
+        }, key=f"km_editor_{'pend' if solo_pend else 'all'}"
     )
 
-    if st.button("🔄 Recalcular TOMAR (HOY − AYER)", use_container_width=True):
-        st.session_state["km_df"] = recalcular_tomar(edit)
+    if st.button("🔄 Recalcular / guardar cambios", type="primary", use_container_width=True):
+        if solo_pend:
+            base = dffull.copy()
+            base_key = base["UNIDAD"].apply(plate)
+            for _, row in edit.iterrows():
+                mask = base_key == plate(row["UNIDAD"])
+                for col in ["AYER", "HOY", "RECORRIDO"]:
+                    base.loc[mask, col] = to_num(row[col]) if isinstance(row[col], str) else row[col]
+            st.session_state["km_df"] = recalcular_tomar(base)
+        else:
+            e = edit.copy()
+            for col in ["AYER", "HOY", "RECORRIDO"]:
+                e[col] = e[col].apply(lambda v: to_num(v) if isinstance(v, str) else v)
+            st.session_state["km_df"] = recalcular_tomar(e)
         st.rerun()
 
-    dfx = recalcular_tomar(edit)
+    dfx = st.session_state["km_df"]
 
     st.markdown("#### 3) Vista con formato (480.352,50)")
     vista = pd.DataFrame({
@@ -400,14 +447,14 @@ if "km_df" in st.session_state:
     st.markdown("#### 4) Cargar al Excel master (Google Sheet)")
     fecha_push = st.date_input("📅 Fecha destino en KM-TABLERO / KM-ODOMETRO",
                                value=st.session_state.get("km_fecha", date.today()), format="DD/MM/YYYY", key="fpush")
-    st.caption("Escribe la columna HOY en la hoja **KM-TABLERO** y la columna TOMAR en la hoja **KM-ODOMETRO**, "
+    st.caption("Escribe la columna HOY en **KM-TABLERO** y la columna TOMAR en **KM-ODOMETRO**, "
                "en la columna de esa fecha (si no existe, la crea al final).")
     confirmar = st.checkbox("Confirmo que quiero escribir en el Google Sheet")
     if st.button("💾 Cargar datos al master", type="primary", use_container_width=True, disabled=not confirmar):
         try:
-            dff = recalcular_tomar(edit)
-            hoy_map = {plate(r["UNIDAD"]): to_num(r["HOY"]) if isinstance(r["HOY"], str) else r["HOY"] for _, r in dff.iterrows()}
-            tomar_map = {plate(r["UNIDAD"]): to_num(r["TOMAR"]) if isinstance(r["TOMAR"], str) else r["TOMAR"] for _, r in dff.iterrows()}
+            dff = st.session_state["km_df"]
+            hoy_map = {plate(r["UNIDAD"]): (to_num(r["HOY"]) if isinstance(r["HOY"], str) else r["HOY"]) for _, r in dff.iterrows()}
+            tomar_map = {plate(r["UNIDAD"]): (to_num(r["TOMAR"]) if isinstance(r["TOMAR"], str) else r["TOMAR"]) for _, r in dff.iterrows()}
             ws_tab = buscar_ws(libro, "TABLERO")
             ws_odo = buscar_ws(libro, "ODOMETRO")
             if ws_tab is None or ws_odo is None:
