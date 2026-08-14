@@ -89,6 +89,7 @@ else:
             st.Page("vzla/app.py", title="Trafico y Salidas", icon="📊"),
             st.Page("vzla/novedades.py", title="Novedades y Status", icon="📝"),
             st.Page("vzla/velocidad.py", title="Exceso de Velocidad", icon="🚨"),
+            st.Page("vzla/kilometraje.py", title="Construcción de Kilometraje", icon="🛞"),
             st.Page("vzla/compras_flota.py", title="Solicitud de Compras", icon="🛒"),
             st.Page("vzla/gps_chinitas.py", title="Análisis de Rutas GPS", icon="🛰️") 
         ]
