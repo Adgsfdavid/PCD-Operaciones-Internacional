@@ -18,3 +18,4 @@ geopy
 fpdf2
 google-generativeai
 folium
+staticmap
