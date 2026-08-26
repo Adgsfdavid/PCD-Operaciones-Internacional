@@ -621,44 +621,39 @@ with t_reportes:
         placas_con_datos = [p for p in placas if reportes_con_datos.get(p)]
         placas_sin_datos = [p for p in placas if not reportes_con_datos.get(p)]
 
-        # --- Botón para enviar TODOS los reportes de una vez ---
+        # --- Lista para enviar los reportes con datos, uno por uno con un clic cada uno ---
         st.markdown("### 📤 Envío masivo")
-        st.caption("Abre un chat de WhatsApp con el texto ya cargado, solo de las placas que sí tuvieron movimiento/ruta ese día "
+        st.caption("Lista de las placas que sí tuvieron movimiento/ruta ese día "
                    "(se excluyen automáticamente las que salen 'SIN MOVIMIENTO' o '[SIN DATOS GPS]', ya que no aportan información). "
-                   "El navegador puede pedirte permitir las ventanas emergentes (pop-ups) la primera vez — solo dale 'Permitir'. "
-                   "WhatsApp no permite adjuntar imágenes automáticamente por este método: el mapa de cada unidad lo descargas aparte y lo adjuntas tú en el chat que se abre.")
+                   "Haz clic en cada 'Enviar' para abrir ese chat de WhatsApp con el texto ya cargado — un clic por reporte "
+                   "(el navegador bloquea abrir varios de golpe con un solo clic, así que esta es la forma confiable). "
+                   "WhatsApp no permite adjuntar imágenes automáticamente: el mapa de cada unidad lo descargas aparte y lo adjuntas tú en el chat.")
         if placas_sin_datos:
             st.caption(f"🚫 Se excluyen del envío masivo: {', '.join(placas_sin_datos)}.")
 
-        reportes_js = json.dumps([
-            {"placa": p, "texto": st.session_state['reportes_texto'][p]}
-            for p in placas_con_datos
-        ])
-
-        html_enviar_todos = f"""
-        <div style="text-align:left;">
-            <button id="btn-enviar-todos" style="background:#25D366; color:white; padding:12px 22px; border:none;
-                border-radius:8px; font-weight:bold; cursor:pointer; font-size:15px;" {'disabled' if not placas_con_datos else ''}>
-                📲 ENVIAR LOS {len(placas_con_datos)} REPORTES CON DATOS POR WHATSAPP
-            </button>
-        </div>
-        <script>
-            const reportes = {reportes_js};
-            const numero = "{numero_destino.strip()}";
-            document.getElementById('btn-enviar-todos').addEventListener('click', function() {{
-                // OJO: los navegadores solo consideran "iniciada por el usuario" la ventana que se
-                // abre EN EL MISMO INSTANTE del clic. Si se abre con setTimeout (como antes), Chrome
-                // deja pasar la primera y bloquea el resto en silencio, sin avisar -> por eso decía
-                // "2" pero abría 1 sola. Abriendo todas de forma síncrona, dentro del mismo clic, el
-                // navegador las deja pasar todas.
-                reportes.forEach(function(r) {{
-                    const url = "https://wa.me/" + numero + "?text=" + encodeURIComponent(r.texto);
-                    window.open(url, '_blank');
-                }});
-            }});
-        </script>
-        """
-        components.html(html_enviar_todos, height=70)
+        # Los navegadores (sobre todo Firefox y Safari, y Chrome en muchos casos) solo permiten
+        # UNA ventana emergente por clic real del usuario, sin importar si el código las abre todas
+        # al mismo tiempo o con retraso — es una protección anti-spam que no se puede evitar desde
+        # el código. Por eso, en vez de un botón que intenta abrir las N de un solo clic (poco
+        # confiable), se muestra la lista y cada enlace es un clic real y genuino del usuario, así
+        # que SIEMPRE abre, sin bloqueos.
+        if placas_con_datos:
+            filas_enlaces = ""
+            for p in placas_con_datos:
+                texto_url = urllib.parse.quote(st.session_state['reportes_texto'][p])
+                url_wa = f"https://wa.me/{numero_destino.strip()}?text={texto_url}"
+                filas_enlaces += f"""
+                <a href="{url_wa}" target="_blank" style="text-decoration:none;">
+                    <div style="display:flex; align-items:center; justify-content:space-between;
+                        background:#f4f6fa; border:1px solid #dde3ec; border-radius:8px;
+                        padding:10px 14px; margin-bottom:6px;">
+                        <span style="font-weight:700; color:#0d47a1;">🚛 {p}</span>
+                        <span style="background:#25D366; color:white; padding:4px 12px; border-radius:6px; font-size:13px; font-weight:bold;">📲 Enviar</span>
+                    </div>
+                </a>"""
+            st.markdown(f'<div>{filas_enlaces}</div>', unsafe_allow_html=True)
+        else:
+            st.info("No hay reportes con datos para enviar.")
 
         st.markdown("---")
         st.markdown("### 📝 Reportes por placa")
