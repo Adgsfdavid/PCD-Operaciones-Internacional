@@ -646,11 +646,14 @@ with t_reportes:
             const reportes = {reportes_js};
             const numero = "{numero_destino.strip()}";
             document.getElementById('btn-enviar-todos').addEventListener('click', function() {{
-                reportes.forEach(function(r, i) {{
-                    setTimeout(function() {{
-                        const url = "https://wa.me/" + numero + "?text=" + encodeURIComponent(r.texto);
-                        window.open(url, '_blank');
-                    }}, i * 1200);
+                // OJO: los navegadores solo consideran "iniciada por el usuario" la ventana que se
+                // abre EN EL MISMO INSTANTE del clic. Si se abre con setTimeout (como antes), Chrome
+                // deja pasar la primera y bloquea el resto en silencio, sin avisar -> por eso decía
+                // "2" pero abría 1 sola. Abriendo todas de forma síncrona, dentro del mismo clic, el
+                // navegador las deja pasar todas.
+                reportes.forEach(function(r) {{
+                    const url = "https://wa.me/" + numero + "?text=" + encodeURIComponent(r.texto);
+                    window.open(url, '_blank');
                 }});
             }});
         </script>
