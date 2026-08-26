@@ -7,6 +7,7 @@ from geopy.distance import great_circle
 from datetime import datetime, timedelta
 import os
 import json
+import re
 import base64
 import io
 import traceback
@@ -98,6 +99,7 @@ def obtener_ultimas_rutas_sheets():
 VELOCIDAD_MINIMA_MOVIMIENTO = 5
 DISTANCIA_MAXIMA_METROS = 300
 DESPACHOS_DB_FILE = "despachos_guardados.json"
+CHOFERES_DB_FILE = "choferes_guardados.json"
 
 # Nombre del Excel de geocercas que se sube al repositorio de GitHub (junto a este script).
 # Si existe, la app lo usa automáticamente y ya NO hace falta subirlo cada vez desde la app;
@@ -320,6 +322,8 @@ st.title("🛰️ Análisis de Rutas y Paradas GPS (Tracksolid)")
 # Inicializar estados
 if 'despachos_guardados' not in st.session_state:
     st.session_state['despachos_guardados'] = cargar_json_local(DESPACHOS_DB_FILE)
+if 'choferes_guardados' not in st.session_state:
+    st.session_state['choferes_guardados'] = cargar_json_local(CHOFERES_DB_FILE)
 if 'datos_resumen' not in st.session_state:
     st.session_state['datos_resumen'] = []
 if 'reportes_texto' not in st.session_state:
@@ -369,7 +373,13 @@ with t_config:
     st.markdown("---")
     st.subheader("2. Parámetros Globales")
     c1, c2, c3 = st.columns(3)
-    st.session_state['chofer_defecto'] = c1.text_input("Chofer por defecto:", value="").upper()
+    st.session_state['chofer_defecto'] = c1.text_input(
+        "Chofer por defecto:", value="",
+        help="Se usa solo para las placas que todavía no tengan un chofer propio guardado. "
+             "El nombre de cada chofer por placa se define después de procesar, en la pestaña "
+             "'Pizarra Ejecutiva' → tabla editable (columna Chofer) → botón 'Guardar Rutas y Choferes "
+             "Definitivos' — y queda recordado para los próximos reportes."
+    ).upper()
     despacho_defecto = c2.text_input("Despacho por defecto:", value="EL TIGRITO").upper()
     auto_resguardo = c3.checkbox("Detectar Hora de Resguardo Automáticamente", value=True)
     hora_manual = c3.time_input("Hora de Resguardo (Manual):", value=datetime.strptime("18:00", "%H:%M").time(), disabled=auto_resguardo)
@@ -416,7 +426,14 @@ with t_config:
                         modelo = MASTER_VEHICULOS[placa]['modelo']
                         color = MASTER_VEHICULOS[placa]['color']
 
-                        chofer_para_esta_placa = "YONNER TAMOY" if placa == 'A72EB0P' else st.session_state['chofer_defecto']
+                        # Chofer por placa: primero se busca el nombre guardado para ESA unidad
+                        # (editable en la pestaña "Pizarra Ejecutiva", persiste entre sesiones);
+                        # si no hay ninguno guardado, se usa el "Chofer por defecto" de Configuración;
+                        # si tampoco hay eso, queda "POR DEFINIR" para que se note que falta.
+                        chofer_guardado = st.session_state['choferes_guardados'].get(placa)
+                        chofer_para_esta_placa = (
+                            chofer_guardado or st.session_state['chofer_defecto'] or "POR DEFINIR"
+                        )
                         despacho_guardado_manual = st.session_state['despachos_guardados'].get(placa)
                         despacho_actual = despacho_guardado_manual if despacho_guardado_manual else despacho_defecto
 
@@ -525,6 +542,7 @@ with t_config:
                             'PLACA': placa,
                             'MODELO': modelo,
                             'COLOR': color,
+                            'CHOFER': chofer_para_esta_placa,
                             'RUTA': str(ruta_resumen).upper(),
                             'KM': total_km
                         })
@@ -561,25 +579,45 @@ with t_resumen:
         df_res = pd.DataFrame(st.session_state['datos_resumen'])
         km_total_gral = df_res['KM'].sum()
 
-        st.subheader("1. Edición y Actualización de Rutas")
-        st.info("Puedes editar la columna **RUTA** directamente en la tabla. La pizarra se actualizará automáticamente.")
+        st.subheader("1. Edición y Actualización de Rutas y Choferes")
+        st.info("Puedes editar las columnas **CHOFER** y **RUTA** directamente en la tabla. "
+                "La pizarra y los reportes por placa se actualizan al guardar, y quedan recordados "
+                "para la próxima vez que proceses el historial (no hace falta escribirlos de nuevo cada día).")
         df_editado = st.data_editor(
-            df_res[['PLACA', 'MODELO', 'COLOR', 'RUTA', 'KM']],
+            df_res[['PLACA', 'MODELO', 'COLOR', 'CHOFER', 'RUTA', 'KM']],
             use_container_width=True,
             hide_index=True,
             column_config={
                 "PLACA": st.column_config.TextColumn(disabled=True),
                 "MODELO": st.column_config.TextColumn(disabled=True),
                 "COLOR": st.column_config.TextColumn(disabled=True),
+                "CHOFER": st.column_config.TextColumn("Chofer"),
                 "KM": st.column_config.NumberColumn("Kilometraje", format="%.0f Kms", disabled=True),
             }
         )
 
-        if st.button("💾 Guardar Rutas Definitivas"):
+        if st.button("💾 Guardar Rutas y Choferes Definitivos"):
             for _, r in df_editado.iterrows():
-                st.session_state['despachos_guardados'][r['PLACA']] = r['RUTA']
+                placa_r = r['PLACA']
+                chofer_r = str(r['CHOFER']).strip().upper() if pd.notna(r['CHOFER']) else ''
+                st.session_state['despachos_guardados'][placa_r] = r['RUTA']
+                st.session_state['choferes_guardados'][placa_r] = chofer_r
+
+                # Actualiza también el reporte ya generado de esa placa (primera línea:
+                # "🚛 PLACA - CHOFER"), para que el cambio se vea de inmediato en
+                # "Reportes Individuales" sin tener que volver a procesar el historial.
+                texto_actual = st.session_state['reportes_texto'].get(placa_r)
+                if texto_actual and chofer_r:
+                    st.session_state['reportes_texto'][placa_r] = re.sub(
+                        rf'^🚛 {re.escape(placa_r)} - .*',
+                        f'🚛 {placa_r} - {chofer_r}',
+                        texto_actual,
+                        count=1,
+                    )
+
             guardar_json_local(DESPACHOS_DB_FILE, st.session_state['despachos_guardados'])
-            st.success("Rutas guardadas para próximos reportes.")
+            guardar_json_local(CHOFERES_DB_FILE, st.session_state['choferes_guardados'])
+            st.success("Rutas y choferes guardados — se recordarán para los próximos reportes.")
 
         st.markdown("---")
 
@@ -811,8 +849,7 @@ with t_historico:
                     mes_nombre = meses_es.get(fecha_actual.strftime("%B"), fecha_actual.strftime("%B"))
 
                     for d in st.session_state['datos_resumen']:
-                        chofer = "YONNER TAMOY" if d['PLACA'] == 'A72EB0P' else st.session_state['chofer_defecto']
-                        if not chofer: chofer = "POR DEFINIR"
+                        chofer = d.get('CHOFER') or "POR DEFINIR"
 
                         fila = [
                             fecha_actual.strftime("%d/%m/%Y"),
