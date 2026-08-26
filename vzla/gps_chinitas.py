@@ -10,7 +10,6 @@ import json
 import base64
 import io
 import traceback
-import urllib.parse
 import streamlit.components.v1 as components
 import gspread
 import textwrap
@@ -99,7 +98,6 @@ def obtener_ultimas_rutas_sheets():
 VELOCIDAD_MINIMA_MOVIMIENTO = 5
 DISTANCIA_MAXIMA_METROS = 300
 DESPACHOS_DB_FILE = "despachos_guardados.json"
-NUMERO_WHATSAPP_DEFECTO = "584127969408"
 
 # Nombre del Excel de geocercas que se sube al repositorio de GitHub (junto a este script).
 # Si existe, la app lo usa automáticamente y ya NO hace falta subirlo cada vez desde la app;
@@ -729,48 +727,14 @@ with t_reportes:
             st.warning("El paquete `folium` no está instalado, así que no se puede dibujar el trazado GPS. "
                        "Instálalo con `pip install folium` para activar los mapas automáticos.")
 
-        numero_destino = st.text_input("Número de WhatsApp destino (con código de país, sin '+'):", value=NUMERO_WHATSAPP_DEFECTO)
-
         placas = list(st.session_state['reportes_texto'].keys())
         reportes_con_datos = st.session_state.get('reportes_con_datos', {})
         placas_con_datos = [p for p in placas if reportes_con_datos.get(p)]
         placas_sin_datos = [p for p in placas if not reportes_con_datos.get(p)]
 
-        # --- Lista para enviar los reportes con datos, uno por uno con un clic cada uno ---
-        st.markdown("### 📤 Envío masivo")
-        st.caption("Lista de las placas que sí tuvieron movimiento/ruta ese día "
-                   "(se excluyen automáticamente las que salen 'SIN MOVIMIENTO' o '[SIN DATOS GPS]', ya que no aportan información). "
-                   "Haz clic en cada 'Enviar' para abrir ese chat de WhatsApp con el texto ya cargado — un clic por reporte "
-                   "(el navegador bloquea abrir varios de golpe con un solo clic, así que esta es la forma confiable). "
-                   "WhatsApp no permite adjuntar imágenes automáticamente: el mapa de cada unidad lo descargas aparte y lo adjuntas tú en el chat.")
         if placas_sin_datos:
-            st.caption(f"🚫 Se excluyen del envío masivo: {', '.join(placas_sin_datos)}.")
+            st.caption(f"🚫 Sin datos GPS hoy (revisa/edita manualmente si hace falta): {', '.join(placas_sin_datos)}.")
 
-        # Los navegadores (sobre todo Firefox y Safari, y Chrome en muchos casos) solo permiten
-        # UNA ventana emergente por clic real del usuario, sin importar si el código las abre todas
-        # al mismo tiempo o con retraso — es una protección anti-spam que no se puede evitar desde
-        # el código. Por eso, en vez de un botón que intenta abrir las N de un solo clic (poco
-        # confiable), se muestra la lista y cada enlace es un clic real y genuino del usuario, así
-        # que SIEMPRE abre, sin bloqueos.
-        if placas_con_datos:
-            filas_enlaces = ""
-            for p in placas_con_datos:
-                texto_url = urllib.parse.quote(st.session_state['reportes_texto'][p])
-                url_wa = f"https://wa.me/{numero_destino.strip()}?text={texto_url}"
-                filas_enlaces += f"""
-                <a href="{url_wa}" target="_blank" style="text-decoration:none;">
-                    <div style="display:flex; align-items:center; justify-content:space-between;
-                        background:#f4f6fa; border:1px solid #dde3ec; border-radius:8px;
-                        padding:10px 14px; margin-bottom:6px;">
-                        <span style="font-weight:700; color:#0d47a1;">🚛 {p}</span>
-                        <span style="background:#25D366; color:white; padding:4px 12px; border-radius:6px; font-size:13px; font-weight:bold;">📲 Enviar</span>
-                    </div>
-                </a>"""
-            st.markdown(f'<div>{filas_enlaces}</div>', unsafe_allow_html=True)
-        else:
-            st.info("No hay reportes con datos para enviar.")
-
-        st.markdown("---")
         st.markdown("### 📝 Reportes por placa")
 
         tabs_placas = st.tabs(placas)
@@ -778,58 +742,47 @@ with t_reportes:
             with tabs_placas[i]:
                 texto = st.text_area("Reporte Generado (Editable):", value=st.session_state['reportes_texto'][placa], height=350, key=f"txt_{placa}")
 
+                st.caption("📋 Pasa el mouse sobre el recuadro de abajo y haz clic en el ícono de copiar "
+                           "(arriba a la derecha) para copiar el mensaje completo — ya con los cambios que hayas hecho arriba.")
+                st.code(texto, language=None)
+
                 puntos_ruta = st.session_state['rutas_gps'].get(placa)
                 mapa_obj = generar_mapa_folium(placa, puntos_ruta) if puntos_ruta else None
 
-                col_mapa, col_envio = st.columns([2, 1])
-                with col_mapa:
-                    if mapa_obj:
-                        st.markdown("**Trazado GPS (generado automáticamente desde las coordenadas del Excel):**")
+                if mapa_obj:
+                    st.markdown("**Trazado GPS (generado automáticamente desde las coordenadas del Excel):**")
 
-                        if ST_FOLIUM_DISPONIBLE:
-                            # st_folium mide el contenedor real antes de inicializar Leaflet, por eso
-                            # el mapa queda centrado y con el zoom correcto (a diferencia de
-                            # components.html, que lo mostraba con el mundo completo).
-                            st_folium(mapa_obj, width=700, height=420, returned_objects=[], key=f"mapa_{placa}")
-                        else:
-                            components.html(mapa_obj._repr_html_(), height=420, scrolling=False)
-                            st.caption("⚠️ Instala `pip install streamlit-folium` para que el mapa quede bien centrado.")
+                    if ST_FOLIUM_DISPONIBLE:
+                        # st_folium mide el contenedor real antes de inicializar Leaflet, por eso
+                        # el mapa queda centrado y con el zoom correcto (a diferencia de
+                        # components.html, que lo mostraba con el mundo completo).
+                        st_folium(mapa_obj, width=700, height=420, returned_objects=[], key=f"mapa_{placa}")
+                    else:
+                        components.html(mapa_obj._repr_html_(), height=420, scrolling=False)
+                        st.caption("⚠️ Instala `pip install streamlit-folium` para que el mapa quede bien centrado.")
 
-                        if STATICMAP_DISPONIBLE:
-                            cache_key = f"mapa_png_{placa}"
-                            if cache_key not in st.session_state:
-                                with st.spinner("Generando imagen del mapa para descargar..."):
-                                    try:
-                                        st.session_state[cache_key] = generar_mapa_estatico_png(puntos_ruta)
-                                    except Exception as e:
-                                        st.session_state[cache_key] = None
-                                        st.warning(f"No se pudo generar la imagen del mapa: {e}")
-                            if st.session_state.get(cache_key):
-                                st.download_button(
-                                    "📸 Descargar mapa (PNG)",
-                                    data=st.session_state[cache_key],
-                                    file_name=f"Mapa_{placa}_{st.session_state['fecha_operativa'].strftime('%Y%m%d')}.png",
-                                    mime="image/png",
-                                    key=f"dl_mapa_{placa}",
-                                    use_container_width=True,
-                                )
-                        else:
-                            st.caption("Instala `pip install staticmap` para poder descargar el mapa como imagen PNG.")
-                    elif FOLIUM_DISPONIBLE:
-                        st.info("No hay puntos de ruta suficientes para dibujar el trazado de esta unidad (posible 'sin movimiento').")
-
-                with col_envio:
-                    texto_url = urllib.parse.quote(texto)
-                    url_wa = f"https://wa.me/{numero_destino.strip()}?text={texto_url}"
-                    st.markdown(f"""
-                    <a href="{url_wa}" target="_blank" style="text-decoration:none;">
-                        <button style="background-color:#25D366; color:white; padding:10px 20px; border:none; border-radius:5px; font-weight:bold; cursor:pointer; width:100%; margin-top:10px;">
-                            📲 ENVIAR ESTE REPORTE
-                        </button>
-                    </a>
-                    """, unsafe_allow_html=True)
-                    if mapa_obj:
-                        st.caption("1️⃣ Descarga el mapa → 2️⃣ Envía este reporte (se abre el chat) → 3️⃣ Adjunta la imagen descargada en WhatsApp.")
+                    if STATICMAP_DISPONIBLE:
+                        cache_key = f"mapa_png_{placa}"
+                        if cache_key not in st.session_state:
+                            with st.spinner("Generando imagen del mapa para descargar..."):
+                                try:
+                                    st.session_state[cache_key] = generar_mapa_estatico_png(puntos_ruta)
+                                except Exception as e:
+                                    st.session_state[cache_key] = None
+                                    st.warning(f"No se pudo generar la imagen del mapa: {e}")
+                        if st.session_state.get(cache_key):
+                            st.download_button(
+                                "📸 Descargar mapa (PNG)",
+                                data=st.session_state[cache_key],
+                                file_name=f"Mapa_{placa}_{st.session_state['fecha_operativa'].strftime('%Y%m%d')}.png",
+                                mime="image/png",
+                                key=f"dl_mapa_{placa}",
+                                use_container_width=True,
+                            )
+                    else:
+                        st.caption("Instala `pip install staticmap` para poder descargar el mapa como imagen PNG.")
+                elif FOLIUM_DISPONIBLE:
+                    st.info("No hay puntos de ruta suficientes para dibujar el trazado de esta unidad (posible 'sin movimiento').")
     else:
         st.info("Los reportes aparecerán aquí después de procesar los datos.")
 
