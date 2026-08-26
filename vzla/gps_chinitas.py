@@ -311,22 +311,22 @@ t_config, t_resumen, t_reportes, t_historico = st.tabs(["⚙️ Configuración",
 # ---------------------------------------------------------
 with t_config:
     st.subheader("1. Carga de Archivos Base")
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     with col1:
         archivos_historial = st.file_uploader(
             "1. Historial(es) Tracksolid (.xlsx)", type=['xlsx', 'xls'], accept_multiple_files=True,
             help="Puedes subir varios Excel a la vez (por ejemplo 5 archivos con 5 placas cada uno). "
-                 "El sistema los une automáticamente antes de procesar, siempre que todos tengan el mismo formato."
+                 "El sistema los une automáticamente antes de procesar, siempre que todos tengan el mismo formato. "
+                 "El kilometraje del día se calcula directamente de la columna 'Odómetro (Km)' que ya trae "
+                 "este mismo Excel (máximo menos mínimo del día) — no hace falta un Excel de odómetro aparte."
         )
         if archivos_historial:
             st.caption(f"📎 {len(archivos_historial)} archivo(s) cargado(s).")
     with col2:
-        archivo_odometro = st.file_uploader("2. Odómetro (.xlsx)", type=['xlsx', 'xls'])
-    with col3:
         ruta_geocercas_repo = buscar_archivo_repo(GEOCERCAS_ARCHIVO_REPO)
         geocercas_en_repo = ruta_geocercas_repo is not None
         archivo_geocercas = st.file_uploader(
-            "3. Base de Localizaciones (.xlsx) — opcional si ya está en el repo",
+            "2. Base de Localizaciones (.xlsx) — opcional si ya está en el repo",
             type=['xlsx', 'xls'],
             help=f"Si subes `{GEOCERCAS_ARCHIVO_REPO}` al repositorio de GitHub junto al script, ya no hace "
                  f"falta cargarlo aquí cada vez: la app lo toma automático. Solo usa este campo si quieres "
@@ -356,11 +356,6 @@ with t_config:
                     df_base_loc = pd.read_excel(fuente_geocercas)
                     df_base_loc = _normalize_df_columns(df_base_loc)
 
-                    df_odometro = None
-                    if archivo_odometro:
-                        df_odometro = pd.read_excel(archivo_odometro, header=8)
-                        df_odometro = _normalize_df_columns(df_odometro)
-
                     all_dfs = []
                     for f in archivos_historial:
                         df_h = pd.read_excel(f, header=8)
@@ -381,12 +376,7 @@ with t_config:
                     placas_a_procesar = sorted([p for p in MASTER_VEHICULOS.keys() if p in PLACAS_AUTORIZADAS])
 
                     for placa in placas_a_procesar:
-                        total_km = 0
-                        if df_odometro is not None and 'Placa' in df_odometro.columns:
-                            odometro_placa = df_odometro[df_odometro['Placa'] == placa]
-                            if not odometro_placa.empty and 'Odómetro (Km)' in odometro_placa.columns:
-                                total_km = pd.to_numeric(odometro_placa['Odómetro (Km)'], errors='coerce').max()
-                                if pd.isna(total_km): total_km = 0
+                        total_km = 0  # se calcula más abajo a partir del Odómetro (Km) del propio historial
 
                         modelo = MASTER_VEHICULOS[placa]['modelo']
                         color = MASTER_VEHICULOS[placa]['color']
@@ -408,6 +398,16 @@ with t_config:
                                 dia_mas_reciente = historial_placa['Fecha De Reporte'].dt.date.max()
                                 fechas_detectadas.append(dia_mas_reciente)
                                 hist_dia = historial_placa[historial_placa['Fecha De Reporte'].dt.date == dia_mas_reciente].sort_values('Fecha De Reporte')
+
+                                # KM del día = diferencia entre la lectura de odómetro más alta y la más baja
+                                # registradas ese día en el propio historial de Tracksolid (columna "Odómetro (Km)").
+                                # Ya no hace falta un Excel de odómetro aparte: cada fila del historial ya trae
+                                # la lectura acumulada del vehículo en ese instante.
+                                if 'Odómetro (Km)' in hist_dia.columns:
+                                    odometro_dia = pd.to_numeric(hist_dia['Odómetro (Km)'], errors='coerce').dropna()
+                                    if not odometro_dia.empty:
+                                        total_km = max(0, odometro_dia.max() - odometro_dia.min())
+
                                 mov_dia = hist_dia[pd.to_numeric(hist_dia['Velocidad (Km/H)'], errors='coerce').fillna(0) > VELOCIDAD_MINIMA_MOVIMIENTO]
 
                                 if mov_dia.empty:
