@@ -50,6 +50,8 @@ llave_limpia = llave_sucia.replace("-----BEGIN PRIVATE KEY-----", "").replace("-
 llave_perfecta = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(textwrap.wrap(llave_limpia, 64)) + "\n-----END PRIVATE KEY-----\n"
 CREDENCIALES_GOOGLE["private_key"] = llave_perfecta
 
+GOOGLE_SHEET_KEY = "1wCM3tcfQJtIQ4gDB0gLe9gJ4_ON7Vl6U4cBGuxXTKZ0"
+
 def obtener_cliente_sheets():
     alcance = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
     credenciales = Credentials.from_service_account_info(CREDENCIALES_GOOGLE, scopes=alcance)
@@ -57,10 +59,39 @@ def obtener_cliente_sheets():
 
 def guardar_en_googlesheets(datos_lista):
     cliente = obtener_cliente_sheets()
-    doc = cliente.open_by_key("1wCM3tcfQJtIQ4gDB0gLe9gJ4_ON7Vl6U4cBGuxXTKZ0")
+    doc = cliente.open_by_key(GOOGLE_SHEET_KEY)
     sheet = doc.worksheet("Historial_GPS")
     for fila in datos_lista:
         sheet.append_row(fila)
+
+def obtener_ultimas_rutas_sheets():
+    """
+    Recorre todo el historial guardado en Google Sheets (hoja 'Historial_GPS') y devuelve un
+    diccionario {placa: última ruta guardada}, tomando la fila más reciente para cada placa
+    (recorriendo de abajo hacia arriba, ya que 'guardar_en_googlesheets' agrega filas nuevas
+    al final). Columnas esperadas por fila (en ese orden): Fecha, Día, Semana, Mes, Placa,
+    Chofer, Ruta, Km — el mismo orden que arma la pestaña 'Guardar en Nube'.
+    Se usa como respaldo: si hoy una placa no tiene datos GPS ('Plantilla Manual'), en vez de
+    dejarla en blanco se propone la última ruta conocida de esa unidad. Si Sheets no responde
+    (sin conexión, credenciales, etc.) devuelve {} sin interrumpir el procesamiento normal.
+    """
+    try:
+        cliente = obtener_cliente_sheets()
+        doc = cliente.open_by_key(GOOGLE_SHEET_KEY)
+        sheet = doc.worksheet("Historial_GPS")
+        filas = sheet.get_all_values()
+    except Exception:
+        return {}
+
+    ultimas_rutas = {}
+    for fila in reversed(filas):
+        if len(fila) < 7:
+            continue
+        placa_fila = str(fila[4]).strip().upper()
+        ruta_fila = str(fila[6]).strip()
+        if placa_fila in PLACAS_AUTORIZADAS and placa_fila not in ultimas_rutas and ruta_fila:
+            ultimas_rutas[placa_fila] = ruta_fila
+    return ultimas_rutas
 
 # ==========================================
 # CONSTANTES
@@ -368,6 +399,12 @@ with t_config:
                     if faltantes:
                         st.warning(f"⚠️ No se encontraron datos GPS para: {', '.join(sorted(faltantes))} (quedarán como 'Plantilla Manual').")
 
+                    # Última ruta guardada por placa en Google Sheets (respaldo para cuando hoy no
+                    # hay datos GPS de una unidad). Si Sheets no responde, sigue funcionando igual
+                    # que antes (queda "Plantilla Manual").
+                    ultimas_rutas_sheets = obtener_ultimas_rutas_sheets()
+                    placas_ruta_de_sheets = []
+
                     datos_resumen = []
                     reportes = {}
                     reportes_con_datos = {}
@@ -475,7 +512,16 @@ with t_config:
 
                         reportes[placa] = reporte_texto
                         reportes_con_datos[placa] = tiene_datos_reales
-                        ruta_resumen = despacho_guardado_manual if despacho_guardado_manual else ubicacion_final_gps
+
+                        if despacho_guardado_manual:
+                            ruta_resumen = despacho_guardado_manual
+                        elif ubicacion_final_gps == "Plantilla Manual" and ultimas_rutas_sheets.get(placa):
+                            # Hoy no hay GPS para esta placa: se propone la última ruta que quedó
+                            # guardada en Google Sheets (en vez de dejarla en blanco/"Plantilla Manual").
+                            ruta_resumen = ultimas_rutas_sheets[placa]
+                            placas_ruta_de_sheets.append(placa)
+                        else:
+                            ruta_resumen = ubicacion_final_gps
 
                         datos_resumen.append({
                             'PLACA': placa,
@@ -501,6 +547,9 @@ with t_config:
                     st.session_state['rutas_gps'] = rutas_gps
                     st.success(f"✅ Procesamiento completado (fecha detectada: {fecha_operativa.strftime('%d/%m/%Y')}). "
                                f"Revisa las pestañas de Resumen y Reportes.")
+                    if placas_ruta_de_sheets:
+                        st.info(f"🔁 Sin GPS hoy, se usó la última ruta guardada en Google Sheets para: "
+                                f"{', '.join(sorted(placas_ruta_de_sheets))}. Puedes editarla en la Pizarra Ejecutiva si hace falta.")
 
                 except Exception as e:
                     st.error(f"Error fatal: {e}")
@@ -580,7 +629,7 @@ with t_resumen:
                 </tr>"""
 
             tarjetas_html += f"""
-            <div style="background:white; border:1px solid #d5dce8; border-radius:10px; overflow:hidden; box-shadow:0 3px 8px rgba(0,0,0,0.08);">
+            <div style="background:white; border:2px solid #000; border-radius:10px; overflow:hidden; box-shadow:0 3px 8px rgba(0,0,0,0.08);">
                 <div style="background:#0d47a1; color:white; padding:10px 14px; display:flex; align-items:center; gap:10px;">
                     <img src="{foto_b64}" style="width:46px; height:46px; object-fit:cover; border-radius:6px; background:white;">
                     <div style="font-weight:800; font-size:15px; letter-spacing:.3px;">{modelo}</div>
@@ -619,7 +668,7 @@ with t_resumen:
                 <button onclick="capResumen()" style="background: #0d47a1; color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">📸 DESCARGAR PIZARRA (FOTO HD)</button>
             </div>
 
-            <div id="pizarra-resumen" style="background: #eef1f7; width: 1000px; margin: auto; border: 2px solid #0d47a1; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 20px rgba(0,0,0,0.15); padding-bottom: 4px;">
+            <div id="pizarra-resumen" style="background: #eef1f7; width: 1000px; margin: auto; border: 4px solid #000; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 20px rgba(0,0,0,0.15); padding-bottom: 4px;">
                 <div style="background-color: #0d47a1; padding: 18px 28px; display: flex; justify-content: space-between; align-items: center; border-bottom: 4px solid #F57F17;">
                     <div style="display: flex; align-items: center;">
                         <img src="{logo_b64}" style="height: 40px; margin-right: 12px; border-radius:4px;">
