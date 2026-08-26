@@ -429,11 +429,13 @@ with t_config:
                         # Chofer por placa: primero se busca el nombre guardado para ESA unidad
                         # (editable en la pestaña "Pizarra Ejecutiva", persiste entre sesiones);
                         # si no hay ninguno guardado, se usa el "Chofer por defecto" de Configuración;
-                        # si tampoco hay eso, queda "POR DEFINIR" para que se note que falta.
+                        # si tampoco hay eso, queda en blanco (no se inventa ni se escribe "POR DEFINIR").
                         chofer_guardado = st.session_state['choferes_guardados'].get(placa)
                         chofer_para_esta_placa = (
-                            chofer_guardado or st.session_state['chofer_defecto'] or "POR DEFINIR"
+                            chofer_guardado or st.session_state['chofer_defecto'] or ""
                         )
+                        # Sufijo para el encabezado del reporte: si hay chofer, "- NOMBRE"; si no, nada.
+                        sufijo_chofer = f" - {chofer_para_esta_placa}" if chofer_para_esta_placa else ""
                         despacho_guardado_manual = st.session_state['despachos_guardados'].get(placa)
                         despacho_actual = despacho_guardado_manual if despacho_guardado_manual else despacho_defecto
 
@@ -463,7 +465,7 @@ with t_config:
                                 mov_dia = hist_dia[pd.to_numeric(hist_dia['Velocidad (Km/H)'], errors='coerce').fillna(0) > VELOCIDAD_MINIMA_MOVIMIENTO]
 
                                 if mov_dia.empty:
-                                    reporte_texto = (f"🚛 {placa} - {chofer_para_esta_placa}\n*DESPACHO:* {despacho_actual}\n\n"
+                                    reporte_texto = (f"🚛 {placa}{sufijo_chofer}\n*DESPACHO:* {despacho_actual}\n\n"
                                                      f"LA UNIDAD NO REGISTRÓ MOVIMIENTO EL {dia_mas_reciente.strftime('%d/%m/%Y')}.\n\n*KM Total:* {total_km:,.0f} Kms".replace(',', '.'))
                                     ubicacion_final_gps = "SIN MOVIMIENTO"
                                 else:
@@ -513,7 +515,7 @@ with t_config:
                                     minutos = (rem % 3600) // 60
 
                                     hist_text = '\n'.join(historial_ruta) if historial_ruta else "No se detectaron puntos de ruta conocidos."
-                                    reporte_texto = (f"🚛 {placa} - {chofer_para_esta_placa}\n*DESPACHO:* {despacho_actual}\n\n"
+                                    reporte_texto = (f"🚛 {placa}{sufijo_chofer}\n*DESPACHO:* {despacho_actual}\n\n"
                                                      f"*UBICACIÓN INICIAL:*\n{hora_salida.strftime('%I:%M:%S %p')} - UNIDAD REPORTA: {ubi_inicial}\n\n"
                                                      f"*UBICACIÓN FINAL:*\n{fecha_resguardo.strftime('%I:%M:%S %p')} - UNIDAD REPORTA: {ubicacion_final_gps}\n\n"
                                                      f"----------------------------------------------------\n*HISTORIAL DE RUTA*\n----------------------------------------------------\n{hist_text}\n\n"
@@ -522,7 +524,7 @@ with t_config:
                                     tiene_datos_reales = True
 
                         if not reporte_texto:
-                            reporte_texto = f"🚛 {placa} - {chofer_para_esta_placa}\n*DESPACHO:* {despacho_actual}\n\n[SIN DATOS GPS]"
+                            reporte_texto = f"🚛 {placa}{sufijo_chofer}\n*DESPACHO:* {despacho_actual}\n\n[SIN DATOS GPS]"
                             ubicacion_final_gps = "Plantilla Manual"
 
                         reportes[placa] = reporte_texto
@@ -577,6 +579,9 @@ with t_config:
 with t_resumen:
     if st.session_state['datos_resumen']:
         df_res = pd.DataFrame(st.session_state['datos_resumen'])
+        for _col_req, _val_def in [('CHOFER', ''), ('RUTA', ''), ('KM', 0)]:
+            if _col_req not in df_res.columns:
+                df_res[_col_req] = _val_def
         km_total_gral = df_res['KM'].sum()
 
         st.subheader("1. Edición y Actualización de Rutas y Choferes")
@@ -849,7 +854,7 @@ with t_historico:
                     mes_nombre = meses_es.get(fecha_actual.strftime("%B"), fecha_actual.strftime("%B"))
 
                     for d in st.session_state['datos_resumen']:
-                        chofer = d.get('CHOFER') or "POR DEFINIR"
+                        chofer = d.get('CHOFER') or ""
 
                         fila = [
                             fecha_actual.strftime("%d/%m/%Y"),
