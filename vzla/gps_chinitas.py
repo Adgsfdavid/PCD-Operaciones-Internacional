@@ -15,6 +15,7 @@ import streamlit.components.v1 as components
 import gspread
 import textwrap
 from pathlib import Path
+from collections import Counter
 from google.oauth2.service_account import Credentials
 
 try:
@@ -68,6 +69,13 @@ VELOCIDAD_MINIMA_MOVIMIENTO = 5
 DISTANCIA_MAXIMA_METROS = 300
 DESPACHOS_DB_FILE = "despachos_guardados.json"
 NUMERO_WHATSAPP_DEFECTO = "584127969408"
+
+# Nombre del Excel de geocercas que se sube al repositorio de GitHub (junto a este script).
+# Si existe, la app lo usa automáticamente y ya NO hace falta subirlo cada vez desde la app;
+# solo editas ese archivo en el repo y GitHub/Streamlit Cloud lo redepliega. Si además subes uno
+# manualmente desde "3. Base de Localizaciones", ese archivo subido tiene prioridad (por si un día
+# necesitas probar una versión distinta sin tocar el repo).
+GEOCERCAS_ARCHIVO_REPO = "BaseLocalizaciones.xlsx"
 
 PLACAS_AUTORIZADAS = {
     'A36AC9X', 'A37CS2D', 'A38BA4N', 'A48AU5T',
@@ -274,6 +282,8 @@ if 'rutas_gps' not in st.session_state:
     st.session_state['rutas_gps'] = {}
 if 'chofer_defecto' not in st.session_state:
     st.session_state['chofer_defecto'] = ""
+if 'fecha_operativa' not in st.session_state:
+    st.session_state['fecha_operativa'] = datetime.now().date()
 
 t_config, t_resumen, t_reportes, t_historico = st.tabs(["⚙️ Configuración", "📊 Pizarra Ejecutiva", "📝 Reportes Individuales", "💾 Guardar en Nube"])
 
@@ -294,7 +304,19 @@ with t_config:
     with col2:
         archivo_odometro = st.file_uploader("2. Odómetro (.xlsx)", type=['xlsx', 'xls'])
     with col3:
-        archivo_geocercas = st.file_uploader("3. Base de Localizaciones (.xlsx)", type=['xlsx', 'xls'])
+        ruta_geocercas_repo = Path(__file__).parent / GEOCERCAS_ARCHIVO_REPO
+        geocercas_en_repo = ruta_geocercas_repo.exists()
+        archivo_geocercas = st.file_uploader(
+            "3. Base de Localizaciones (.xlsx) — opcional si ya está en el repo",
+            type=['xlsx', 'xls'],
+            help=f"Si subes `{GEOCERCAS_ARCHIVO_REPO}` al repositorio de GitHub junto al script, ya no hace "
+                 f"falta cargarlo aquí cada vez: la app lo toma automático. Solo usa este campo si quieres "
+                 f"probar una versión distinta sin tocar el repo (tiene prioridad sobre la del repo)."
+        )
+        if geocercas_en_repo:
+            st.caption(f"✅ Usando `{GEOCERCAS_ARCHIVO_REPO}` del repositorio (súbelo actualizado a GitHub cuando quieras cambiarlo).")
+        elif not archivo_geocercas:
+            st.caption(f"⚠️ No se encontró `{GEOCERCAS_ARCHIVO_REPO}` en el repo — sube el Excel aquí o agrégalo al repositorio.")
 
     st.markdown("---")
     st.subheader("2. Parámetros Globales")
@@ -305,12 +327,14 @@ with t_config:
     hora_manual = c3.time_input("Hora de Resguardo (Manual):", value=datetime.strptime("18:00", "%H:%M").time(), disabled=auto_resguardo)
 
     if st.button("🚀 Procesar Cruce GPS vs Geocercas", type="primary", use_container_width=True):
-        if not archivos_historial or not archivo_geocercas:
-            st.error("⚠️ Faltan archivos por cargar. (Obligatorio: Tracksolid y Base de Localizaciones)")
+        fuente_geocercas = archivo_geocercas if archivo_geocercas else (ruta_geocercas_repo if geocercas_en_repo else None)
+        if not archivos_historial or not fuente_geocercas:
+            st.error(f"⚠️ Faltan archivos por cargar. Obligatorio: Historial Tracksolid, y Base de Localizaciones "
+                     f"(súbela aquí o agrega `{GEOCERCAS_ARCHIVO_REPO}` al repositorio).")
         else:
             with st.spinner("Masticando datos de coordenadas con Geopy..."):
                 try:
-                    df_base_loc = pd.read_excel(archivo_geocercas)
+                    df_base_loc = pd.read_excel(fuente_geocercas)
                     df_base_loc = _normalize_df_columns(df_base_loc)
 
                     df_odometro = None
@@ -334,6 +358,7 @@ with t_config:
                     reportes = {}
                     reportes_con_datos = {}
                     rutas_gps = {}
+                    fechas_detectadas = []  # una fecha por cada placa que sí tuvo historial GPS
                     placas_a_procesar = sorted([p for p in MASTER_VEHICULOS.keys() if p in PLACAS_AUTORIZADAS])
 
                     for placa in placas_a_procesar:
@@ -362,6 +387,7 @@ with t_config:
 
                             if not historial_placa.empty:
                                 dia_mas_reciente = historial_placa['Fecha De Reporte'].dt.date.max()
+                                fechas_detectadas.append(dia_mas_reciente)
                                 hist_dia = historial_placa[historial_placa['Fecha De Reporte'].dt.date == dia_mas_reciente].sort_values('Fecha De Reporte')
                                 mov_dia = hist_dia[pd.to_numeric(hist_dia['Velocidad (Km/H)'], errors='coerce').fillna(0) > VELOCIDAD_MINIMA_MOVIMIENTO]
 
@@ -440,11 +466,22 @@ with t_config:
                             'KM': total_km
                         })
 
+                    # Fecha operativa: la fecha real de los datos GPS (la más repetida entre las
+                    # placas procesadas), no la fecha de HOY. Así, si subes un historial de una fecha
+                    # pasada (ej. 1/1/2026), la pizarra y Google Sheets quedan con esa fecha y no con
+                    # la del día en que corriste la app.
+                    if fechas_detectadas:
+                        fecha_operativa = Counter(fechas_detectadas).most_common(1)[0][0]
+                    else:
+                        fecha_operativa = datetime.now().date()
+                    st.session_state['fecha_operativa'] = fecha_operativa
+
                     st.session_state['datos_resumen'] = datos_resumen
                     st.session_state['reportes_texto'] = reportes
                     st.session_state['reportes_con_datos'] = reportes_con_datos
                     st.session_state['rutas_gps'] = rutas_gps
-                    st.success("✅ Procesamiento completado. Revisa las pestañas de Resumen y Reportes.")
+                    st.success(f"✅ Procesamiento completado (fecha detectada: {fecha_operativa.strftime('%d/%m/%Y')}). "
+                               f"Revisa las pestañas de Resumen y Reportes.")
 
                 except Exception as e:
                     st.error(f"Error fatal: {e}")
@@ -482,7 +519,7 @@ with t_resumen:
 
         # --- GENERADOR DE WHATSAPP DINÁMICO (EJECUTIVO / RESUMIDO) ---
         st.subheader("2. Resumen para WhatsApp (Listo para Copiar)")
-        msg_w = f"🛰️ *REPORTE EJECUTIVO DE FLOTA PCD - GPS*\n📅 Fecha: {datetime.now().strftime('%d/%m/%Y')}\n\n"
+        msg_w = f"🛰️ *REPORTE EJECUTIVO DE FLOTA PCD - GPS*\n📅 Fecha: {st.session_state['fecha_operativa'].strftime('%d/%m/%Y')}\n\n"
         msg_w += f"📊 *TOTAL VEHÍCULOS:* {len(df_editado)} Unidades\n"
         msg_w += f"🛣️ *GRAN TOTAL RECORRIDO:* {formatear_km(km_total_gral)} Kms\n\n"
         msg_w += f"✅ *Pizarra detallada de rutas adjunta en imagen.*"
@@ -492,8 +529,16 @@ with t_resumen:
         st.markdown("---")
         st.subheader("3. Pizarra Ejecutiva (Imagen HD)")
 
+        # Fecha detectada automáticamente desde el historial GPS (no la fecha de hoy). Editable por
+        # si necesitas forzarla manualmente (ej. estás procesando datos atrasados).
+        st.session_state['fecha_operativa'] = st.date_input(
+            "Fecha del reporte (detectada automáticamente desde el Excel; edítala si hace falta):",
+            value=st.session_state['fecha_operativa'],
+            format="DD/MM/YYYY",
+        )
+
         # --- GENERADOR HTML PARA FOTO: TARJETAS POR MODELO CON FOTOS ---
-        fecha_pizarra = datetime.now().strftime('%d/%m/%Y')
+        fecha_pizarra = st.session_state['fecha_operativa'].strftime('%d/%m/%Y')
         df_agrupado = df_editado.copy()
         df_agrupado['MODELO'] = df_agrupado['MODELO'].astype(str)
         orden_modelos = list(dict.fromkeys(df_agrupado.sort_values('MODELO')['MODELO']))
@@ -580,7 +625,7 @@ with t_resumen:
                         canvas.toBlob(function(blob) {{
                             var url = URL.createObjectURL(blob);
                             var link = document.createElement('a');
-                            link.download = 'Pizarra_GPS_{datetime.now().strftime('%Y%m%d')}.png';
+                            link.download = 'Pizarra_GPS_{st.session_state['fecha_operativa'].strftime('%Y%m%d')}.png';
                             link.href = url;
                             document.body.appendChild(link);
                             link.click();
@@ -693,7 +738,7 @@ with t_reportes:
                                 st.download_button(
                                     "📸 Descargar mapa (PNG)",
                                     data=st.session_state[cache_key],
-                                    file_name=f"Mapa_{placa}_{datetime.now().strftime('%Y%m%d')}.png",
+                                    file_name=f"Mapa_{placa}_{st.session_state['fecha_operativa'].strftime('%Y%m%d')}.png",
                                     mime="image/png",
                                     key=f"dl_mapa_{placa}",
                                     use_container_width=True,
@@ -723,14 +768,16 @@ with t_reportes:
 # ---------------------------------------------------------
 with t_historico:
     st.subheader("💾 Guardar en Google Sheets")
-    st.info("Al presionar el botón, se enviará el resumen del día a tu hoja 'Historial_GPS' en la nube.")
+    st.info(f"Al presionar el botón, se enviará el resumen a tu hoja 'Historial_GPS' en la nube, con fecha "
+            f"**{st.session_state['fecha_operativa'].strftime('%d/%m/%Y')}** (la detectada del historial GPS — "
+            f"ajústala en la pestaña 'Pizarra Ejecutiva' si hace falta antes de guardar).")
 
     if st.button("🚀 Enviar Datos a Google Sheets", type="primary"):
         if st.session_state['datos_resumen']:
             try:
                 with st.spinner("Conectando con la nube (Google Sheets)..."):
                     datos_a_enviar = []
-                    fecha_actual = datetime.now()
+                    fecha_actual = st.session_state['fecha_operativa']
 
                     semana = fecha_actual.strftime("%W")
 
