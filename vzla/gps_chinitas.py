@@ -190,6 +190,25 @@ def obtener_logo_base64():
         return None
     except: return None
 
+def buscar_archivo_repo(nombre_esperado, carpeta=None):
+    """
+    Busca un archivo junto al script sin importar mayúsculas/minúsculas ni la
+    extensión (.xlsx vs .xls). Streamlit Cloud corre en Linux, donde los nombres
+    de archivo SÍ distinguen mayúsculas de minúsculas (a diferencia de Windows),
+    así que si en GitHub subiste "BASELOCALIZACIONES.xlsx" y el código busca
+    "BaseLocalizaciones.xlsx" exacto, no lo encuentra aunque esté ahí mismo.
+    Devuelve la ruta real del archivo si existe, o None si no hay ninguna coincidencia.
+    """
+    carpeta = carpeta or Path(__file__).parent
+    objetivo = nombre_esperado.lower()
+    try:
+        for archivo in carpeta.iterdir():
+            if archivo.is_file() and archivo.name.lower() == objetivo:
+                return archivo
+    except OSError:
+        pass
+    return None
+
 def obtener_foto_vehiculo(modelo):
     """
     Orden de prioridad:
@@ -201,8 +220,8 @@ def obtener_foto_vehiculo(modelo):
     nombre_archivo = FOTOS_VEHICULOS.get(modelo)
     if nombre_archivo:
         for carpeta in [Path(__file__).parent / "fotos", Path(__file__).parent]:
-            ruta = carpeta / nombre_archivo
-            if ruta.exists():
+            ruta = buscar_archivo_repo(nombre_archivo, carpeta) if carpeta.exists() else None
+            if ruta:
                 ext = ruta.suffix.lower().replace('.', '') or 'png'
                 mime = 'jpeg' if ext in ('jpg', 'jpeg') else ext
                 with open(ruta, "rb") as f:
@@ -304,8 +323,8 @@ with t_config:
     with col2:
         archivo_odometro = st.file_uploader("2. Odómetro (.xlsx)", type=['xlsx', 'xls'])
     with col3:
-        ruta_geocercas_repo = Path(__file__).parent / GEOCERCAS_ARCHIVO_REPO
-        geocercas_en_repo = ruta_geocercas_repo.exists()
+        ruta_geocercas_repo = buscar_archivo_repo(GEOCERCAS_ARCHIVO_REPO)
+        geocercas_en_repo = ruta_geocercas_repo is not None
         archivo_geocercas = st.file_uploader(
             "3. Base de Localizaciones (.xlsx) — opcional si ya está en el repo",
             type=['xlsx', 'xls'],
@@ -314,7 +333,7 @@ with t_config:
                  f"probar una versión distinta sin tocar el repo (tiene prioridad sobre la del repo)."
         )
         if geocercas_en_repo:
-            st.caption(f"✅ Usando `{GEOCERCAS_ARCHIVO_REPO}` del repositorio (súbelo actualizado a GitHub cuando quieras cambiarlo).")
+            st.caption(f"✅ Usando `{ruta_geocercas_repo.name}` del repositorio (súbelo actualizado a GitHub cuando quieras cambiarlo).")
         elif not archivo_geocercas:
             st.caption(f"⚠️ No se encontró `{GEOCERCAS_ARCHIVO_REPO}` en el repo — sube el Excel aquí o agrégalo al repositorio.")
 
@@ -641,8 +660,10 @@ with t_resumen:
         # rompería la coma del "data:image/png;base64,..." de las fotos y del CSS/JS.
         # Los números ya salen formateados en español porque pasan por formatear_km().
         components.html(html_pizarra_completa, height=1150, scrolling=True)
+        carpeta_fotos = Path(__file__).parent / "fotos"
         modelos_sin_foto = [m for m in orden_modelos if m not in FOTOS_BASE64
-                             and not (FOTOS_VEHICULOS.get(m) and (Path(__file__).parent / "fotos" / FOTOS_VEHICULOS[m]).exists())]
+                             and not (FOTOS_VEHICULOS.get(m) and carpeta_fotos.exists()
+                                      and buscar_archivo_repo(FOTOS_VEHICULOS[m], carpeta_fotos))]
         if modelos_sin_foto:
             st.caption(f"ℹ️ Sin foto de referencia para: {', '.join(modelos_sin_foto)} — se usó un ícono genérico. "
                        "Coloca un archivo en `fotos/` con el nombre indicado en `FOTOS_VEHICULOS` para agregarla.")
