@@ -632,6 +632,14 @@ with t_resumen:
                         flags=re.MULTILINE,
                     )
 
+                # El text_area de "Reportes Individuales" tiene su propia clave
+                # (txt_{placa}) y, una vez creado, Streamlit ignora el `value=` nuevo
+                # a favor de lo que ya tenga guardado esa clave. Se borra aquí para
+                # que en este mismo refresco tome el texto recién actualizado.
+                key_widget = f"txt_{placa_r}"
+                if key_widget in st.session_state:
+                    del st.session_state[key_widget]
+
             guardar_json_local(DESPACHOS_DB_FILE, st.session_state['despachos_guardados'])
             guardar_json_local(CHOFERES_DB_FILE, st.session_state['choferes_guardados'])
             st.success("Rutas y choferes guardados — se recordarán para los próximos reportes.")
