@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import os
 import json
 import base64
+import io
 import traceback
 import urllib.parse
 import streamlit.components.v1 as components
@@ -21,6 +22,12 @@ try:
     FOLIUM_DISPONIBLE = True
 except ImportError:
     FOLIUM_DISPONIBLE = False
+
+try:
+    from staticmap import StaticMap, Line, CircleMarker
+    STATICMAP_DISPONIBLE = True
+except ImportError:
+    STATICMAP_DISPONIBLE = False
 
 try:
     from fotos_vehiculos_data import FOTOS_BASE64
@@ -208,6 +215,33 @@ def generar_mapa_folium(placa, puntos, altura=420):
     ).add_to(m)
     m.fit_bounds(coords)
     return m._repr_html_()
+
+@st.cache_data(show_spinner=False)
+def generar_mapa_estatico_png(puntos, ancho=900, alto=600):
+    """
+    Genera el trazado como una imagen PNG real (no un mapa interactivo), dibujada del
+    lado del servidor con la librería `staticmap`. Esto es lo que permite el botón de
+    descarga: capturar un mapa de Leaflet con html2canvas NO funciona de forma confiable
+    porque el mapa vive dentro de iframes anidados (el propio folium genera un iframe, y
+    components.html de Streamlit agrega otro) — por eso salía el texto de aviso de
+    "Trust Notebook" en vez del mapa. Generando el PNG en Python nos evitamos ese problema
+    por completo.
+    """
+    if not STATICMAP_DISPONIBLE or not puntos:
+        return None
+    coords = [(p['lon'], p['lat']) for p in puntos]  # staticmap espera (lon, lat)
+    m = StaticMap(
+        ancho, alto,
+        url_template='https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        headers={"User-Agent": "FlotaGPS-Chinitas/1.0"},  # OSM exige un User-Agent identificable
+    )
+    m.add_line(Line(coords, '#0d47a1', 4))
+    m.add_marker(CircleMarker(coords[0], '#2e7d32', 14))   # salida (verde)
+    m.add_marker(CircleMarker(coords[-1], '#c62828', 14))  # resguardo (rojo)
+    imagen = m.render()
+    buffer = io.BytesIO()
+    imagen.save(buffer, format="PNG")
+    return buffer.getvalue()
 
 # ==========================================
 # INTERFAZ PRINCIPAL DE STREAMLIT
@@ -613,32 +647,30 @@ with t_reportes:
                 with col_mapa:
                     if mapa_html:
                         st.markdown("**Trazado GPS (generado automáticamente desde las coordenadas del Excel):**")
-                        id_mapa = f"mapa-{placa}"
-                        html_mapa_wrap = f"""
-                        <div style="text-align:right; margin-bottom:6px;">
-                            <button onclick="capMapa_{placa}()" style="background:#0d47a1; color:white; border:none;
-                                padding:6px 14px; border-radius:6px; font-size:12px; cursor:pointer;">📸 Descargar mapa</button>
-                        </div>
-                        <div id="{id_mapa}">{mapa_html}</div>
-                        <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-                        <script>
-                            function capMapa_{placa}() {{
-                                html2canvas(document.getElementById('{id_mapa}'), {{useCORS: true}}).then(canvas => {{
-                                    canvas.toBlob(function(blob) {{
-                                        var url = URL.createObjectURL(blob);
-                                        var link = document.createElement('a');
-                                        link.download = 'Mapa_{placa}_{datetime.now().strftime('%Y%m%d')}.png';
-                                        link.href = url;
-                                        document.body.appendChild(link);
-                                        link.click();
-                                        document.body.removeChild(link);
-                                        URL.revokeObjectURL(url);
-                                    }});
-                                }});
-                            }}
-                        </script>
-                        """
-                        components.html(html_mapa_wrap, height=460, scrolling=False)
+                        components.html(mapa_html, height=420, scrolling=False)
+
+                        if STATICMAP_DISPONIBLE:
+                            # Se genera bajo demanda (no automáticamente en cada pestaña) para no
+                            # disparar 12 descargas de tiles de OpenStreetMap en cada recarga.
+                            cache_key = f"mapa_png_{placa}"
+                            if cache_key not in st.session_state:
+                                if st.button("🖼️ Generar imagen del mapa", key=f"gen_mapa_{placa}", use_container_width=True):
+                                    with st.spinner("Generando imagen del mapa (puede tardar unos segundos)..."):
+                                        try:
+                                            st.session_state[cache_key] = generar_mapa_estatico_png(puntos_ruta)
+                                        except Exception as e:
+                                            st.warning(f"No se pudo generar la imagen del mapa: {e}")
+                            if st.session_state.get(cache_key):
+                                st.download_button(
+                                    "📸 Descargar mapa (PNG)",
+                                    data=st.session_state[cache_key],
+                                    file_name=f"Mapa_{placa}_{datetime.now().strftime('%Y%m%d')}.png",
+                                    mime="image/png",
+                                    key=f"dl_mapa_{placa}",
+                                    use_container_width=True,
+                                )
+                        else:
+                            st.caption("Instala `pip install staticmap` para poder descargar el mapa como imagen PNG.")
                     elif FOLIUM_DISPONIBLE:
                         st.info("No hay puntos de ruta suficientes para dibujar el trazado de esta unidad (posible 'sin movimiento').")
 
