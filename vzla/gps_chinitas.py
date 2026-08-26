@@ -24,6 +24,12 @@ except ImportError:
     FOLIUM_DISPONIBLE = False
 
 try:
+    from streamlit_folium import st_folium
+    ST_FOLIUM_DISPONIBLE = True
+except ImportError:
+    ST_FOLIUM_DISPONIBLE = False
+
+try:
     from staticmap import StaticMap, Line, CircleMarker
     STATICMAP_DISPONIBLE = True
 except ImportError:
@@ -197,8 +203,14 @@ def obtener_foto_vehiculo(modelo):
         return FOTOS_BASE64[modelo]
     return ICONO_GENERICO_B64
 
-def generar_mapa_folium(placa, puntos, altura=420):
-    """puntos: lista de dicts {lat, lon, hora, lugar}. Devuelve HTML del mapa Leaflet/OSM."""
+def generar_mapa_folium(placa, puntos):
+    """
+    puntos: lista de dicts {lat, lon, hora, lugar}. Devuelve el objeto folium.Map (no el HTML)
+    para que lo renderice streamlit_folium.st_folium, que mide bien el tamaño del contenedor
+    antes de inicializar Leaflet. Con components.html(m._repr_html_()) el mapa quedaba dentro
+    de un iframe anidado con tamaño 0x0 en el primer render, y Leaflet calculaba mal el zoom
+    para encajar la ruta -> por eso se veía el mundo completo en vez de la zona real.
+    """
     if not FOLIUM_DISPONIBLE or not puntos:
         return None
     coords = [(p['lat'], p['lon']) for p in puntos]
@@ -213,8 +225,8 @@ def generar_mapa_folium(placa, puntos, altura=420):
         coords[-1], tooltip=f"Resguardo: {puntos[-1]['hora'].strftime('%I:%M:%S %p')} - {puntos[-1].get('lugar','')}",
         icon=folium.Icon(color="red", icon="stop")
     ).add_to(m)
-    m.fit_bounds(coords)
-    return m._repr_html_()
+    m.fit_bounds(coords, padding=(20, 20))
+    return m
 
 @st.cache_data(show_spinner=False)
 def generar_mapa_estatico_png(puntos, ancho=900, alto=600):
@@ -256,6 +268,8 @@ if 'datos_resumen' not in st.session_state:
     st.session_state['datos_resumen'] = []
 if 'reportes_texto' not in st.session_state:
     st.session_state['reportes_texto'] = {}
+if 'reportes_con_datos' not in st.session_state:
+    st.session_state['reportes_con_datos'] = {}
 if 'rutas_gps' not in st.session_state:
     st.session_state['rutas_gps'] = {}
 if 'chofer_defecto' not in st.session_state:
@@ -318,6 +332,7 @@ with t_config:
 
                     datos_resumen = []
                     reportes = {}
+                    reportes_con_datos = {}
                     rutas_gps = {}
                     placas_a_procesar = sorted([p for p in MASTER_VEHICULOS.keys() if p in PLACAS_AUTORIZADAS])
 
@@ -338,6 +353,7 @@ with t_config:
 
                         ubicacion_final_gps = "N/A"
                         reporte_texto = ""
+                        tiene_datos_reales = False  # solo True si la unidad tuvo movimiento y ruta real ese día
 
                         if 'Placa' in df_historial.columns and placa in df_historial['Placa'].values:
                             historial_placa = df_historial[df_historial['Placa'] == placa].copy()
@@ -406,12 +422,14 @@ with t_config:
                                                      f"----------------------------------------------------\n*HISTORIAL DE RUTA*\n----------------------------------------------------\n{hist_text}\n\n"
                                                      f"----------------------------------------------------\n*RESUMEN DEL DIA - {placa} - {hora_salida.strftime('%d/%m/%Y')}*\n----------------------------------------------------\n\n"
                                                      f"*TOTAL KILOMETRAJE:* {total_km:,.0f} Kms\n\n*SALIDA:* {hora_salida.strftime('%I:%M:%S %p')}\n*RESGUARDO:* {fecha_resguardo.strftime('%I:%M:%S %p')}\n\n*TOTAL HORAS:* {int(horas)} Horas y {int(minutos)} minutos".replace(',', '.'))
+                                    tiene_datos_reales = True
 
                         if not reporte_texto:
                             reporte_texto = f"🚛 {placa} - {chofer_para_esta_placa}\n*DESPACHO:* {despacho_actual}\n\n[SIN DATOS GPS]"
                             ubicacion_final_gps = "Plantilla Manual"
 
                         reportes[placa] = reporte_texto
+                        reportes_con_datos[placa] = tiene_datos_reales
                         ruta_resumen = despacho_guardado_manual if despacho_guardado_manual else ubicacion_final_gps
 
                         datos_resumen.append({
@@ -424,6 +442,7 @@ with t_config:
 
                     st.session_state['datos_resumen'] = datos_resumen
                     st.session_state['reportes_texto'] = reportes
+                    st.session_state['reportes_con_datos'] = reportes_con_datos
                     st.session_state['rutas_gps'] = rutas_gps
                     st.success("✅ Procesamiento completado. Revisa las pestañas de Resumen y Reportes.")
 
@@ -598,23 +617,29 @@ with t_reportes:
         numero_destino = st.text_input("Número de WhatsApp destino (con código de país, sin '+'):", value=NUMERO_WHATSAPP_DEFECTO)
 
         placas = list(st.session_state['reportes_texto'].keys())
+        reportes_con_datos = st.session_state.get('reportes_con_datos', {})
+        placas_con_datos = [p for p in placas if reportes_con_datos.get(p)]
+        placas_sin_datos = [p for p in placas if not reportes_con_datos.get(p)]
 
         # --- Botón para enviar TODOS los reportes de una vez ---
         st.markdown("### 📤 Envío masivo")
-        st.caption("Abre un chat de WhatsApp con el texto ya cargado por cada placa, uno detrás de otro. "
+        st.caption("Abre un chat de WhatsApp con el texto ya cargado, solo de las placas que sí tuvieron movimiento/ruta ese día "
+                   "(se excluyen automáticamente las que salen 'SIN MOVIMIENTO' o '[SIN DATOS GPS]', ya que no aportan información). "
                    "El navegador puede pedirte permitir las ventanas emergentes (pop-ups) la primera vez — solo dale 'Permitir'. "
                    "WhatsApp no permite adjuntar imágenes automáticamente por este método: el mapa de cada unidad lo descargas aparte y lo adjuntas tú en el chat que se abre.")
+        if placas_sin_datos:
+            st.caption(f"🚫 Se excluyen del envío masivo: {', '.join(placas_sin_datos)}.")
 
         reportes_js = json.dumps([
             {"placa": p, "texto": st.session_state['reportes_texto'][p]}
-            for p in placas
+            for p in placas_con_datos
         ])
 
         html_enviar_todos = f"""
         <div style="text-align:left;">
             <button id="btn-enviar-todos" style="background:#25D366; color:white; padding:12px 22px; border:none;
-                border-radius:8px; font-weight:bold; cursor:pointer; font-size:15px;">
-                📲 ENVIAR LOS {len(placas)} REPORTES POR WHATSAPP
+                border-radius:8px; font-weight:bold; cursor:pointer; font-size:15px;" {'disabled' if not placas_con_datos else ''}>
+                📲 ENVIAR LOS {len(placas_con_datos)} REPORTES CON DATOS POR WHATSAPP
             </button>
         </div>
         <script>
@@ -641,25 +666,31 @@ with t_reportes:
                 texto = st.text_area("Reporte Generado (Editable):", value=st.session_state['reportes_texto'][placa], height=350, key=f"txt_{placa}")
 
                 puntos_ruta = st.session_state['rutas_gps'].get(placa)
-                mapa_html = generar_mapa_folium(placa, puntos_ruta) if puntos_ruta else None
+                mapa_obj = generar_mapa_folium(placa, puntos_ruta) if puntos_ruta else None
 
                 col_mapa, col_envio = st.columns([2, 1])
                 with col_mapa:
-                    if mapa_html:
+                    if mapa_obj:
                         st.markdown("**Trazado GPS (generado automáticamente desde las coordenadas del Excel):**")
-                        components.html(mapa_html, height=420, scrolling=False)
+
+                        if ST_FOLIUM_DISPONIBLE:
+                            # st_folium mide el contenedor real antes de inicializar Leaflet, por eso
+                            # el mapa queda centrado y con el zoom correcto (a diferencia de
+                            # components.html, que lo mostraba con el mundo completo).
+                            st_folium(mapa_obj, width=700, height=420, returned_objects=[], key=f"mapa_{placa}")
+                        else:
+                            components.html(mapa_obj._repr_html_(), height=420, scrolling=False)
+                            st.caption("⚠️ Instala `pip install streamlit-folium` para que el mapa quede bien centrado.")
 
                         if STATICMAP_DISPONIBLE:
-                            # Se genera bajo demanda (no automáticamente en cada pestaña) para no
-                            # disparar 12 descargas de tiles de OpenStreetMap en cada recarga.
                             cache_key = f"mapa_png_{placa}"
                             if cache_key not in st.session_state:
-                                if st.button("🖼️ Generar imagen del mapa", key=f"gen_mapa_{placa}", use_container_width=True):
-                                    with st.spinner("Generando imagen del mapa (puede tardar unos segundos)..."):
-                                        try:
-                                            st.session_state[cache_key] = generar_mapa_estatico_png(puntos_ruta)
-                                        except Exception as e:
-                                            st.warning(f"No se pudo generar la imagen del mapa: {e}")
+                                with st.spinner("Generando imagen del mapa para descargar..."):
+                                    try:
+                                        st.session_state[cache_key] = generar_mapa_estatico_png(puntos_ruta)
+                                    except Exception as e:
+                                        st.session_state[cache_key] = None
+                                        st.warning(f"No se pudo generar la imagen del mapa: {e}")
                             if st.session_state.get(cache_key):
                                 st.download_button(
                                     "📸 Descargar mapa (PNG)",
@@ -684,7 +715,7 @@ with t_reportes:
                         </button>
                     </a>
                     """, unsafe_allow_html=True)
-                    if mapa_html:
+                    if mapa_obj:
                         st.caption("1️⃣ Descarga el mapa → 2️⃣ Envía este reporte (se abre el chat) → 3️⃣ Adjunta la imagen descargada en WhatsApp.")
     else:
         st.info("Los reportes aparecerán aquí después de procesar los datos.")
