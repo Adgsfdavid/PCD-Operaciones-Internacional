@@ -604,20 +604,32 @@ with t_resumen:
         if st.button("💾 Guardar Rutas y Choferes Definitivos"):
             for _, r in df_editado.iterrows():
                 placa_r = r['PLACA']
+                ruta_r = str(r['RUTA']).strip().upper() if pd.notna(r['RUTA']) else ''
                 chofer_r = str(r['CHOFER']).strip().upper() if pd.notna(r['CHOFER']) else ''
-                st.session_state['despachos_guardados'][placa_r] = r['RUTA']
+                st.session_state['despachos_guardados'][placa_r] = ruta_r
                 st.session_state['choferes_guardados'][placa_r] = chofer_r
 
+                # Actualiza también datos_resumen (la fuente que usan la Pizarra recién
+                # cargada, el envío a Google Sheets y cualquier otra pestaña) para que
+                # los cambios se reflejen de inmediato, sin tener que volver a procesar.
+                for fila_resumen in st.session_state['datos_resumen']:
+                    if fila_resumen.get('PLACA') == placa_r:
+                        fila_resumen['RUTA'] = ruta_r
+                        fila_resumen['CHOFER'] = chofer_r
+                        break
+
                 # Actualiza también el reporte ya generado de esa placa (primera línea:
-                # "🚛 PLACA - CHOFER"), para que el cambio se vea de inmediato en
-                # "Reportes Individuales" sin tener que volver a procesar el historial.
+                # "🚛 PLACA" o "🚛 PLACA - CHOFER"), para que el cambio se vea de inmediato
+                # en "Reportes Individuales" sin tener que volver a procesar el historial.
                 texto_actual = st.session_state['reportes_texto'].get(placa_r)
-                if texto_actual and chofer_r:
+                if texto_actual:
+                    sufijo_nuevo = f' - {chofer_r}' if chofer_r else ''
                     st.session_state['reportes_texto'][placa_r] = re.sub(
-                        rf'^🚛 {re.escape(placa_r)} - .*',
-                        f'🚛 {placa_r} - {chofer_r}',
+                        rf'^🚛 {re.escape(placa_r)}(?: - .*)?$',
+                        f'🚛 {placa_r}{sufijo_nuevo}',
                         texto_actual,
                         count=1,
+                        flags=re.MULTILINE,
                     )
 
             guardar_json_local(DESPACHOS_DB_FILE, st.session_state['despachos_guardados'])
