@@ -10,6 +10,12 @@ from datetime import datetime, date, timedelta
 from google.oauth2.service_account import Credentials
 import io
 
+try:
+    from fpdf import FPDF
+    FPDF_DISPONIBLE = True
+except ImportError:
+    FPDF_DISPONIBLE = False
+
 # ==========================================
 # CONFIGURACIÓN DE CONEXIÓN A GOOGLE SHEETS
 # ==========================================
@@ -207,6 +213,149 @@ def marcar_completada(ws_sol, id_solicitud, fecha_solicitud_str):
         value_input_option="USER_ENTERED",
     )
 
+def actualizar_solicitud(ws_sol, id_solicitud, solicitante, tipo_retiro, detalle, ruta, chofer, fecha_solicitud):
+    """Edita los datos base de una solicitud ya creada (no toca Estado/Avisado/Confirmado)."""
+    fila = _buscar_fila(ws_sol, id_solicitud)
+    dia_nombre = DIAS_ES.get(fecha_solicitud.strftime("%A"), fecha_solicitud.strftime("%A"))
+    mes_nombre = MESES_ES.get(fecha_solicitud.strftime("%B"), fecha_solicitud.strftime("%B"))
+    semana = fecha_solicitud.strftime("%W")
+    ws_sol.update(
+        f"B{fila}:I{fila}",
+        [[fecha_solicitud.strftime("%d/%m/%Y"), dia_nombre, semana, mes_nombre,
+          solicitante.strip().upper(), tipo_retiro, ruta.strip().upper(), chofer.strip().upper()]],
+        value_input_option="USER_ENTERED",
+    )
+    ws_sol.update(f"N{fila}", [[detalle.strip().upper()]], value_input_option="USER_ENTERED")
+
+def borrar_solicitud(ws_sol, id_solicitud):
+    fila = _buscar_fila(ws_sol, id_solicitud)
+    ws_sol.delete_rows(fila)
+
+def _texto_pdf(valor):
+    """FPDF (fuente Helvetica) no soporta bien tildes/ñ como UTF-8 directo;
+    esto las reemplaza por su versión sin tilde para que el PDF no reviente."""
+    texto = str(valor) if valor is not None else ""
+    reemplazos = {
+        "á": "a", "é": "e", "í": "i", "ó": "o", "ú": "u",
+        "Á": "A", "É": "E", "Í": "I", "Ó": "O", "Ú": "U", "ñ": "n", "Ñ": "N",
+    }
+    for viejo, nuevo in reemplazos.items():
+        texto = texto.replace(viejo, nuevo)
+    return texto
+
+def generar_pdf_informe(df_informe, titulo_rango):
+    """Genera el informe en PDF (apaisado) con el resumen y la tabla de solicitudes del rango elegido."""
+    pdf = FPDF(orientation="L", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=12)
+    pdf.add_page()
+
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, _texto_pdf("Informe de Control de Solicitudes"), ln=True)
+    pdf.set_font("Helvetica", "", 11)
+    pdf.cell(0, 7, _texto_pdf(titulo_rango), ln=True)
+    pdf.cell(0, 7, _texto_pdf(f"Generado: {datetime.now().strftime('%d/%m/%Y %I:%M %p')}"), ln=True)
+    pdf.ln(3)
+
+    total = len(df_informe)
+    n_pend = int((df_informe["Estado"] == ESTADO_PENDIENTE).sum())
+    n_avis = int((df_informe["Estado"] == ESTADO_AVISADO).sum())
+    n_comp = int((df_informe["Estado"] == ESTADO_COMPLETADA).sum())
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(0, 7, _texto_pdf(
+        f"Total: {total}   |   Pendientes: {n_pend}   |   Avisadas: {n_avis}   |   Completadas: {n_comp}"
+    ), ln=True)
+    pdf.ln(4)
+
+    columnas = ["ID", "Fecha", "Solicitante", "Tipo de Retiro", "Detalle", "Ruta / Destino",
+                "Chofer Asignado", "Estado", "Confirmado (Fecha y Hora)", "Días para Completarse"]
+    anchos = [18, 20, 30, 26, 35, 30, 28, 22, 32, 20]
+
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_fill_color(13, 71, 161)
+    pdf.set_text_color(255, 255, 255)
+    for col, ancho in zip(columnas, anchos):
+        pdf.cell(ancho, 8, _texto_pdf(col), border=1, fill=True, align="C")
+    pdf.ln()
+
+    pdf.set_font("Helvetica", "", 7.5)
+    pdf.set_text_color(0, 0, 0)
+    for _, r in df_informe.iterrows():
+        for col, ancho in zip(columnas, anchos):
+            valor = _texto_pdf(r.get(col, ""))
+            if len(valor) > int(ancho * 1.8):
+                valor = valor[: int(ancho * 1.8) - 1] + "…"
+            pdf.cell(ancho, 7, valor, border=1)
+        pdf.ln()
+
+    return bytes(pdf.output())
+
+def _parsear_fecha(fecha_str):
+    try:
+        return datetime.strptime(fecha_str, "%d/%m/%Y").date()
+    except Exception:
+        return date.today()
+
+def render_tarjeta(r, ws_sol, subinfo, accion_label=None, accion_fn=None):
+    """
+    Dibuja una tarjeta de solicitud con: info + botón de acción principal
+    (opcional, ej. "Ya avisé al chofer") + mensaje para el chofer + Editar/Borrar.
+    Se usa igual en Pendientes, Avisadas y Completadas.
+    """
+    id_sol = r["ID"]
+    with st.container(border=True):
+        detalle_linea = f" — {r['Detalle']}" if r.get("Detalle") else ""
+        cA, cB = st.columns([4, 1])
+        cA.markdown(f"**{id_sol}** — {r['Tipo de Retiro']}{detalle_linea} · {r['Ruta / Destino']}  \n{subinfo}")
+        if accion_label and accion_fn and cB.button(accion_label, key=f"accion_{id_sol}", use_container_width=True):
+            accion_fn()
+            st.session_state["recargar_solicitudes"] += 1
+            st.rerun()
+
+        with st.expander("📋 Mensaje para el chofer"):
+            st.code(generar_mensaje_chofer(r), language=None)
+
+        with st.expander("✏️ Editar / 🗑️ Borrar"):
+            with st.form(f"form_editar_{id_sol}"):
+                ec1, ec2 = st.columns(2)
+                sol_idx = SOLICITANTES_FIJOS.index(r["Solicitante"]) if r["Solicitante"] in SOLICITANTES_FIJOS else len(SOLICITANTES_FIJOS) - 1
+                e_solicitante_sel = ec1.selectbox("Solicitante:", SOLICITANTES_FIJOS, index=sol_idx, key=f"esol_{id_sol}")
+                e_solicitante_otro = ""
+                if e_solicitante_sel == "OTROS":
+                    valor_previo = r["Solicitante"] if r["Solicitante"] not in SOLICITANTES_FIJOS else ""
+                    e_solicitante_otro = ec2.text_input("Especifique quién:", value=valor_previo, key=f"eotro_{id_sol}")
+                e_tipo = st.selectbox("Tipo de Retiro:", TIPOS_RETIRO,
+                                       index=TIPOS_RETIRO.index(r["Tipo de Retiro"]) if r["Tipo de Retiro"] in TIPOS_RETIRO else 0,
+                                       key=f"etipo_{id_sol}")
+                e_detalle = st.text_input("Detalle:", value=r.get("Detalle", ""), key=f"edet_{id_sol}")
+                ec3, ec4 = st.columns(2)
+                e_ruta = ec3.text_input("Ruta / Destino:", value=r["Ruta / Destino"], key=f"eruta_{id_sol}")
+                e_chofer = ec4.text_input("Chofer Asignado:", value=r["Chofer Asignado"], key=f"echofer_{id_sol}")
+                e_fecha = st.date_input("Fecha:", value=_parsear_fecha(r["Fecha"]), key=f"efecha_{id_sol}")
+
+                g1, g2 = st.columns(2)
+                guardar = g1.form_submit_button("💾 Guardar Cambios", use_container_width=True)
+                confirmar_borrado = g2.checkbox("Confirmar borrado", key=f"chkborrar_{id_sol}")
+                borrar = g2.form_submit_button("🗑️ Borrar Solicitud", use_container_width=True)
+
+                if guardar:
+                    sol_final = e_solicitante_otro.strip() if e_solicitante_sel == "OTROS" else e_solicitante_sel
+                    if not sol_final or not e_ruta or not e_chofer:
+                        st.error("Completa Solicitante, Ruta/Destino y Chofer Asignado.")
+                    else:
+                        actualizar_solicitud(ws_sol, id_sol, sol_final, e_tipo, e_detalle, e_ruta, e_chofer, e_fecha)
+                        st.success("✅ Solicitud actualizada.")
+                        st.session_state["recargar_solicitudes"] += 1
+                        st.rerun()
+
+                if borrar:
+                    if not confirmar_borrado:
+                        st.error("Marca \"Confirmar borrado\" antes de borrar — es permanente.")
+                    else:
+                        borrar_solicitud(ws_sol, id_sol)
+                        st.success(f"🗑️ Solicitud {id_sol} borrada.")
+                        st.session_state["recargar_solicitudes"] += 1
+                        st.rerun()
+
 # ==========================================
 # INTERFAZ STREAMLIT
 # ==========================================
@@ -310,34 +459,24 @@ with tab_pend:
     if df_pend.empty:
         st.info("No hay solicitudes pendientes por avisar. 🎉")
     for _, r in df_pend.iterrows():
-        with st.container(border=True):
-            cA, cB = st.columns([4, 1])
-            detalle_linea = f" — {r['Detalle']}" if r.get('Detalle') else ""
-            cA.markdown(f"**{r['ID']}** — {r['Tipo de Retiro']}{detalle_linea} · {r['Ruta / Destino']}  \n"
-                        f"Solicitó: {r['Solicitante']} ({r['Fecha']}) · Chofer: {r['Chofer Asignado']}")
-            if cB.button("📣 Ya avisé al chofer", key=f"avisar_{r['ID']}", use_container_width=True):
-                marcar_avisado(ws_sol, r["ID"])
-                st.session_state["recargar_solicitudes"] += 1
-                st.rerun()
-            with st.expander("📋 Mensaje para el chofer"):
-                st.code(generar_mensaje_chofer(r), language=None)
+        render_tarjeta(
+            r, ws_sol,
+            subinfo=f"Solicitó: {r['Solicitante']} ({r['Fecha']}) · Chofer: {r['Chofer Asignado']}",
+            accion_label="📣 Ya avisé al chofer",
+            accion_fn=lambda r=r: marcar_avisado(ws_sol, r["ID"]),
+        )
 
 with tab_avis:
     df_avis = df[df["Estado"] == ESTADO_AVISADO] if not df.empty else df
     if df_avis.empty:
         st.info("No hay solicitudes esperando confirmación de retiro.")
     for _, r in df_avis.iterrows():
-        with st.container(border=True):
-            cA, cB = st.columns([4, 1])
-            detalle_linea = f" — {r['Detalle']}" if r.get('Detalle') else ""
-            cA.markdown(f"**{r['ID']}** — {r['Tipo de Retiro']}{detalle_linea} · {r['Ruta / Destino']}  \n"
-                        f"Chofer: {r['Chofer Asignado']} · Avisado: {r['Avisado (Fecha y Hora)']}")
-            if cB.button("✅ Chofer confirmó el retiro", key=f"confirmar_{r['ID']}", use_container_width=True):
-                marcar_completada(ws_sol, r["ID"], r["Fecha"])
-                st.session_state["recargar_solicitudes"] += 1
-                st.rerun()
-            with st.expander("📋 Mensaje para el chofer"):
-                st.code(generar_mensaje_chofer(r), language=None)
+        render_tarjeta(
+            r, ws_sol,
+            subinfo=f"Chofer: {r['Chofer Asignado']} · Avisado: {r['Avisado (Fecha y Hora)']}",
+            accion_label="✅ Chofer confirmó el retiro",
+            accion_fn=lambda r=r: marcar_completada(ws_sol, r["ID"], r["Fecha"]),
+        )
 
 with tab_comp:
     df_comp = df[df["Estado"] == ESTADO_COMPLETADA] if not df.empty else df
@@ -349,6 +488,12 @@ with tab_comp:
                      "Confirmado (Fecha y Hora)", "Días para Completarse"]],
             use_container_width=True, hide_index=True,
         )
+        if st.checkbox("✏️ Editar o borrar una solicitud completada"):
+            for _, r in df_comp.iterrows():
+                render_tarjeta(
+                    r, ws_sol,
+                    subinfo=f"Chofer: {r['Chofer Asignado']} · Confirmado: {r['Confirmado (Fecha y Hora)']}",
+                )
 
 with tab_kpi:
     total = len(df)
@@ -373,36 +518,75 @@ with tab_kpi:
         st.dataframe(resumen_chofer, use_container_width=True)
 
 with tab_informe:
-    st.markdown("**Descargar informe (Excel)**")
-    rango = st.radio("Rango:", ["Hoy", "Última semana", "Último mes", "Todo"], horizontal=True)
+    st.markdown("**Informe descargable (Excel y PDF)**")
+    rango = st.radio("Rango:", ["Día", "Semana", "Mes", "Todo"], horizontal=True)
+
+    df_informe = df.copy()
+    titulo_rango = "Todas las solicitudes"
 
     if not df.empty:
-        df_fecha = df.copy()
-        df_fecha["_fecha_dt"] = pd.to_datetime(df_fecha["Fecha"], format="%d/%m/%Y", errors="coerce")
-        hoy = pd.Timestamp(date.today())
-        if rango == "Hoy":
-            df_informe = df_fecha[df_fecha["_fecha_dt"] == hoy]
-        elif rango == "Última semana":
-            df_informe = df_fecha[df_fecha["_fecha_dt"] >= hoy - pd.Timedelta(days=7)]
-        elif rango == "Último mes":
-            df_informe = df_fecha[df_fecha["_fecha_dt"] >= hoy - pd.Timedelta(days=30)]
-        else:
-            df_informe = df_fecha
+        df_informe["_fecha_dt"] = pd.to_datetime(df_informe["Fecha"], format="%d/%m/%Y", errors="coerce")
+
+        if rango == "Día":
+            fecha_sel = st.date_input("Elige el día:", value=date.today(), key="informe_dia")
+            df_informe = df_informe[df_informe["_fecha_dt"].dt.date == fecha_sel]
+            titulo_rango = f"Día: {fecha_sel.strftime('%d/%m/%Y')}"
+
+        elif rango == "Semana":
+            fecha_ref = st.date_input(
+                "Elige cualquier día DENTRO de la semana que quieres ver:", value=date.today(), key="informe_semana"
+            )
+            iso_ref = fecha_ref.isocalendar()  # (año ISO, semana ISO, día)
+            iso_datos = df_informe["_fecha_dt"].dt.isocalendar()
+            df_informe = df_informe[(iso_datos["year"] == iso_ref[0]) & (iso_datos["week"] == iso_ref[1])]
+            inicio_semana = fecha_ref - timedelta(days=fecha_ref.weekday())
+            fin_semana = inicio_semana + timedelta(days=6)
+            titulo_rango = f"Semana del {inicio_semana.strftime('%d/%m/%Y')} al {fin_semana.strftime('%d/%m/%Y')}"
+
+        elif rango == "Mes":
+            fecha_ref = st.date_input(
+                "Elige cualquier día DENTRO del mes que quieres ver:", value=date.today(), key="informe_mes"
+            )
+            df_informe = df_informe[
+                (df_informe["_fecha_dt"].dt.month == fecha_ref.month)
+                & (df_informe["_fecha_dt"].dt.year == fecha_ref.year)
+            ]
+            titulo_rango = f"Mes: {MESES_ES.get(fecha_ref.strftime('%B'), fecha_ref.strftime('%B'))} {fecha_ref.year}"
+
         df_informe = df_informe.drop(columns=["_fecha_dt"])
-    else:
-        df_informe = df
 
     st.dataframe(df_informe, use_container_width=True, hide_index=True)
 
     if not df_informe.empty:
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        total_i = len(df_informe)
+        n_pend_i = int((df_informe["Estado"] == ESTADO_PENDIENTE).sum())
+        n_avis_i = int((df_informe["Estado"] == ESTADO_AVISADO).sum())
+        n_comp_i = int((df_informe["Estado"] == ESTADO_COMPLETADA).sum())
+        st.caption(f"Total: {total_i} · 🔴 Pendientes: {n_pend_i} · 🟡 Avisadas: {n_avis_i} · 🟢 Completadas: {n_comp_i}")
+
+        col_excel, col_pdf = st.columns(2)
+
+        buffer_excel = io.BytesIO()
+        with pd.ExcelWriter(buffer_excel, engine="openpyxl") as writer:
             df_informe.to_excel(writer, index=False, sheet_name="Solicitudes")
-        st.download_button(
+        col_excel.download_button(
             "⬇️ Descargar Excel",
-            data=buffer.getvalue(),
+            data=buffer_excel.getvalue(),
             file_name=f"informe_solicitudes_{date.today().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
         )
+
+        if FPDF_DISPONIBLE:
+            pdf_bytes = generar_pdf_informe(df_informe, titulo_rango)
+            col_pdf.download_button(
+                "⬇️ Descargar PDF",
+                data=pdf_bytes,
+                file_name=f"informe_solicitudes_{date.today().strftime('%Y%m%d')}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+            )
+        else:
+            col_pdf.caption("Instala `pip install fpdf2` en el repo (requirements.txt) para activar la descarga en PDF.")
     else:
         st.caption("No hay solicitudes en ese rango para exportar.")
