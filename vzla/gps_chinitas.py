@@ -390,9 +390,9 @@ if 'rutas_gps' not in st.session_state:
 if 'chofer_defecto' not in st.session_state:
     st.session_state['chofer_defecto'] = ""
 if 'precio_gasoil' not in st.session_state:
-    st.session_state['precio_gasoil'] = 0.0
+    st.session_state['precio_gasoil'] = 0.62
 if 'precio_gasolina' not in st.session_state:
-    st.session_state['precio_gasolina'] = 0.0
+    st.session_state['precio_gasolina'] = 0.50
 if 'fecha_operativa' not in st.session_state:
     st.session_state['fecha_operativa'] = datetime.now().date()
 
@@ -449,10 +449,10 @@ with t_config:
                "combustible real. Deja los precios en 0 si no quieres que se calcule el costo.")
     cc1, cc2 = st.columns(2)
     st.session_state['precio_gasoil'] = cc1.number_input(
-        "Precio por litro — Gasoil (Bs):", min_value=0.0, value=st.session_state.get('precio_gasoil', 0.0), step=0.1
+        "Precio por litro — Gasoil (Bs):", min_value=0.0, value=st.session_state.get('precio_gasoil', 0.62), step=0.01, format="%.2f"
     )
     st.session_state['precio_gasolina'] = cc2.number_input(
-        "Precio por litro — Gasolina (Bs):", min_value=0.0, value=st.session_state.get('precio_gasolina', 0.0), step=0.1
+        "Precio por litro — Gasolina (Bs):", min_value=0.0, value=st.session_state.get('precio_gasolina', 0.50), step=0.01, format="%.2f"
     )
 
     if st.button("🚀 Procesar Cruce GPS vs Geocercas", type="primary", use_container_width=True):
@@ -673,21 +673,16 @@ with t_resumen:
             if _col_req not in df_res.columns:
                 df_res[_col_req] = _val_def
         km_total_gral = df_res['KM'].sum()
-        litros_total_gral = df_res['LITROS_EST'].sum()
-        costo_total_gral = df_res['COSTO_EST'].sum()
+        # El combustible estimado (Litros/Costo) SÍ se calcula y SÍ se manda a
+        # Google Sheets (pestaña "Guardar en Nube"), pero a propósito NO se
+        # muestra aquí en la Pizarra Ejecutiva — así lo pidieron.
 
         st.subheader("1. Edición y Actualización de Rutas y Choferes")
         st.info("Puedes editar las columnas **CHOFER** y **RUTA** directamente en la tabla. "
                 "La pizarra y los reportes por placa se actualizan al guardar, y quedan recordados "
                 "para la próxima vez que proceses el historial (no hace falta escribirlos de nuevo cada día).")
-        if costo_total_gral > 0:
-            st.caption(f"⛽ Combustible estimado del día: **{litros_total_gral:,.1f} L** ≈ **{costo_total_gral:,.2f} Bs** "
-                       "(estimado a partir del KM y el rendimiento por modelo — no es una lectura real del GPS).".replace(',', '.'))
-        elif litros_total_gral > 0:
-            st.caption(f"⛽ Combustible estimado del día: **{litros_total_gral:,.1f} L** "
-                       "(agrega el precio por litro en Configuración para ver el costo estimado).".replace(',', '.'))
         df_editado = st.data_editor(
-            df_res[['PLACA', 'MODELO', 'COLOR', 'CHOFER', 'RUTA', 'KM', 'COMBUSTIBLE', 'LITROS_EST', 'COSTO_EST']],
+            df_res[['PLACA', 'MODELO', 'COLOR', 'CHOFER', 'RUTA', 'KM']],
             use_container_width=True,
             hide_index=True,
             column_config={
@@ -696,9 +691,6 @@ with t_resumen:
                 "COLOR": st.column_config.TextColumn(disabled=True),
                 "CHOFER": st.column_config.TextColumn("Chofer"),
                 "KM": st.column_config.NumberColumn("Kilometraje", format="%.0f Kms", disabled=True),
-                "COMBUSTIBLE": st.column_config.TextColumn("Combustible", disabled=True),
-                "LITROS_EST": st.column_config.NumberColumn("Litros Est.", format="%.1f L", disabled=True),
-                "COSTO_EST": st.column_config.NumberColumn("Costo Est. (Bs)", format="%.2f Bs", disabled=True),
             }
         )
 
