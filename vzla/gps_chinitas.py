@@ -825,8 +825,14 @@ with t_reportes:
             st.caption(f"🚫 Sin datos GPS hoy (revisa/edita manualmente si hace falta): {', '.join(placas_sin_datos)}.")
 
         st.markdown("### 📝 Reportes por placa")
+        st.caption("🟢 = tuvo movimiento y recorrido registrado hoy · 🔴 = sin datos GPS o sin movimiento (revisa manualmente).")
 
-        tabs_placas = st.tabs(placas)
+        # Streamlit no permite pintar las pestañas de color directamente, así
+        # que usamos 🟢/🔴 delante de cada placa para que se distinga de un
+        # vistazo cuál tiene recorrido real y cuál no, sin tener que entrar
+        # a cada una.
+        etiquetas_tabs = [f"🟢 {p}" if reportes_con_datos.get(p) else f"🔴 {p}" for p in placas]
+        tabs_placas = st.tabs(etiquetas_tabs)
         for i, placa in enumerate(placas):
             with tabs_placas[i]:
                 texto = st.text_area("Reporte Generado (Editable):", value=st.session_state['reportes_texto'][placa], height=350, key=f"txt_{placa}")
