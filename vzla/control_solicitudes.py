@@ -136,14 +136,18 @@ def leer_solicitudes(ws_sol):
         df = pd.DataFrame(columns=COLUMNAS_SOLICITUDES)
     return df
 
-def crear_solicitud(ws_sol, solicitante, tipo_retiro, ruta, chofer):
-    ahora = datetime.now()
+def crear_solicitud(ws_sol, solicitante, tipo_retiro, ruta, chofer, fecha_solicitud):
+    """
+    fecha_solicitud: objeto date de la solicitud (por defecto hoy, pero
+    editable desde el formulario — por ejemplo para cargar algo que pidieron
+    el lunes aunque se registre en el sistema más tarde).
+    """
     id_nuevo = uuid.uuid4().hex[:8].upper()
-    dia_nombre = DIAS_ES.get(ahora.strftime("%A"), ahora.strftime("%A"))
-    mes_nombre = MESES_ES.get(ahora.strftime("%B"), ahora.strftime("%B"))
-    semana = ahora.strftime("%W")
+    dia_nombre = DIAS_ES.get(fecha_solicitud.strftime("%A"), fecha_solicitud.strftime("%A"))
+    mes_nombre = MESES_ES.get(fecha_solicitud.strftime("%B"), fecha_solicitud.strftime("%B"))
+    semana = fecha_solicitud.strftime("%W")
     fila = [
-        id_nuevo, ahora.strftime("%d/%m/%Y"), dia_nombre, semana, mes_nombre,
+        id_nuevo, fecha_solicitud.strftime("%d/%m/%Y"), dia_nombre, semana, mes_nombre,
         solicitante.strip().upper(), tipo_retiro, ruta.strip().upper(), chofer.strip().upper(),
         ESTADO_PENDIENTE, "", "", "",
     ]
@@ -239,14 +243,18 @@ with st.form("form_nueva_solicitud", clear_on_submit=True):
     fc3, fc4 = st.columns(2)
     ruta = fc3.text_input("Ruta / Destino:")
     chofer = fc4.text_input("Chofer Asignado:")
+    fecha_solicitud = st.date_input(
+        "Fecha de la solicitud:", value=date.today(),
+        help="Por defecto es hoy, pero la puedes cambiar — por ejemplo si estás cargando algo que pidieron el lunes."
+    )
     enviado = st.form_submit_button("➕ Crear Solicitud", type="primary", use_container_width=True)
 
     if enviado:
         if not solicitante or not ruta or not chofer:
             st.error("Completa Solicitante, Ruta/Destino y Chofer Asignado.")
         else:
-            nuevo_id = crear_solicitud(ws_sol, solicitante, tipo_retiro, ruta, chofer)
-            st.success(f"✅ Solicitud {nuevo_id} creada como Pendiente.")
+            nuevo_id = crear_solicitud(ws_sol, solicitante, tipo_retiro, ruta, chofer, fecha_solicitud)
+            st.success(f"✅ Solicitud {nuevo_id} creada como Pendiente ({fecha_solicitud.strftime('%d/%m/%Y')}).")
             st.session_state["recargar_solicitudes"] += 1
             st.rerun()
 
