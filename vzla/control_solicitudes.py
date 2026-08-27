@@ -88,17 +88,31 @@ def _configurar_formulas_kpi(ws_kpi):
     except Exception:
         pass
 
+def _letra_columna(n):
+    """1 -> A, 2 -> B, ... 14 -> N (para armar rangos tipo 'A1:N1' dinámicamente)."""
+    letras = ""
+    while n > 0:
+        n, resto = divmod(n - 1, 26)
+        letras = chr(65 + resto) + letras
+    return letras
+
 @st.cache_resource(show_spinner=False)
+def obtener_documento():
+    """Cachea SOLO la conexión (lo caro: autenticar y abrir el Sheet)."""
+    cliente = obtener_cliente_sheets()
+    return cliente.open_by_key(GOOGLE_SHEET_KEY_SOLICITUDES)
+
 def asegurar_estructura_sheet():
     """
-    Se ejecuta una sola vez por sesión: conecta al Google Sheet y crea las
-    hojas "Solicitudes" y "KPIs" con su encabezado/fórmulas si todavía no
-    existen (por ejemplo, si el Sheet está recién creado y vacío). Si ya
-    existen, no las toca — solo se asegura de que el encabezado de
-    "Solicitudes" esté completo.
+    Se ejecuta en CADA carga de la página (a propósito, sin @st.cache_resource):
+    crea las hojas "Solicitudes" y "KPIs" con su encabezado/fórmulas si
+    todavía no existen, y si el código agrega una columna nueva más adelante
+    (como pasó con "Detalle"), la agrega sola sin necesitar reiniciar la app
+    — antes esto estaba cacheado y por eso una columna nueva se quedaba sin
+    escribir hasta reiniciar el servidor. La revisión en sí es barata (un
+    par de llamadas), así que no hay problema en repetirla siempre.
     """
-    cliente = obtener_cliente_sheets()
-    doc = cliente.open_by_key(GOOGLE_SHEET_KEY_SOLICITUDES)
+    doc = obtener_documento()
     nombres = [ws.title for ws in doc.worksheets()]
 
     # --- Hoja "Solicitudes" ---
@@ -120,7 +134,8 @@ def asegurar_estructura_sheet():
     if primera_fila != COLUMNAS_SOLICITUDES:
         ws_sol.update("A1", [COLUMNAS_SOLICITUDES])
         try:
-            ws_sol.format("A1:M1", {"textFormat": {"bold": True}})
+            ultima_letra = _letra_columna(len(COLUMNAS_SOLICITUDES))
+            ws_sol.format(f"A1:{ultima_letra}1", {"textFormat": {"bold": True}})
             ws_sol.freeze(rows=1)
         except Exception:
             pass
