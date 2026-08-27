@@ -147,6 +147,35 @@ FOTOS_VEHICULOS = {
 
 EXTENSIONES_FOTO_VALIDAS = ('png', 'jpg', 'jpeg', 'webp')
 
+# ==========================================
+# CONSUMO DE COMBUSTIBLE ESTIMADO
+# ==========================================
+# El GPS no mide combustible real (no hay sensor de nivel ni de inyección),
+# así que esto es una ESTIMACIÓN: Litros = KM del día / rendimiento del
+# modelo, y Costo = Litros × precio del tipo de combustible (definido en
+# Configuración). Los rendimientos de abajo son un punto de partida
+# razonable por tipo/tamaño de vehículo — si tienes el dato real de fábrica
+# o de tus propias cargas de combustible, ajústalo aquí.
+TIPO_COMBUSTIBLE_VEHICULOS = {
+    'ENCAVA': 'GASOIL',
+    'CHANGAN HUNTER 4X2': 'GASOIL',
+    'CHANGAN KAICENE F70': 'GASOIL',
+    'DFSK D1': 'GASOLINA',
+    'REY CAMION': 'GASOLINA',       # Chevrolet C3500 2014
+    'MITSUBISHI LANCER': 'GASOLINA',
+    'RICH P11': 'GASOLINA',         # Dong Feng
+}
+
+RENDIMIENTO_KM_POR_LITRO = {
+    'ENCAVA': 9,             # furgón de carga, diesel
+    'CHANGAN HUNTER 4X2': 12,  # pick-up 4x2, diesel
+    'CHANGAN KAICENE F70': 10, # pick-up 4x4, diesel (algo menos por tracción)
+    'DFSK D1': 13,            # pick-up chica, gasolina
+    'REY CAMION': 6,          # camión/pick-up pesada más vieja (2014), gasolina
+    'MITSUBISHI LANCER': 13,  # sedán, gasolina
+    'RICH P11': 11,           # pick-up, gasolina
+}
+
 ICONO_GENERICO_SVG = """
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="100%" height="100%">
 <rect width="64" height="64" fill="#e3e8f0"/>
@@ -360,6 +389,10 @@ if 'rutas_gps' not in st.session_state:
     st.session_state['rutas_gps'] = {}
 if 'chofer_defecto' not in st.session_state:
     st.session_state['chofer_defecto'] = ""
+if 'precio_gasoil' not in st.session_state:
+    st.session_state['precio_gasoil'] = 0.0
+if 'precio_gasolina' not in st.session_state:
+    st.session_state['precio_gasolina'] = 0.0
 if 'fecha_operativa' not in st.session_state:
     st.session_state['fecha_operativa'] = datetime.now().date()
 
@@ -409,6 +442,18 @@ with t_config:
     despacho_defecto = c2.text_input("Despacho por defecto:", value="EL TIGRITO").upper()
     auto_resguardo = c3.checkbox("Detectar Hora de Resguardo Automáticamente", value=True)
     hora_manual = c3.time_input("Hora de Resguardo (Manual):", value=datetime.strptime("18:00", "%H:%M").time(), disabled=auto_resguardo)
+
+    st.markdown("---")
+    st.subheader("3. Consumo de Combustible (estimado)")
+    st.caption("Estimado a partir del KM del día y el rendimiento (km/l) de cada modelo — el GPS no mide "
+               "combustible real. Deja los precios en 0 si no quieres que se calcule el costo.")
+    cc1, cc2 = st.columns(2)
+    st.session_state['precio_gasoil'] = cc1.number_input(
+        "Precio por litro — Gasoil (Bs):", min_value=0.0, value=st.session_state.get('precio_gasoil', 0.0), step=0.1
+    )
+    st.session_state['precio_gasolina'] = cc2.number_input(
+        "Precio por litro — Gasolina (Bs):", min_value=0.0, value=st.session_state.get('precio_gasolina', 0.0), step=0.1
+    )
 
     if st.button("🚀 Procesar Cruce GPS vs Geocercas", type="primary", use_container_width=True):
         fuente_geocercas = archivo_geocercas if archivo_geocercas else (ruta_geocercas_repo if geocercas_en_repo else None)
@@ -566,13 +611,29 @@ with t_config:
                         else:
                             ruta_resumen = ubicacion_final_gps
 
+                        # Combustible estimado: KM del día / rendimiento del modelo (km/l).
+                        # No es una lectura real (el GPS no mide combustible), es una estimación
+                        # para tener una referencia de gasto por unidad y por ruta.
+                        tipo_combustible = TIPO_COMBUSTIBLE_VEHICULOS.get(modelo, '')
+                        rendimiento = RENDIMIENTO_KM_POR_LITRO.get(modelo)
+                        litros_estimados = round(total_km / rendimiento, 1) if rendimiento else 0
+                        precio_litro = (
+                            st.session_state.get('precio_gasoil', 0.0) if tipo_combustible == 'GASOIL'
+                            else st.session_state.get('precio_gasolina', 0.0) if tipo_combustible == 'GASOLINA'
+                            else 0.0
+                        )
+                        costo_estimado = round(litros_estimados * precio_litro, 2)
+
                         datos_resumen.append({
                             'PLACA': placa,
                             'MODELO': modelo,
                             'COLOR': color,
                             'CHOFER': chofer_para_esta_placa,
                             'RUTA': str(ruta_resumen).upper(),
-                            'KM': total_km
+                            'KM': total_km,
+                            'COMBUSTIBLE': tipo_combustible,
+                            'LITROS_EST': litros_estimados,
+                            'COSTO_EST': costo_estimado,
                         })
 
                     # Fecha operativa: la fecha real de los datos GPS (la más repetida entre las
@@ -605,17 +666,28 @@ with t_config:
 with t_resumen:
     if st.session_state['datos_resumen']:
         df_res = pd.DataFrame(st.session_state['datos_resumen'])
-        for _col_req, _val_def in [('CHOFER', ''), ('RUTA', ''), ('KM', 0)]:
+        for _col_req, _val_def in [
+            ('CHOFER', ''), ('RUTA', ''), ('KM', 0),
+            ('COMBUSTIBLE', ''), ('LITROS_EST', 0), ('COSTO_EST', 0),
+        ]:
             if _col_req not in df_res.columns:
                 df_res[_col_req] = _val_def
         km_total_gral = df_res['KM'].sum()
+        litros_total_gral = df_res['LITROS_EST'].sum()
+        costo_total_gral = df_res['COSTO_EST'].sum()
 
         st.subheader("1. Edición y Actualización de Rutas y Choferes")
         st.info("Puedes editar las columnas **CHOFER** y **RUTA** directamente en la tabla. "
                 "La pizarra y los reportes por placa se actualizan al guardar, y quedan recordados "
                 "para la próxima vez que proceses el historial (no hace falta escribirlos de nuevo cada día).")
+        if costo_total_gral > 0:
+            st.caption(f"⛽ Combustible estimado del día: **{litros_total_gral:,.1f} L** ≈ **{costo_total_gral:,.2f} Bs** "
+                       "(estimado a partir del KM y el rendimiento por modelo — no es una lectura real del GPS).".replace(',', '.'))
+        elif litros_total_gral > 0:
+            st.caption(f"⛽ Combustible estimado del día: **{litros_total_gral:,.1f} L** "
+                       "(agrega el precio por litro en Configuración para ver el costo estimado).".replace(',', '.'))
         df_editado = st.data_editor(
-            df_res[['PLACA', 'MODELO', 'COLOR', 'CHOFER', 'RUTA', 'KM']],
+            df_res[['PLACA', 'MODELO', 'COLOR', 'CHOFER', 'RUTA', 'KM', 'COMBUSTIBLE', 'LITROS_EST', 'COSTO_EST']],
             use_container_width=True,
             hide_index=True,
             column_config={
@@ -624,6 +696,9 @@ with t_resumen:
                 "COLOR": st.column_config.TextColumn(disabled=True),
                 "CHOFER": st.column_config.TextColumn("Chofer"),
                 "KM": st.column_config.NumberColumn("Kilometraje", format="%.0f Kms", disabled=True),
+                "COMBUSTIBLE": st.column_config.TextColumn("Combustible", disabled=True),
+                "LITROS_EST": st.column_config.NumberColumn("Litros Est.", format="%.1f L", disabled=True),
+                "COSTO_EST": st.column_config.NumberColumn("Costo Est. (Bs)", format="%.2f Bs", disabled=True),
             }
         )
 
@@ -916,12 +991,16 @@ with t_historico:
                             d['PLACA'],
                             chofer,
                             d['RUTA'],
-                            d['KM']
+                            d['KM'],
+                            d.get('COMBUSTIBLE', ''),
+                            d.get('LITROS_EST', 0),
+                            d.get('COSTO_EST', 0),
                         ]
                         datos_a_enviar.append(fila)
 
                     guardar_en_googlesheets(datos_a_enviar)
-                    st.success("✅ ¡Datos registrados en Google Sheets exitosamente!")
+                    st.success("✅ ¡Datos registrados en Google Sheets exitosamente! (incluye combustible estimado: "
+                               "columnas Combustible, Litros Est. y Costo Est. al final de la fila).")
             except Exception as e:
                 st.error(f"Error al conectar con Sheets: {e}")
                 st.code(traceback.format_exc())
