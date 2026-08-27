@@ -32,6 +32,7 @@ COLUMNAS_SOLICITUDES = [
     "ID", "Fecha", "Día", "Semana", "Mes", "Solicitante", "Tipo de Retiro",
     "Ruta / Destino", "Chofer Asignado", "Estado",
     "Avisado (Fecha y Hora)", "Confirmado (Fecha y Hora)", "Días para Completarse",
+    "Detalle",
 ]
 
 TIPOS_RETIRO = ["Encomienda", "Retiro de Mercancía"]
@@ -136,7 +137,7 @@ def leer_solicitudes(ws_sol):
         df = pd.DataFrame(columns=COLUMNAS_SOLICITUDES)
     return df
 
-def crear_solicitud(ws_sol, solicitante, tipo_retiro, ruta, chofer, fecha_solicitud):
+def crear_solicitud(ws_sol, solicitante, tipo_retiro, detalle, ruta, chofer, fecha_solicitud):
     """
     fecha_solicitud: objeto date de la solicitud (por defecto hoy, pero
     editable desde el formulario — por ejemplo para cargar algo que pidieron
@@ -149,10 +150,35 @@ def crear_solicitud(ws_sol, solicitante, tipo_retiro, ruta, chofer, fecha_solici
     fila = [
         id_nuevo, fecha_solicitud.strftime("%d/%m/%Y"), dia_nombre, semana, mes_nombre,
         solicitante.strip().upper(), tipo_retiro, ruta.strip().upper(), chofer.strip().upper(),
-        ESTADO_PENDIENTE, "", "", "",
+        ESTADO_PENDIENTE, "", "", "", detalle.strip().upper(),
     ]
     ws_sol.append_row(fila, value_input_option="USER_ENTERED")
     return id_nuevo
+
+def generar_mensaje_chofer(r):
+    """
+    Arma el mensaje ya redactado, listo para copiar y mandarle al chofer por
+    WhatsApp (o el medio que sea) con toda la info de la solicitud.
+    """
+    ahora = datetime.now()
+    detalle = (r.get("Detalle") or "").strip()
+    lineas = [
+        "📦 *SOLICITUD DE RETIRO*",
+        "",
+        f"🗓️ {ahora.strftime('%d/%m/%Y')} - {ahora.strftime('%I:%M %p')}",
+        f"👤 Supervisor: {r['Solicitante']}",
+        "",
+        f"*Tipo:* {r['Tipo de Retiro']}",
+    ]
+    if detalle:
+        lineas.append(f"*Detalle:* {detalle}")
+    lineas += [
+        f"*Ruta:* {r['Ruta / Destino']}",
+        f"*Chofer:* {r['Chofer Asignado']}",
+        "",
+        "Por favor confirmar este mensaje ✅",
+    ]
+    return "\n".join(lineas)
 
 def _buscar_fila(ws_sol, id_solicitud):
     celda = ws_sol.find(id_solicitud, in_column=1)
@@ -240,6 +266,7 @@ with st.form("form_nueva_solicitud", clear_on_submit=True):
     fc1, fc2 = st.columns(2)
     solicitante = fc1.text_input("Solicitante (Supervisor):")
     tipo_retiro = fc2.selectbox("Tipo de Retiro:", TIPOS_RETIRO)
+    detalle = st.text_input("¿Qué se solicita? (detalle):", placeholder="Ej: 2 BOTELLAS DE AGUA")
     fc3, fc4 = st.columns(2)
     ruta = fc3.text_input("Ruta / Destino:")
     chofer = fc4.text_input("Chofer Asignado:")
@@ -253,7 +280,7 @@ with st.form("form_nueva_solicitud", clear_on_submit=True):
         if not solicitante or not ruta or not chofer:
             st.error("Completa Solicitante, Ruta/Destino y Chofer Asignado.")
         else:
-            nuevo_id = crear_solicitud(ws_sol, solicitante, tipo_retiro, ruta, chofer, fecha_solicitud)
+            nuevo_id = crear_solicitud(ws_sol, solicitante, tipo_retiro, detalle, ruta, chofer, fecha_solicitud)
             st.success(f"✅ Solicitud {nuevo_id} creada como Pendiente ({fecha_solicitud.strftime('%d/%m/%Y')}).")
             st.session_state["recargar_solicitudes"] += 1
             st.rerun()
@@ -274,12 +301,15 @@ with tab_pend:
     for _, r in df_pend.iterrows():
         with st.container(border=True):
             cA, cB = st.columns([4, 1])
-            cA.markdown(f"**{r['ID']}** — {r['Tipo de Retiro']} · {r['Ruta / Destino']}  \n"
+            detalle_linea = f" — {r['Detalle']}" if r.get('Detalle') else ""
+            cA.markdown(f"**{r['ID']}** — {r['Tipo de Retiro']}{detalle_linea} · {r['Ruta / Destino']}  \n"
                         f"Solicitó: {r['Solicitante']} ({r['Fecha']}) · Chofer: {r['Chofer Asignado']}")
             if cB.button("📣 Ya avisé al chofer", key=f"avisar_{r['ID']}", use_container_width=True):
                 marcar_avisado(ws_sol, r["ID"])
                 st.session_state["recargar_solicitudes"] += 1
                 st.rerun()
+            with st.expander("📋 Mensaje para el chofer"):
+                st.code(generar_mensaje_chofer(r), language=None)
 
 with tab_avis:
     df_avis = df[df["Estado"] == ESTADO_AVISADO] if not df.empty else df
@@ -288,12 +318,15 @@ with tab_avis:
     for _, r in df_avis.iterrows():
         with st.container(border=True):
             cA, cB = st.columns([4, 1])
-            cA.markdown(f"**{r['ID']}** — {r['Tipo de Retiro']} · {r['Ruta / Destino']}  \n"
+            detalle_linea = f" — {r['Detalle']}" if r.get('Detalle') else ""
+            cA.markdown(f"**{r['ID']}** — {r['Tipo de Retiro']}{detalle_linea} · {r['Ruta / Destino']}  \n"
                         f"Chofer: {r['Chofer Asignado']} · Avisado: {r['Avisado (Fecha y Hora)']}")
             if cB.button("✅ Chofer confirmó el retiro", key=f"confirmar_{r['ID']}", use_container_width=True):
                 marcar_completada(ws_sol, r["ID"], r["Fecha"])
                 st.session_state["recargar_solicitudes"] += 1
                 st.rerun()
+            with st.expander("📋 Mensaje para el chofer"):
+                st.code(generar_mensaje_chofer(r), language=None)
 
 with tab_comp:
     df_comp = df[df["Estado"] == ESTADO_COMPLETADA] if not df.empty else df
