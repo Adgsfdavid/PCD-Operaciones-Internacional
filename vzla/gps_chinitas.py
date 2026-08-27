@@ -129,19 +129,23 @@ MASTER_VEHICULOS = {
     'A87EZ8P': {'modelo': 'RICH P11', 'color': 'BLANCO'},
 }
 
-# Mapa MODELO -> nombre de archivo esperado dentro de la carpeta "fotos/".
-# Deja caer ahí una foto del vehículo con ese nombre exacto (jpg o png) y la
-# Pizarra Ejecutiva la usará automáticamente. Si no existe, se usa un ícono
-# genérico y la app sigue funcionando igual.
+# Mapa MODELO -> nombre BASE de archivo esperado dentro de la carpeta "fotos/"
+# (SIN extensión). Deja caer ahí una foto del vehículo con ese nombre y
+# cualquiera de estas extensiones: .png, .jpg, .jpeg o .webp — no importa
+# cuál uses, el código las prueba todas. La Pizarra Ejecutiva la usará
+# automáticamente. Si no existe ningún archivo con ese nombre, se usa un
+# ícono genérico y la app sigue funcionando igual.
 FOTOS_VEHICULOS = {
-    'CHANGAN HUNTER 4X2': 'changan_hunter_4x2.png',
-    'CHANGAN KAICENE F70': 'changan_kaicene_f70.png',
-    'DFSK D1': 'dfsk_d1.png',
-    'ENCAVA': 'encava.png',
-    'MITSUBISHI LANCER': 'mitsubishi_lancer.png',
-    'REY CAMION': 'rey_camion.png',
-    'RICH P11': 'rich_p11.png',
+    'CHANGAN HUNTER 4X2': 'changan_hunter_4x2',
+    'CHANGAN KAICENE F70': 'changan_kaicene_f70',
+    'DFSK D1': 'dfsk_d1',
+    'ENCAVA': 'encava',
+    'MITSUBISHI LANCER': 'mitsubishi_lancer',
+    'REY CAMION': 'rey_camion',
+    'RICH P11': 'rich_p11',
 }
+
+EXTENSIONES_FOTO_VALIDAS = ('png', 'jpg', 'jpeg', 'webp')
 
 ICONO_GENERICO_SVG = """
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="100%" height="100%">
@@ -240,18 +244,40 @@ def buscar_archivo_repo(nombre_esperado, carpeta=None):
         pass
     return None
 
+def buscar_foto_cualquier_extension(nombre_base, carpeta):
+    """
+    Busca dentro de `carpeta` un archivo llamado `nombre_base` con cualquiera
+    de las extensiones de EXTENSIONES_FOTO_VALIDAS, sin importar mayúsculas ni
+    minúsculas — así no depende de si subiste .png, .jpg, .jpeg o .webp.
+    """
+    if not carpeta.exists():
+        return None
+    objetivo = nombre_base.strip().lower()
+    try:
+        for archivo in carpeta.iterdir():
+            if not archivo.is_file():
+                continue
+            stem = archivo.stem.strip().lower()
+            ext = archivo.suffix.lower().lstrip('.')
+            if stem == objetivo and ext in EXTENSIONES_FOTO_VALIDAS:
+                return archivo
+    except OSError:
+        pass
+    return None
+
 def obtener_foto_vehiculo(modelo):
     """
     Orden de prioridad:
     1) Foto propia en la carpeta fotos/ (si algún día quieres reemplazar la de catálogo
-       por la foto real de TU vehículo, solo colócala ahí con el nombre de FOTOS_VEHICULOS).
+       por la foto real de TU vehículo, solo colócala ahí con el nombre de FOTOS_VEHICULOS,
+       en cualquier extensión: png, jpg, jpeg o webp).
     2) Foto de catálogo ya integrada en fotos_vehiculos_data.py (no requiere subir nada).
     3) Ícono genérico, por si el modelo no está contemplado.
     """
-    nombre_archivo = FOTOS_VEHICULOS.get(modelo)
-    if nombre_archivo:
+    nombre_base = FOTOS_VEHICULOS.get(modelo)
+    if nombre_base:
         for carpeta in [Path(__file__).parent / "fotos", Path(__file__).parent]:
-            ruta = buscar_archivo_repo(nombre_archivo, carpeta) if carpeta.exists() else None
+            ruta = buscar_foto_cualquier_extension(nombre_base, carpeta)
             if ruta:
                 ext = ruta.suffix.lower().replace('.', '') or 'png'
                 mime = 'jpeg' if ext in ('jpg', 'jpeg') else ext
@@ -772,8 +798,8 @@ with t_resumen:
         components.html(html_pizarra_completa, height=1150, scrolling=True)
         carpeta_fotos = Path(__file__).parent / "fotos"
         modelos_sin_foto = [m for m in orden_modelos if m not in FOTOS_BASE64
-                             and not (FOTOS_VEHICULOS.get(m) and carpeta_fotos.exists()
-                                      and buscar_archivo_repo(FOTOS_VEHICULOS[m], carpeta_fotos))]
+                             and not (FOTOS_VEHICULOS.get(m)
+                                      and buscar_foto_cualquier_extension(FOTOS_VEHICULOS[m], carpeta_fotos))]
         if modelos_sin_foto:
             st.caption(f"ℹ️ Sin foto de referencia para: {', '.join(modelos_sin_foto)} — se usó un ícono genérico. "
                        "Coloca un archivo en `fotos/` con el nombre indicado en `FOTOS_VEHICULOS` para agregarla.")
