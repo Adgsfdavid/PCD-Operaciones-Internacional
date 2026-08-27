@@ -691,8 +691,8 @@ with t_resumen:
 
             tarjetas_html += f"""
             <div style="background:white; border:2px solid #000; border-radius:10px; overflow:hidden; box-shadow:0 3px 8px rgba(0,0,0,0.08);">
-                <div style="background:#0d47a1; color:white; padding:10px 14px; display:flex; align-items:center; gap:10px;">
-                    <img src="{foto_b64}" style="width:64px; height:64px; object-fit:cover; border-radius:6px; background:white;">
+                <div style="background:#0d47a1; color:white; padding:8px 14px; display:flex; align-items:center; gap:12px;">
+                    <img src="{foto_b64}" style="width:110px; height:58px; object-fit:contain; object-position:left center; border-radius:6px; background:white; flex-shrink:0;">
                     <div style="font-weight:800; font-size:15px; letter-spacing:.3px;">{modelo}</div>
                 </div>
                 <div style="display:flex; border-bottom:1px solid #eee;">
