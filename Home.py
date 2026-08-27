@@ -34,7 +34,8 @@ USUARIOS = {
     "flota_rd": {"pass": "RDFlota2026*", "rol": "Coordinador", "pais": "DOMINICANA"},
     "admin_master": {"pass": "MasterDrotaca*", "rol": "Master", "pais": "MASTER_VZLA"},
     "compras_vzla": {"pass": "Compras2026*", "rol": "Compras", "pais": "COMPRAS_VZLA"},
-    "monitoreo": {"pass": "295377886", "rol": "Monitoreo", "pais": "MONITOREO_GPS"}
+    "monitoreo": {"pass": "295377886", "rol": "Monitoreo", "pais": "MONITOREO_GPS"},
+    "faisal": {"pass": "295377886", "rol": "Solicitudes", "pais": "CONTROL_SOLICITUDES"}
 }
 
 # Inicialización del gestor de cookies sin caché para evitar errores
@@ -92,12 +93,19 @@ else:
             st.Page("vzla/velocidad.py", title="Exceso de Velocidad", icon="🚨"),
             st.Page("vzla/kilometraje.py", title="Construcción de Kilometraje", icon="🛞"),
             st.Page("vzla/compras_flota.py", title="Solicitud de Compras", icon="🛒"),
-            st.Page("vzla/gps_chinitas.py", title="Análisis de Rutas GPS", icon="🛰️") 
+            st.Page("vzla/gps_chinitas.py", title="Análisis de Rutas GPS", icon="🛰️"),
         ]
+        # "Control de Solicitudes" es exclusivo de admin_vzla (y de faisal, más
+        # abajo) — no se le da al resto de usuarios que caen en este mismo
+        # bloque de país (flota_vzla, admin_master).
+        if st.session_state["usuario"] == "admin_vzla":
+            paginas.append(st.Page("vzla/control_solicitudes.py", title="Control de Solicitudes", icon="📋"))
     elif u_data['pais'] == "COMPRAS_VZLA":
         paginas = [st.Page("vzla/compras_flota.py", title="Solicitud de Compras", icon="🛒")]
     elif u_data['pais'] == "MONITOREO_GPS":
         paginas = [st.Page("vzla/gps_chinitas.py", title="Análisis de Rutas GPS", icon="🛰️")]
+    elif u_data['pais'] == "CONTROL_SOLICITUDES":
+        paginas = [st.Page("vzla/control_solicitudes.py", title="Control de Solicitudes", icon="📋")]
     elif u_data['pais'] == "DOMINICANA":
         paginas = [
             st.Page("rd/cierre_diario.py", title="Cierre Diario (RD)", icon="📋"),
