@@ -425,6 +425,26 @@ if not df.empty:
 st.markdown("---")
 
 # ---------------------------------------------------------
+# 0. RESUMEN / KPIs — visible siempre en la pantalla principal,
+#    no solo dentro de la pestaña "KPIs".
+# ---------------------------------------------------------
+st.subheader("📊 Resumen General")
+total_kpi = len(df)
+n_pend_kpi = int((df["Estado"] == ESTADO_PENDIENTE).sum()) if total_kpi else 0
+n_avis_kpi = int((df["Estado"] == ESTADO_AVISADO).sum()) if total_kpi else 0
+n_comp_kpi = int((df["Estado"] == ESTADO_COMPLETADA).sum()) if total_kpi else 0
+dias_prom_kpi = pd.to_numeric(df["Días para Completarse"], errors="coerce").dropna().mean() if total_kpi else 0
+
+rk1, rk2, rk3, rk4, rk5 = st.columns(5)
+rk1.metric("Total", total_kpi)
+rk2.metric("🔴 Pendientes", n_pend_kpi)
+rk3.metric("🟡 Avisadas", n_avis_kpi)
+rk4.metric("🟢 Completadas", n_comp_kpi)
+rk5.metric("Prom. días para completarse", f"{dias_prom_kpi:,.1f}" if dias_prom_kpi else "—")
+
+st.markdown("---")
+
+# ---------------------------------------------------------
 # 1. CREAR NUEVA SOLICITUD
 # ---------------------------------------------------------
 st.subheader("➕ Nueva solicitud")
@@ -528,9 +548,18 @@ with tab_kpi:
                "\"KPIs\" del Google Sheet, para verlo sin abrir la app.")
 
     if total and "Chofer Asignado" in df.columns:
-        st.markdown("**Por chofer:**")
+        st.markdown("**Resumen por chofer (conteo):**")
         resumen_chofer = df.groupby("Chofer Asignado")["Estado"].value_counts().unstack(fill_value=0)
         st.dataframe(resumen_chofer, use_container_width=True)
+
+        st.markdown("**Detalle por chofer (fecha, ruta y estado):**")
+        columnas_detalle = ["Chofer Asignado", "Fecha", "Ruta / Destino", "Solicitante", "Estado",
+                             "Avisado (Fecha y Hora)", "Confirmado (Fecha y Hora)"]
+        columnas_detalle = [c for c in columnas_detalle if c in df.columns]
+        st.dataframe(
+            df[columnas_detalle].sort_values(["Chofer Asignado", "Fecha"]),
+            use_container_width=True, hide_index=True,
+        )
 
 with tab_informe:
     st.markdown("**Informe descargable (Excel y PDF)**")
