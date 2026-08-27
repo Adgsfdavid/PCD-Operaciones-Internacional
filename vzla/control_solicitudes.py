@@ -375,7 +375,6 @@ def render_tarjeta(r, ws_sol, subinfo, accion_label=None, accion_fn=None):
 # INTERFAZ STREAMLIT
 # ==========================================
 st.title("📋 Control de Solicitudes")
-st.caption("Encomiendas y retiros de mercancía — pedido → avisado al chofer → retiro confirmado.")
 
 try:
     ws_sol, ws_kpi = asegurar_estructura_sheet()
@@ -387,10 +386,6 @@ except Exception as e:
 
 if "recargar_solicitudes" not in st.session_state:
     st.session_state["recargar_solicitudes"] = 0
-
-col_recarga, _ = st.columns([1, 4])
-if col_recarga.button("🔄 Actualizar datos"):
-    st.session_state["recargar_solicitudes"] += 1
 
 df = leer_solicitudes(ws_sol)
 
