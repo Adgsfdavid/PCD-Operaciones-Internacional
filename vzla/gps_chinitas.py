@@ -134,8 +134,8 @@ MASTER_VEHICULOS = {
 # Pizarra Ejecutiva la usará automáticamente. Si no existe, se usa un ícono
 # genérico y la app sigue funcionando igual.
 FOTOS_VEHICULOS = {
-    'CHANGAN HUNTER 4X2': 'changan_hunter.png',
-    'CHANGAN KAICENE F70': 'changan_kaicene.png',
+    'CHANGAN HUNTER 4X2': 'changan_hunter_4x2.png',
+    'CHANGAN KAICENE F70': 'changan_kaicene_f70.png',
     'DFSK D1': 'dfsk_d1.png',
     'ENCAVA': 'encava.png',
     'MITSUBISHI LANCER': 'mitsubishi_lancer.png',
@@ -692,7 +692,7 @@ with t_resumen:
             tarjetas_html += f"""
             <div style="background:white; border:2px solid #000; border-radius:10px; overflow:hidden; box-shadow:0 3px 8px rgba(0,0,0,0.08);">
                 <div style="background:#0d47a1; color:white; padding:10px 14px; display:flex; align-items:center; gap:10px;">
-                    <img src="{foto_b64}" style="width:46px; height:46px; object-fit:cover; border-radius:6px; background:white;">
+                    <img src="{foto_b64}" style="width:64px; height:64px; object-fit:cover; border-radius:6px; background:white;">
                     <div style="font-weight:800; font-size:15px; letter-spacing:.3px;">{modelo}</div>
                 </div>
                 <div style="display:flex; border-bottom:1px solid #eee;">
