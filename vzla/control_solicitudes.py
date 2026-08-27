@@ -37,6 +37,8 @@ COLUMNAS_SOLICITUDES = [
 
 TIPOS_RETIRO = ["Encomienda", "Retiro de Mercancía"]
 
+SOLICITANTES_FIJOS = ["JOSE SUAREZ", "PROCURA", "PROMOCION COMERCIAL", "PROMOCION MEDICA", "OTROS"]
+
 ESTADO_PENDIENTE = "Pendiente"
 ESTADO_AVISADO = "Avisado"
 ESTADO_COMPLETADA = "Completada"
@@ -262,10 +264,18 @@ st.markdown("---")
 # 1. CREAR NUEVA SOLICITUD
 # ---------------------------------------------------------
 st.subheader("➕ Nueva solicitud")
+
+# El selector de "Solicitante" va FUERA del formulario porque necesita
+# reaccionar al instante cuando se elige "OTROS" (los widgets dentro de un
+# st.form solo se procesan al enviarlo, no muestran/ocultan nada al vuelo).
+sc1, sc2 = st.columns(2)
+solicitante_sel = sc1.selectbox("Solicitante (Supervisor):", SOLICITANTES_FIJOS)
+solicitante_otro = ""
+if solicitante_sel == "OTROS":
+    solicitante_otro = sc2.text_input("Especifique quién solicita:")
+
 with st.form("form_nueva_solicitud", clear_on_submit=True):
-    fc1, fc2 = st.columns(2)
-    solicitante = fc1.text_input("Solicitante (Supervisor):")
-    tipo_retiro = fc2.selectbox("Tipo de Retiro:", TIPOS_RETIRO)
+    tipo_retiro = st.selectbox("Tipo de Retiro:", TIPOS_RETIRO)
     detalle = st.text_input("¿Qué se solicita? (detalle):", placeholder="Ej: 2 BOTELLAS DE AGUA")
     fc3, fc4 = st.columns(2)
     ruta = fc3.text_input("Ruta / Destino:")
@@ -277,10 +287,11 @@ with st.form("form_nueva_solicitud", clear_on_submit=True):
     enviado = st.form_submit_button("➕ Crear Solicitud", type="primary", use_container_width=True)
 
     if enviado:
-        if not solicitante or not ruta or not chofer:
-            st.error("Completa Solicitante, Ruta/Destino y Chofer Asignado.")
+        solicitante_final = solicitante_otro.strip() if solicitante_sel == "OTROS" else solicitante_sel
+        if not solicitante_final or not ruta or not chofer:
+            st.error("Completa Solicitante (si elegiste 'OTROS', escribe quién), Ruta/Destino y Chofer Asignado.")
         else:
-            nuevo_id = crear_solicitud(ws_sol, solicitante, tipo_retiro, detalle, ruta, chofer, fecha_solicitud)
+            nuevo_id = crear_solicitud(ws_sol, solicitante_final, tipo_retiro, detalle, ruta, chofer, fecha_solicitud)
             st.success(f"✅ Solicitud {nuevo_id} creada como Pendiente ({fecha_solicitud.strftime('%d/%m/%Y')}).")
             st.session_state["recargar_solicitudes"] += 1
             st.rerun()
