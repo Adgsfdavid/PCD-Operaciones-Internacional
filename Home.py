@@ -47,6 +47,16 @@ def check_login():
         st.session_state["usuario"] = None
     if st.session_state["logged_in"]:
         return True
+    # Cuando se le da "Cerrar Sesión", cookie_manager.delete(...) le manda la
+    # orden al navegador para borrar la cookie, pero esa borrada es asíncrona
+    # (pasa por un componente de JavaScript) — el rerun que sigue casi
+    # siempre llega ANTES de que el navegador termine de borrarla. Entonces
+    # cookie_manager.get() todavía devuelve el valor viejo y la sesión se
+    # vuelve a abrir sola, como si nunca se hubiera cerrado. Esta bandera
+    # bloquea el auto-login por cookie hasta que la persona entre otra vez
+    # a propósito con usuario y contraseña.
+    if st.session_state.get("sesion_cerrada_manual"):
+        return False
     cookie_user = cookie_manager.get("pcd_usuario_valido")
     if cookie_user and cookie_user in USUARIOS:
         st.session_state["logged_in"] = True
@@ -65,6 +75,7 @@ if not check_login():
             if usuario_input in USUARIOS and USUARIOS[usuario_input]["pass"] == password_input:
                 st.session_state["logged_in"] = True
                 st.session_state["usuario"] = usuario_input
+                st.session_state["sesion_cerrada_manual"] = False
                 cookie_manager.set("pcd_usuario_valido", usuario_input, expires_at=datetime.now() + timedelta(days=30))
                 st.success("✅ Acceso Concedido.")
                 st.rerun()
@@ -73,11 +84,13 @@ if not check_login():
 else:
     u_data = USUARIOS[st.session_state["usuario"]]
     st.sidebar.markdown(f"**Usuario:** {st.session_state['usuario'].upper()}")
-    
+
     if st.sidebar.button("🚪 Cerrar Sesión"):
         try: cookie_manager.delete("pcd_usuario_valido")
-        except: pass 
+        except: pass
         st.session_state["logged_in"] = False
+        st.session_state["usuario"] = None
+        st.session_state["sesion_cerrada_manual"] = True
         st.rerun()
 
     # Rutas por país/perfil
