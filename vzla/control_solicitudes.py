@@ -462,6 +462,30 @@ def _parsear_fecha_hora(fecha_hora_str):
     except Exception:
         return ahora_vzla()
 
+def selector_hora_12h(key_prefix, valor_default=None):
+    """
+    st.time_input de Streamlit siempre muestra el reloj en formato 24h
+    (militar) y no tiene forma de cambiarlo — así que en vez de usarlo, esto
+    arma un selector con Hora (1-12) + Minutos + AM/PM, como se usa en
+    Venezuela. Devuelve un objeto time() en 24h para los cálculos internos.
+    """
+    if valor_default is None:
+        valor_default = ahora_vzla().time()
+    hora_12_actual = valor_default.hour % 12
+    if hora_12_actual == 0:
+        hora_12_actual = 12
+    ampm_actual = "PM" if valor_default.hour >= 12 else "AM"
+
+    ch1, ch2, ch3 = st.columns(3)
+    hora_sel = ch1.selectbox("Hora", list(range(1, 13)), index=hora_12_actual - 1, key=f"{key_prefix}_hora12")
+    minuto_sel = ch2.selectbox("Min", [f"{m:02d}" for m in range(60)], index=valor_default.minute, key=f"{key_prefix}_min12")
+    ampm_sel = ch3.selectbox("AM/PM", ["AM", "PM"], index=0 if ampm_actual == "AM" else 1, key=f"{key_prefix}_ampm12")
+
+    hora_24 = hora_sel % 12
+    if ampm_sel == "PM":
+        hora_24 += 12
+    return time(hora_24, int(minuto_sel))
+
 def render_tarjeta(r, ws_sol, subinfo, accion_label=None, accion_fn=None, confirmar_entrega=False, confirmar_aviso=False):
     """
     Dibuja una tarjeta de solicitud con: info + botón de acción principal
@@ -490,9 +514,9 @@ def render_tarjeta(r, ws_sol, subinfo, accion_label=None, accion_fn=None, confir
         if confirmar_aviso:
             with st.expander("📣 Avisar al chofer", expanded=False):
                 with st.form(f"form_avisar_{id_sol}"):
-                    af1, af2 = st.columns(2)
-                    fecha_aviso = af1.date_input("Fecha del aviso:", value=date.today(), key=f"favi_{id_sol}")
-                    hora_aviso = af2.time_input("Hora del aviso:", value=ahora_vzla().time(), key=f"havi_{id_sol}")
+                    fecha_aviso = st.date_input("Fecha del aviso:", value=date.today(), key=f"favi_{id_sol}")
+                    st.caption("Hora del aviso:")
+                    hora_aviso = selector_hora_12h(f"havi_{id_sol}")
                     avisar = st.form_submit_button("📣 Ya avisé al chofer", type="primary", use_container_width=True)
                     if avisar:
                         marcar_avisado(ws_sol, id_sol, fecha_aviso, hora_aviso)
@@ -511,9 +535,9 @@ def render_tarjeta(r, ws_sol, subinfo, accion_label=None, accion_fn=None, confir
             else:
                 with st.expander("📥 Confirmar Entrega", expanded=False):
                     with st.form(f"form_confirmar_{id_sol}"):
-                        cf1, cf2 = st.columns(2)
-                        fecha_retiro = cf1.date_input("Fecha del retiro:", value=date.today(), key=f"fret_{id_sol}")
-                        hora_retiro = cf2.time_input("Hora del retiro:", value=ahora_vzla().time(), key=f"hret_{id_sol}")
+                        fecha_retiro = st.date_input("Fecha del retiro:", value=date.today(), key=f"fret_{id_sol}")
+                        st.caption("Hora del retiro:")
+                        hora_retiro = selector_hora_12h(f"hret_{id_sol}")
                         chofer_retiro = st.text_input(
                             "Chofer que retiró:", value=r["Chofer Asignado"], key=f"chret_{id_sol}",
                             help="Por defecto es el chofer asignado a la solicitud, pero puedes cambiarlo si fue otro chofer.",
