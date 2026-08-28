@@ -6,9 +6,28 @@ import pandas as pd
 import gspread
 import textwrap
 import uuid
-from datetime import datetime, date, time, timedelta
+from datetime import datetime, date, time, timedelta, timezone
 from google.oauth2.service_account import Credentials
 import io
+
+# Streamlit Cloud corre sus servidores en UTC, no en hora de Venezuela — sin
+# esto, todo lo que use ahora_vzla() queda ~4-5 horas adelantado. Esta
+# función se usa en TODO el archivo en vez de datetime.now() directo.
+# Venezuela no tiene horario de verano, así que un offset fijo de -4 es
+# siempre correcto (se intenta primero con la base de datos de zonas
+# horarias del sistema; si el servidor no la tiene instalada, se cae al
+# offset fijo para que esto nunca truene).
+try:
+    from zoneinfo import ZoneInfo
+    VENEZUELA_TZ = ZoneInfo("America/Caracas")
+except Exception:
+    VENEZUELA_TZ = timezone(timedelta(hours=-4))
+
+def ahora_vzla():
+    try:
+        return datetime.now(VENEZUELA_TZ).replace(tzinfo=None)
+    except Exception:
+        return datetime.now(timezone(timedelta(hours=-4))).replace(tzinfo=None)
 
 try:
     from fpdf import FPDF
@@ -188,7 +207,7 @@ def generar_mensaje_chofer(r):
     Arma el mensaje ya redactado, listo para copiar y mandarle al chofer por
     WhatsApp (o el medio que sea) con toda la info de la solicitud.
     """
-    ahora = datetime.now()
+    ahora = ahora_vzla()
     detalle = (r.get("Detalle") or "").strip()
     lineas = [
         "📦 *SOLICITUD DE RETIRO*",
@@ -216,7 +235,7 @@ def _buscar_fila(ws_sol, id_solicitud):
 
 def marcar_avisado(ws_sol, id_solicitud):
     fila = _buscar_fila(ws_sol, id_solicitud)
-    ahora = datetime.now().strftime("%d/%m/%Y %I:%M %p")
+    ahora = ahora_vzla().strftime("%d/%m/%Y %I:%M %p")
     ws_sol.update(f"J{fila}:K{fila}", [[ESTADO_AVISADO, ahora]], value_input_option="USER_ENTERED")
 
 def marcar_completada_detallada(ws_sol, id_solicitud, fecha_solicitud_str, fecha_retiro, hora_retiro, chofer_retiro):
@@ -316,7 +335,7 @@ def generar_pdf_informe(df_informe, titulo_rango):
     pdf.cell(0, 10, _texto_pdf("Informe de Control de Solicitudes"), ln=True)
     pdf.set_font("Helvetica", "", 11)
     pdf.cell(0, 7, _texto_pdf(titulo_rango), ln=True)
-    pdf.cell(0, 7, _texto_pdf(f"Generado: {datetime.now().strftime('%d/%m/%Y %I:%M %p')}"), ln=True)
+    pdf.cell(0, 7, _texto_pdf(f"Generado: {ahora_vzla().strftime('%d/%m/%Y %I:%M %p')}"), ln=True)
     pdf.ln(3)
 
     total = len(df_informe)
@@ -392,7 +411,7 @@ def render_tarjeta(r, ws_sol, subinfo, accion_label=None, accion_fn=None, confir
                     with st.form(f"form_confirmar_{id_sol}"):
                         cf1, cf2 = st.columns(2)
                         fecha_retiro = cf1.date_input("Fecha del retiro:", value=date.today(), key=f"fret_{id_sol}")
-                        hora_retiro = cf2.time_input("Hora del retiro:", value=datetime.now().time(), key=f"hret_{id_sol}")
+                        hora_retiro = cf2.time_input("Hora del retiro:", value=ahora_vzla().time(), key=f"hret_{id_sol}")
                         chofer_retiro = st.text_input(
                             "Chofer que retiró:", value=r["Chofer Asignado"], key=f"chret_{id_sol}",
                             help="Por defecto es el chofer asignado a la solicitud, pero puedes cambiarlo si fue otro chofer.",
@@ -470,7 +489,7 @@ df = leer_solicitudes(ws_sol)
 # ALERTAS
 # ---------------------------------------------------------
 if not df.empty:
-    ahora = datetime.now()
+    ahora = ahora_vzla()
 
     def _horas_desde(valor_fecha_hora):
         try:
