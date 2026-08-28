@@ -57,7 +57,7 @@ COLUMNAS_SOLICITUDES = [
     "ID", "Fecha", "Día", "Semana", "Mes", "Solicitante", "Tipo de Retiro",
     "Ruta / Destino", "Chofer Asignado", "Estado",
     "Avisado (Fecha y Hora)", "Confirmado (Fecha y Hora)", "Días para Completarse",
-    "Detalle", "Duración del Retiro",
+    "Detalle", "Duración del Retiro", "Proveedor",
 ]
 
 # El tipo de retiro ya no se elige — siempre es "Retiro de Encomienda". Se deja
@@ -198,7 +198,7 @@ def leer_solicitudes(ws_sol):
         df = pd.DataFrame(columns=COLUMNAS_SOLICITUDES)
     return df
 
-def crear_solicitud(ws_sol, solicitante, detalle, ruta, chofer, fecha_solicitud):
+def crear_solicitud(ws_sol, solicitante, detalle, ruta, chofer, fecha_solicitud, proveedor=""):
     """
     fecha_solicitud: objeto date de la solicitud (por defecto hoy, pero
     editable desde el formulario — por ejemplo para cargar algo que pidieron
@@ -211,7 +211,7 @@ def crear_solicitud(ws_sol, solicitante, detalle, ruta, chofer, fecha_solicitud)
     fila = [
         id_nuevo, fecha_solicitud.strftime("%d/%m/%Y"), dia_nombre, semana, mes_nombre,
         solicitante.strip().upper(), TIPO_RETIRO_FIJO, ruta.strip().upper(), chofer.strip().upper(),
-        ESTADO_PENDIENTE, "", "", "", detalle.strip().upper(), "",
+        ESTADO_PENDIENTE, "", "", "", detalle.strip().upper(), "", proveedor.strip().upper(),
     ]
     ws_sol.append_row(fila, value_input_option="USER_ENTERED")
     return id_nuevo
@@ -223,6 +223,7 @@ def generar_mensaje_chofer(r):
     """
     ahora = ahora_vzla()
     detalle = (r.get("Detalle") or "").strip()
+    proveedor = (r.get("Proveedor") or "").strip()
     lineas = [
         "📦 *SOLICITUD DE RETIRO*",
         "",
@@ -232,6 +233,8 @@ def generar_mensaje_chofer(r):
         "",
         f"*Tipo:* {r['Tipo de Retiro']}",
     ]
+    if proveedor:
+        lineas.append(f"*Proveedor:* {proveedor}")
     if detalle:
         lineas.append(f"*Detalle:* {detalle}")
     lineas += [
@@ -311,7 +314,7 @@ def generar_mensaje_confirmacion(r, confirmado_dt, chofer_retiro, duracion_texto
     ]
     return "\n".join(lineas)
 
-def actualizar_solicitud(ws_sol, id_solicitud, solicitante, detalle, ruta, chofer, fecha_solicitud):
+def actualizar_solicitud(ws_sol, id_solicitud, solicitante, detalle, ruta, chofer, fecha_solicitud, proveedor=""):
     """Edita los datos base de una solicitud ya creada (no toca Estado/Avisado/Confirmado)."""
     fila = _buscar_fila(ws_sol, id_solicitud)
     dia_nombre = DIAS_ES.get(fecha_solicitud.strftime("%A"), fecha_solicitud.strftime("%A"))
@@ -324,6 +327,7 @@ def actualizar_solicitud(ws_sol, id_solicitud, solicitante, detalle, ruta, chofe
         value_input_option="USER_ENTERED",
     )
     ws_sol.update(f"N{fila}", [[detalle.strip().upper()]], value_input_option="USER_ENTERED")
+    ws_sol.update(f"P{fila}", [[proveedor.strip().upper()]], value_input_option="USER_ENTERED")
 
 def borrar_solicitud(ws_sol, id_solicitud):
     fila = _buscar_fila(ws_sol, id_solicitud)
@@ -364,9 +368,9 @@ def generar_pdf_informe(df_informe, titulo_rango):
     ), ln=True)
     pdf.ln(4)
 
-    columnas = ["ID", "Fecha", "Solicitante", "Tipo de Retiro", "Detalle", "Ruta / Destino",
+    columnas = ["ID", "Fecha", "Solicitante", "Tipo de Retiro", "Detalle", "Proveedor", "Ruta / Destino",
                 "Chofer Asignado", "Estado", "Confirmado (Fecha y Hora)", "Días para Completarse"]
-    anchos = [18, 20, 30, 26, 35, 30, 28, 22, 32, 20]
+    anchos = [16, 18, 26, 22, 28, 22, 26, 26, 20, 30, 18]
 
     pdf.set_font("Helvetica", "B", 8)
     pdf.set_fill_color(13, 71, 161)
@@ -393,6 +397,12 @@ def _parsear_fecha(fecha_str):
     except Exception:
         return date.today()
 
+def _parsear_fecha_hora(fecha_hora_str):
+    try:
+        return datetime.strptime(fecha_hora_str, "%d/%m/%Y %I:%M %p")
+    except Exception:
+        return ahora_vzla()
+
 def render_tarjeta(r, ws_sol, subinfo, accion_label=None, accion_fn=None, confirmar_entrega=False):
     """
     Dibuja una tarjeta de solicitud con: info + botón de acción principal
@@ -406,8 +416,9 @@ def render_tarjeta(r, ws_sol, subinfo, accion_label=None, accion_fn=None, confir
     id_sol = r["ID"]
     with st.container(border=True):
         detalle_linea = f" — {r['Detalle']}" if r.get("Detalle") else ""
+        proveedor_linea = f" · Proveedor: {r['Proveedor']}" if r.get("Proveedor") else ""
         cA, cB = st.columns([4, 1])
-        cA.markdown(f"**{id_sol}** — {r['Tipo de Retiro']}{detalle_linea} · {r['Ruta / Destino']}  \n{subinfo}")
+        cA.markdown(f"**{id_sol}** — {r['Tipo de Retiro']}{detalle_linea} · {r['Ruta / Destino']}{proveedor_linea}  \n{subinfo}")
         if accion_label and accion_fn and not confirmar_entrega and cB.button(accion_label, key=f"accion_{id_sol}", use_container_width=True):
             accion_fn()
             st.session_state["recargar_solicitudes"] += 1
@@ -444,6 +455,20 @@ def render_tarjeta(r, ws_sol, subinfo, accion_label=None, accion_fn=None, confir
         with st.expander("📋 Mensaje para el chofer"):
             st.code(generar_mensaje_chofer(r), language=None)
 
+        # Solo tiene sentido para solicitudes ya Completadas — se reconstruye
+        # a partir de lo que ya quedó guardado en el Sheet, así que queda
+        # disponible para copiar en cualquier momento (no solo justo cuando
+        # se confirma), por ejemplo si se cierra el mensaje o se vuelve a
+        # entrar más tarde.
+        if r.get("Estado") == ESTADO_COMPLETADA and r.get("Confirmado (Fecha y Hora)"):
+            with st.expander("✅ Mensaje de confirmación de retiro"):
+                confirmado_dt = _parsear_fecha_hora(r["Confirmado (Fecha y Hora)"])
+                duracion_texto = r.get("Duración del Retiro") or "—"
+                st.code(
+                    generar_mensaje_confirmacion(r, confirmado_dt, r["Chofer Asignado"], duracion_texto),
+                    language=None,
+                )
+
         with st.expander("✏️ Editar / 🗑️ Borrar"):
             with st.form(f"form_editar_{id_sol}"):
                 ec1, ec2 = st.columns(2)
@@ -457,6 +482,7 @@ def render_tarjeta(r, ws_sol, subinfo, accion_label=None, accion_fn=None, confir
                 ec3, ec4 = st.columns(2)
                 e_ruta = ec3.text_input("Ruta / Destino:", value=r["Ruta / Destino"], key=f"eruta_{id_sol}")
                 e_chofer = ec4.text_input("Chofer Asignado:", value=r["Chofer Asignado"], key=f"echofer_{id_sol}")
+                e_proveedor = st.text_input("Proveedor:", value=r.get("Proveedor", ""), key=f"eprov_{id_sol}")
                 e_fecha = st.date_input("Fecha:", value=_parsear_fecha(r["Fecha"]), key=f"efecha_{id_sol}")
 
                 g1, g2 = st.columns(2)
@@ -469,7 +495,7 @@ def render_tarjeta(r, ws_sol, subinfo, accion_label=None, accion_fn=None, confir
                     if not sol_final or not e_ruta or not e_chofer:
                         st.error("Completa Solicitante, Ruta/Destino y Chofer Asignado.")
                     else:
-                        actualizar_solicitud(ws_sol, id_sol, sol_final, e_detalle, e_ruta, e_chofer, e_fecha)
+                        actualizar_solicitud(ws_sol, id_sol, sol_final, e_detalle, e_ruta, e_chofer, e_fecha, e_proveedor)
                         st.success("✅ Solicitud actualizada.")
                         st.session_state["recargar_solicitudes"] += 1
                         st.rerun()
@@ -570,6 +596,7 @@ with st.form("form_nueva_solicitud", clear_on_submit=True):
     fc3, fc4 = st.columns(2)
     ruta = fc3.text_input("Ruta / Destino:")
     chofer = fc4.text_input("Chofer Asignado:")
+    proveedor = st.text_input("Proveedor:", placeholder="Ej: DISTRIBUIDORA XYZ")
     fecha_solicitud = st.date_input(
         "Fecha de la solicitud:", value=date.today(),
         help="Por defecto es hoy, pero la puedes cambiar — por ejemplo si estás cargando algo que pidieron el lunes."
@@ -581,7 +608,7 @@ with st.form("form_nueva_solicitud", clear_on_submit=True):
         if not solicitante_final or not ruta or not chofer:
             st.error("Completa Solicitante (si elegiste 'OTROS', escribe quién), Ruta/Destino y Chofer Asignado.")
         else:
-            nuevo_id = crear_solicitud(ws_sol, solicitante_final, detalle, ruta, chofer, fecha_solicitud)
+            nuevo_id = crear_solicitud(ws_sol, solicitante_final, detalle, ruta, chofer, fecha_solicitud, proveedor)
             st.success(f"✅ Solicitud {nuevo_id} creada como Pendiente ({fecha_solicitud.strftime('%d/%m/%Y')}).")
             # El selector de "Solicitante" y el campo de "OTROS" viven FUERA del
             # st.form (ver comentario arriba), así que clear_on_submit no los
@@ -630,11 +657,11 @@ with tab_comp:
         st.info("Todavía no hay solicitudes completadas.")
     else:
         st.dataframe(
-            df_comp[["ID", "Fecha", "Solicitante", "Tipo de Retiro", "Ruta / Destino", "Chofer Asignado",
+            df_comp[["ID", "Fecha", "Solicitante", "Tipo de Retiro", "Proveedor", "Ruta / Destino", "Chofer Asignado",
                      "Confirmado (Fecha y Hora)", "Días para Completarse"]],
             use_container_width=True, hide_index=True,
         )
-        if st.checkbox("✏️ Editar o borrar una solicitud completada"):
+        if st.checkbox("📋 Ver mensajes / editar / borrar una solicitud completada"):
             for _, r in df_comp.iterrows():
                 render_tarjeta(
                     r, ws_sol,
