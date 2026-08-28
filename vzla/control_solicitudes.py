@@ -353,8 +353,28 @@ def _texto_pdf(valor):
         texto = texto.replace(viejo, nuevo)
     return texto
 
-def generar_pdf_informe(df_informe, titulo_rango):
-    """Genera el informe en PDF (apaisado) con el resumen y la tabla de solicitudes del rango elegido."""
+def armar_resumen_proveedores(df_informe):
+    """
+    Agrupa el rango de fechas elegido por Proveedor: cuántos retiros tuvo
+    cada uno y en qué fechas, ordenado de mayor a menor — para ir viendo qué
+    proveedores piden más retiros con el tiempo.
+    """
+    if df_informe.empty:
+        return pd.DataFrame(columns=["Proveedor", "Retiros", "Fechas"])
+    df2 = df_informe.copy()
+    df2["Proveedor"] = df2["Proveedor"].replace("", pd.NA).fillna("SIN PROVEEDOR ESPECIFICADO")
+    resumen = (
+        df2.groupby("Proveedor")
+        .agg(Retiros=("ID", "count"), Fechas=("Fecha", lambda s: ", ".join(s)))
+        .reset_index()
+        .sort_values("Retiros", ascending=False)
+    )
+    return resumen
+
+def generar_pdf_informe(df_informe, titulo_rango, resumen_proveedores=None):
+    """Genera el informe en PDF (apaisado) con el resumen y la tabla de solicitudes del rango elegido.
+    Si se pasa resumen_proveedores (ver armar_resumen_proveedores), se agrega una segunda página
+    con el conteo de retiros por proveedor."""
     pdf = FPDF(orientation="L", unit="mm", format="A4")
     pdf.set_auto_page_break(auto=True, margin=12)
     pdf.add_page()
@@ -396,6 +416,37 @@ def generar_pdf_informe(df_informe, titulo_rango):
                 valor = valor[: int(ancho * 1.8) - 1] + "…"
             pdf.cell(ancho, 7, valor, border=1)
         pdf.ln()
+
+    if resumen_proveedores is not None and not resumen_proveedores.empty:
+        pdf.add_page()
+        pdf.set_font("Helvetica", "B", 16)
+        pdf.cell(0, 10, _texto_pdf("Resumen por Proveedor"), ln=True)
+        pdf.set_font("Helvetica", "", 11)
+        pdf.cell(0, 7, _texto_pdf(titulo_rango), ln=True)
+        pdf.ln(3)
+
+        col_prov, col_ret, col_fec = 60, 22, 195
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_fill_color(13, 71, 161)
+        pdf.set_text_color(255, 255, 255)
+        pdf.cell(col_prov, 8, _texto_pdf("Proveedor"), border=1, fill=True, align="C")
+        pdf.cell(col_ret, 8, _texto_pdf("Retiros"), border=1, fill=True, align="C")
+        pdf.cell(col_fec, 8, _texto_pdf("Fechas"), border=1, fill=True, align="C")
+        pdf.ln()
+
+        pdf.set_font("Helvetica", "", 8.5)
+        pdf.set_text_color(0, 0, 0)
+        for _, fila in resumen_proveedores.iterrows():
+            proveedor_txt = _texto_pdf(fila["Proveedor"])
+            if len(proveedor_txt) > 34:
+                proveedor_txt = proveedor_txt[:33] + "…"
+            fechas_txt = _texto_pdf(fila["Fechas"])
+            if len(fechas_txt) > 110:
+                fechas_txt = fechas_txt[:109] + "…"
+            pdf.cell(col_prov, 7, proveedor_txt, border=1)
+            pdf.cell(col_ret, 7, str(int(fila["Retiros"])), border=1, align="C")
+            pdf.cell(col_fec, 7, fechas_txt, border=1)
+            pdf.ln()
 
     return bytes(pdf.output())
 
@@ -803,11 +854,19 @@ with tab_informe:
         n_comp_i = int((df_informe["Estado"] == ESTADO_COMPLETADA).sum())
         st.caption(f"Total: {total_i} · 🔴 Pendientes: {n_pend_i} · 🟡 Avisadas: {n_avis_i} · 🟢 Completadas: {n_comp_i}")
 
+        # Resumen por proveedor del mismo rango de fechas elegido arriba —
+        # cuántos retiros tuvo cada proveedor y en qué fechas, para ir viendo
+        # cuáles piden más con el tiempo.
+        resumen_proveedores = armar_resumen_proveedores(df_informe)
+        st.markdown("**Resumen por proveedor (mismo rango):**")
+        st.dataframe(resumen_proveedores, use_container_width=True, hide_index=True)
+
         col_excel, col_pdf = st.columns(2)
 
         buffer_excel = io.BytesIO()
         with pd.ExcelWriter(buffer_excel, engine="openpyxl") as writer:
             df_informe.to_excel(writer, index=False, sheet_name="Solicitudes")
+            resumen_proveedores.to_excel(writer, index=False, sheet_name="Por Proveedor")
         col_excel.download_button(
             "⬇️ Descargar Excel",
             data=buffer_excel.getvalue(),
@@ -817,7 +876,7 @@ with tab_informe:
         )
 
         if FPDF_DISPONIBLE:
-            pdf_bytes = generar_pdf_informe(df_informe, titulo_rango)
+            pdf_bytes = generar_pdf_informe(df_informe, titulo_rango, resumen_proveedores)
             col_pdf.download_button(
                 "⬇️ Descargar PDF",
                 data=pdf_bytes,
