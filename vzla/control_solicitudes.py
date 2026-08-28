@@ -6,7 +6,7 @@ import pandas as pd
 import gspread
 import textwrap
 import uuid
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, time, timedelta
 from google.oauth2.service_account import Credentials
 import io
 
@@ -38,10 +38,15 @@ COLUMNAS_SOLICITUDES = [
     "ID", "Fecha", "Día", "Semana", "Mes", "Solicitante", "Tipo de Retiro",
     "Ruta / Destino", "Chofer Asignado", "Estado",
     "Avisado (Fecha y Hora)", "Confirmado (Fecha y Hora)", "Días para Completarse",
-    "Detalle",
+    "Detalle", "Duración del Retiro",
 ]
 
-TIPOS_RETIRO = ["Encomienda", "Retiro de Mercancía"]
+# El tipo de retiro ya no se elige — siempre es "Retiro de Encomienda". Se deja
+# como constante (en vez de un selector) para no complicar el formulario.
+TIPO_RETIRO_FIJO = "Retiro de Encomienda"
+# Se conserva por compatibilidad con solicitudes viejas que puedan tener otro
+# valor guardado en el Sheet (no se tocan al leerlas, solo las nuevas usan el fijo).
+TIPOS_RETIRO = ["Encomienda", "Retiro de Mercancía", TIPO_RETIRO_FIJO]
 
 SOLICITANTES_FIJOS = ["JOSE SUAREZ", "PROCURA", "PROMOCION COMERCIAL", "PROMOCION MEDICA", "OTROS"]
 
@@ -160,7 +165,7 @@ def leer_solicitudes(ws_sol):
         df = pd.DataFrame(columns=COLUMNAS_SOLICITUDES)
     return df
 
-def crear_solicitud(ws_sol, solicitante, tipo_retiro, detalle, ruta, chofer, fecha_solicitud):
+def crear_solicitud(ws_sol, solicitante, detalle, ruta, chofer, fecha_solicitud):
     """
     fecha_solicitud: objeto date de la solicitud (por defecto hoy, pero
     editable desde el formulario — por ejemplo para cargar algo que pidieron
@@ -172,8 +177,8 @@ def crear_solicitud(ws_sol, solicitante, tipo_retiro, detalle, ruta, chofer, fec
     semana = fecha_solicitud.strftime("%W")
     fila = [
         id_nuevo, fecha_solicitud.strftime("%d/%m/%Y"), dia_nombre, semana, mes_nombre,
-        solicitante.strip().upper(), tipo_retiro, ruta.strip().upper(), chofer.strip().upper(),
-        ESTADO_PENDIENTE, "", "", "", detalle.strip().upper(),
+        solicitante.strip().upper(), TIPO_RETIRO_FIJO, ruta.strip().upper(), chofer.strip().upper(),
+        ESTADO_PENDIENTE, "", "", "", detalle.strip().upper(), "",
     ]
     ws_sol.append_row(fila, value_input_option="USER_ENTERED")
     return id_nuevo
@@ -214,21 +219,64 @@ def marcar_avisado(ws_sol, id_solicitud):
     ahora = datetime.now().strftime("%d/%m/%Y %I:%M %p")
     ws_sol.update(f"J{fila}:K{fila}", [[ESTADO_AVISADO, ahora]], value_input_option="USER_ENTERED")
 
-def marcar_completada(ws_sol, id_solicitud, fecha_solicitud_str):
+def marcar_completada_detallada(ws_sol, id_solicitud, fecha_solicitud_str, fecha_retiro, hora_retiro, chofer_retiro):
+    """
+    Confirma la entrega con fecha, hora y chofer específicos (indicados a
+    mano en el mini-panel "Confirmar Entrega"), calcula cuánto se demoró en
+    días y horas desde que se creó la solicitud, y lo deja todo escrito en
+    el Sheet (Estado, Confirmado, Días para Completarse y Duración).
+    Devuelve (duracion_texto, confirmado_dt) para armar el mensaje de WhatsApp.
+    """
     fila = _buscar_fila(ws_sol, id_solicitud)
-    ahora = datetime.now()
-    try:
-        fecha_solicitud = datetime.strptime(fecha_solicitud_str, "%d/%m/%Y").date()
-        dias = (ahora.date() - fecha_solicitud).days
-    except Exception:
-        dias = ""
+    fecha_solicitud = _parsear_fecha(fecha_solicitud_str)
+    confirmado_dt = datetime.combine(fecha_retiro, hora_retiro)
+    inicio_dt = datetime.combine(fecha_solicitud, time.min)
+    delta = confirmado_dt - inicio_dt
+    if delta.total_seconds() < 0:
+        delta = timedelta(0)
+    dias_totales = delta.days
+    horas_resto = delta.seconds // 3600
+    if dias_totales == 0 and horas_resto == 0:
+        duracion_texto = "menos de 1 hora"
+    elif dias_totales == 0:
+        duracion_texto = f"{horas_resto}h"
+    else:
+        duracion_texto = f"{dias_totales}d {horas_resto}h"
+
     ws_sol.update(
         f"J{fila}:M{fila}",
-        [[ESTADO_COMPLETADA, ws_sol.acell(f"K{fila}").value or "", ahora.strftime("%d/%m/%Y %I:%M %p"), dias]],
+        [[ESTADO_COMPLETADA, ws_sol.acell(f"K{fila}").value or "", confirmado_dt.strftime("%d/%m/%Y %I:%M %p"), dias_totales]],
         value_input_option="USER_ENTERED",
     )
+    ws_sol.update(f"O{fila}", [[duracion_texto]], value_input_option="USER_ENTERED")
 
-def actualizar_solicitud(ws_sol, id_solicitud, solicitante, tipo_retiro, detalle, ruta, chofer, fecha_solicitud):
+    chofer_final = chofer_retiro.strip().upper() if chofer_retiro and chofer_retiro.strip() else ""
+    if chofer_final:
+        ws_sol.update(f"I{fila}", [[chofer_final]], value_input_option="USER_ENTERED")
+
+    return duracion_texto, confirmado_dt
+
+def generar_mensaje_confirmacion(r, confirmado_dt, chofer_retiro, duracion_texto):
+    """Mensaje listo para copiar y mandar por WhatsApp confirmando que el retiro se realizó."""
+    detalle = (r.get("Detalle") or "").strip()
+    lineas = [
+        "✅ *CONFIRMACIÓN DE RETIRO*",
+        "",
+        f"🗓️ Solicitado: {r['Fecha']}",
+        f"📦 Retirado: {confirmado_dt.strftime('%d/%m/%Y')} - {confirmado_dt.strftime('%I:%M %p')}",
+        f"👤 Supervisor: {r['Solicitante']}",
+        f"🚚 Chofer: {chofer_retiro or r['Chofer Asignado']}",
+    ]
+    if detalle:
+        lineas.append(f"*Detalle:* {detalle}")
+    lineas += [
+        f"*Ruta:* {r['Ruta / Destino']}",
+        "",
+        f"⏱️ Tiempo de gestión: {duracion_texto}",
+    ]
+    return "\n".join(lineas)
+
+def actualizar_solicitud(ws_sol, id_solicitud, solicitante, detalle, ruta, chofer, fecha_solicitud):
     """Edita los datos base de una solicitud ya creada (no toca Estado/Avisado/Confirmado)."""
     fila = _buscar_fila(ws_sol, id_solicitud)
     dia_nombre = DIAS_ES.get(fecha_solicitud.strftime("%A"), fecha_solicitud.strftime("%A"))
@@ -237,7 +285,7 @@ def actualizar_solicitud(ws_sol, id_solicitud, solicitante, tipo_retiro, detalle
     ws_sol.update(
         f"B{fila}:I{fila}",
         [[fecha_solicitud.strftime("%d/%m/%Y"), dia_nombre, semana, mes_nombre,
-          solicitante.strip().upper(), tipo_retiro, ruta.strip().upper(), chofer.strip().upper()]],
+          solicitante.strip().upper(), TIPO_RETIRO_FIJO, ruta.strip().upper(), chofer.strip().upper()]],
         value_input_option="USER_ENTERED",
     )
     ws_sol.update(f"N{fila}", [[detalle.strip().upper()]], value_input_option="USER_ENTERED")
@@ -310,21 +358,53 @@ def _parsear_fecha(fecha_str):
     except Exception:
         return date.today()
 
-def render_tarjeta(r, ws_sol, subinfo, accion_label=None, accion_fn=None):
+def render_tarjeta(r, ws_sol, subinfo, accion_label=None, accion_fn=None, confirmar_entrega=False):
     """
     Dibuja una tarjeta de solicitud con: info + botón de acción principal
     (opcional, ej. "Ya avisé al chofer") + mensaje para el chofer + Editar/Borrar.
     Se usa igual en Pendientes, Avisadas y Completadas.
+
+    confirmar_entrega=True (solo en Avisadas) reemplaza el botón simple por un
+    mini-panel "📥 Confirmar Entrega" donde se valida fecha, hora y chofer real
+    del retiro, y al confirmar genera el mensaje de confirmación para WhatsApp.
     """
     id_sol = r["ID"]
     with st.container(border=True):
         detalle_linea = f" — {r['Detalle']}" if r.get("Detalle") else ""
         cA, cB = st.columns([4, 1])
         cA.markdown(f"**{id_sol}** — {r['Tipo de Retiro']}{detalle_linea} · {r['Ruta / Destino']}  \n{subinfo}")
-        if accion_label and accion_fn and cB.button(accion_label, key=f"accion_{id_sol}", use_container_width=True):
+        if accion_label and accion_fn and not confirmar_entrega and cB.button(accion_label, key=f"accion_{id_sol}", use_container_width=True):
             accion_fn()
             st.session_state["recargar_solicitudes"] += 1
             st.rerun()
+
+        if confirmar_entrega:
+            msg_key = f"msg_confirmado_{id_sol}"
+            if st.session_state.get(msg_key):
+                st.success("✅ Entrega confirmada.")
+                st.code(st.session_state[msg_key], language=None)
+                if st.button("👍 Listo, continuar", key=f"cerrar_{id_sol}", use_container_width=True):
+                    del st.session_state[msg_key]
+                    st.session_state["recargar_solicitudes"] += 1
+                    st.rerun()
+            else:
+                with st.expander("📥 Confirmar Entrega", expanded=False):
+                    with st.form(f"form_confirmar_{id_sol}"):
+                        cf1, cf2 = st.columns(2)
+                        fecha_retiro = cf1.date_input("Fecha del retiro:", value=date.today(), key=f"fret_{id_sol}")
+                        hora_retiro = cf2.time_input("Hora del retiro:", value=datetime.now().time(), key=f"hret_{id_sol}")
+                        chofer_retiro = st.text_input(
+                            "Chofer que retiró:", value=r["Chofer Asignado"], key=f"chret_{id_sol}",
+                            help="Por defecto es el chofer asignado a la solicitud, pero puedes cambiarlo si fue otro chofer.",
+                        )
+                        confirmar = st.form_submit_button("✅ Confirmar Entrega", type="primary", use_container_width=True)
+                        if confirmar:
+                            duracion_texto, confirmado_dt = marcar_completada_detallada(
+                                ws_sol, id_sol, r["Fecha"], fecha_retiro, hora_retiro, chofer_retiro
+                            )
+                            chofer_final = chofer_retiro.strip().upper() if chofer_retiro.strip() else r["Chofer Asignado"]
+                            st.session_state[msg_key] = generar_mensaje_confirmacion(r, confirmado_dt, chofer_final, duracion_texto)
+                            st.rerun()
 
         with st.expander("📋 Mensaje para el chofer"):
             st.code(generar_mensaje_chofer(r), language=None)
@@ -338,9 +418,6 @@ def render_tarjeta(r, ws_sol, subinfo, accion_label=None, accion_fn=None):
                 if e_solicitante_sel == "OTROS":
                     valor_previo = r["Solicitante"] if r["Solicitante"] not in SOLICITANTES_FIJOS else ""
                     e_solicitante_otro = ec2.text_input("Especifique quién:", value=valor_previo, key=f"eotro_{id_sol}")
-                e_tipo = st.selectbox("Tipo de Retiro:", TIPOS_RETIRO,
-                                       index=TIPOS_RETIRO.index(r["Tipo de Retiro"]) if r["Tipo de Retiro"] in TIPOS_RETIRO else 0,
-                                       key=f"etipo_{id_sol}")
                 e_detalle = st.text_input("Detalle:", value=r.get("Detalle", ""), key=f"edet_{id_sol}")
                 ec3, ec4 = st.columns(2)
                 e_ruta = ec3.text_input("Ruta / Destino:", value=r["Ruta / Destino"], key=f"eruta_{id_sol}")
@@ -357,7 +434,7 @@ def render_tarjeta(r, ws_sol, subinfo, accion_label=None, accion_fn=None):
                     if not sol_final or not e_ruta or not e_chofer:
                         st.error("Completa Solicitante, Ruta/Destino y Chofer Asignado.")
                     else:
-                        actualizar_solicitud(ws_sol, id_sol, sol_final, e_tipo, e_detalle, e_ruta, e_chofer, e_fecha)
+                        actualizar_solicitud(ws_sol, id_sol, sol_final, e_detalle, e_ruta, e_chofer, e_fecha)
                         st.success("✅ Solicitud actualizada.")
                         st.session_state["recargar_solicitudes"] += 1
                         st.rerun()
@@ -454,7 +531,6 @@ if solicitante_sel == "OTROS":
     solicitante_otro = sc2.text_input("Especifique quién solicita:")
 
 with st.form("form_nueva_solicitud", clear_on_submit=True):
-    tipo_retiro = st.selectbox("Tipo de Retiro:", TIPOS_RETIRO)
     detalle = st.text_input("¿Qué se solicita? (detalle):", placeholder="Ej: 2 BOTELLAS DE AGUA")
     fc3, fc4 = st.columns(2)
     ruta = fc3.text_input("Ruta / Destino:")
@@ -470,7 +546,7 @@ with st.form("form_nueva_solicitud", clear_on_submit=True):
         if not solicitante_final or not ruta or not chofer:
             st.error("Completa Solicitante (si elegiste 'OTROS', escribe quién), Ruta/Destino y Chofer Asignado.")
         else:
-            nuevo_id = crear_solicitud(ws_sol, solicitante_final, tipo_retiro, detalle, ruta, chofer, fecha_solicitud)
+            nuevo_id = crear_solicitud(ws_sol, solicitante_final, detalle, ruta, chofer, fecha_solicitud)
             st.success(f"✅ Solicitud {nuevo_id} creada como Pendiente ({fecha_solicitud.strftime('%d/%m/%Y')}).")
             st.session_state["recargar_solicitudes"] += 1
             st.rerun()
@@ -504,8 +580,7 @@ with tab_avis:
         render_tarjeta(
             r, ws_sol,
             subinfo=f"Chofer: {r['Chofer Asignado']} · Avisado: {r['Avisado (Fecha y Hora)']}",
-            accion_label="✅ Chofer confirmó el retiro",
-            accion_fn=lambda r=r: marcar_completada(ws_sol, r["ID"], r["Fecha"]),
+            confirmar_entrega=True,
         )
 
 with tab_comp:
