@@ -676,20 +676,54 @@ with tab_avis:
 
 with tab_comp:
     df_comp = df[df["Estado"] == ESTADO_COMPLETADA] if not df.empty else df
+
     if df_comp.empty:
         st.info("Todavía no hay solicitudes completadas.")
     else:
-        st.dataframe(
-            df_comp[["ID", "Fecha", "Solicitante", "Tipo de Retiro", "Proveedor", "Ruta / Destino", "Chofer Asignado",
-                     "Confirmado (Fecha y Hora)", "Días para Completarse"]],
-            use_container_width=True, hide_index=True,
+        # Filtro semanal — si hay muchas completadas acumuladas (cientos), no
+        # tiene sentido mostrarlas todas de una. Por defecto se ve la semana
+        # actual, y hay opción de ver otra semana puntual o todo el historial.
+        filtro_comp = st.radio(
+            "Ver:", ["Esta semana", "Elegir semana", "Todas"], horizontal=True, key="filtro_semana_completadas"
         )
-        if st.checkbox("📋 Ver mensajes / editar / borrar una solicitud completada"):
-            for _, r in df_comp.iterrows():
-                render_tarjeta(
-                    r, ws_sol,
-                    subinfo=f"Chofer: {r['Chofer Asignado']} · Confirmado: {r['Confirmado (Fecha y Hora)']}",
+
+        df_comp = df_comp.copy()
+        df_comp["_confirmado_dt"] = pd.to_datetime(
+            df_comp["Confirmado (Fecha y Hora)"], format="%d/%m/%Y %I:%M %p", errors="coerce"
+        )
+
+        if filtro_comp in ("Esta semana", "Elegir semana"):
+            if filtro_comp == "Esta semana":
+                fecha_ref_comp = date.today()
+            else:
+                fecha_ref_comp = st.date_input(
+                    "Elige cualquier día DENTRO de la semana que quieres ver:",
+                    value=date.today(), key="fecha_semana_completadas",
                 )
+            iso_ref_comp = fecha_ref_comp.isocalendar()
+            iso_datos_comp = df_comp["_confirmado_dt"].dt.isocalendar()
+            df_comp = df_comp[(iso_datos_comp["year"] == iso_ref_comp[0]) & (iso_datos_comp["week"] == iso_ref_comp[1])]
+            inicio_semana_comp = fecha_ref_comp - timedelta(days=fecha_ref_comp.weekday())
+            fin_semana_comp = inicio_semana_comp + timedelta(days=6)
+            st.caption(f"📅 Semana del {inicio_semana_comp.strftime('%d/%m/%Y')} al {fin_semana_comp.strftime('%d/%m/%Y')} "
+                       f"— {len(df_comp)} solicitud(es) completada(s).")
+
+        df_comp = df_comp.drop(columns=["_confirmado_dt"])
+
+        if df_comp.empty:
+            st.info("No hay solicitudes completadas en ese rango.")
+        else:
+            st.dataframe(
+                df_comp[["ID", "Fecha", "Solicitante", "Tipo de Retiro", "Proveedor", "Ruta / Destino", "Chofer Asignado",
+                         "Confirmado (Fecha y Hora)", "Días para Completarse"]],
+                use_container_width=True, hide_index=True,
+            )
+            if st.checkbox("📋 Ver mensajes / editar / borrar una solicitud completada"):
+                for _, r in df_comp.iterrows():
+                    render_tarjeta(
+                        r, ws_sol,
+                        subinfo=f"Chofer: {r['Chofer Asignado']} · Confirmado: {r['Confirmado (Fecha y Hora)']}",
+                    )
 
 with tab_kpi:
     total = len(df)
