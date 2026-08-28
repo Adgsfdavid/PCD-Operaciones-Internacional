@@ -69,6 +69,20 @@ TIPOS_RETIRO = ["Encomienda", "Retiro de Mercancía", TIPO_RETIRO_FIJO]
 
 SOLICITANTES_FIJOS = ["JOSE SUAREZ", "PROCURA", "PROMOCION COMERCIAL", "PROMOCION MEDICA", "OTROS"]
 
+# "Solicitante" es el ÁREA/DEPARTAMENTO que pide el retiro (ej. "PROMOCION
+# COMERCIAL"), NO la persona. El supervisor encargado de gestionar todo esto
+# desde el sistema es una persona real, y esa es la que debe salir como
+# "Supervisor encargado" en los mensajes — se toma del usuario que inició
+# sesión, no del campo Solicitante.
+NOMBRES_SUPERVISORES = {
+    "faisal": "FAISAL YORDI",
+    "admin_vzla": "ADMINISTRADOR",
+}
+
+def nombre_supervisor_actual():
+    usuario = st.session_state.get("usuario", "")
+    return NOMBRES_SUPERVISORES.get(usuario, usuario.upper() if usuario else "SUPERVISOR")
+
 ESTADO_PENDIENTE = "Pendiente"
 ESTADO_AVISADO = "Avisado"
 ESTADO_COMPLETADA = "Completada"
@@ -213,7 +227,8 @@ def generar_mensaje_chofer(r):
         "📦 *SOLICITUD DE RETIRO*",
         "",
         f"🗓️ {ahora.strftime('%d/%m/%Y')} - {ahora.strftime('%I:%M %p')}",
-        f"👤 Supervisor: {r['Solicitante']}",
+        f"👤 Supervisor encargado: {nombre_supervisor_actual()}",
+        f"🏢 Área solicitante: {r['Solicitante']}",
         "",
         f"*Tipo:* {r['Tipo de Retiro']}",
     ]
@@ -283,7 +298,8 @@ def generar_mensaje_confirmacion(r, confirmado_dt, chofer_retiro, duracion_texto
         "",
         f"🗓️ Solicitado: {r['Fecha']}",
         f"📦 Retirado: {confirmado_dt.strftime('%d/%m/%Y')} - {confirmado_dt.strftime('%I:%M %p')}",
-        f"👤 Supervisor: {r['Solicitante']}",
+        f"👤 Supervisor encargado: {nombre_supervisor_actual()}",
+        f"🏢 Área solicitante: {r['Solicitante']}",
         f"🚚 Chofer: {chofer_retiro or r['Chofer Asignado']}",
     ]
     if detalle:
