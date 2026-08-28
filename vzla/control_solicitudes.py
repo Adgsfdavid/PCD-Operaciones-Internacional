@@ -544,10 +544,10 @@ st.subheader("➕ Nueva solicitud")
 # reaccionar al instante cuando se elige "OTROS" (los widgets dentro de un
 # st.form solo se procesan al enviarlo, no muestran/ocultan nada al vuelo).
 sc1, sc2 = st.columns(2)
-solicitante_sel = sc1.selectbox("Solicitante (Supervisor):", SOLICITANTES_FIJOS)
+solicitante_sel = sc1.selectbox("Solicitante (Supervisor):", SOLICITANTES_FIJOS, key="solicitante_sel_nueva")
 solicitante_otro = ""
 if solicitante_sel == "OTROS":
-    solicitante_otro = sc2.text_input("Especifique quién solicita:")
+    solicitante_otro = sc2.text_input("Especifique quién solicita:", key="solicitante_otro_nueva")
 
 with st.form("form_nueva_solicitud", clear_on_submit=True):
     detalle = st.text_input("¿Qué se solicita? (detalle):", placeholder="Ej: 2 BOTELLAS DE AGUA")
@@ -567,6 +567,12 @@ with st.form("form_nueva_solicitud", clear_on_submit=True):
         else:
             nuevo_id = crear_solicitud(ws_sol, solicitante_final, detalle, ruta, chofer, fecha_solicitud)
             st.success(f"✅ Solicitud {nuevo_id} creada como Pendiente ({fecha_solicitud.strftime('%d/%m/%Y')}).")
+            # El selector de "Solicitante" y el campo de "OTROS" viven FUERA del
+            # st.form (ver comentario arriba), así que clear_on_submit no los
+            # limpia solo — hay que borrarlos a mano para que el formulario
+            # quede completamente en blanco y listo para cargar otra solicitud.
+            st.session_state.pop("solicitante_sel_nueva", None)
+            st.session_state.pop("solicitante_otro_nueva", None)
             st.session_state["recargar_solicitudes"] += 1
             st.rerun()
 
