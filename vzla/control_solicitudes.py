@@ -251,10 +251,18 @@ def _buscar_fila(ws_sol, id_solicitud):
         raise ValueError(f"No encontré la solicitud {id_solicitud} en el Sheet (¿la borraron o cambiaron el ID?).")
     return celda.row
 
-def marcar_avisado(ws_sol, id_solicitud):
+def marcar_avisado(ws_sol, id_solicitud, fecha_aviso=None, hora_aviso=None):
+    """
+    fecha_aviso/hora_aviso: por defecto es "ahora" (hora de Venezuela), pero
+    son editables desde el mini-panel "📣 Avisar al chofer" — por si el aviso
+    real fue en otro momento y se está cargando después.
+    """
     fila = _buscar_fila(ws_sol, id_solicitud)
-    ahora = ahora_vzla().strftime("%d/%m/%Y %I:%M %p")
-    ws_sol.update(f"J{fila}:K{fila}", [[ESTADO_AVISADO, ahora]], value_input_option="USER_ENTERED")
+    if fecha_aviso and hora_aviso:
+        momento = datetime.combine(fecha_aviso, hora_aviso)
+    else:
+        momento = ahora_vzla()
+    ws_sol.update(f"J{fila}:K{fila}", [[ESTADO_AVISADO, momento.strftime("%d/%m/%Y %I:%M %p")]], value_input_option="USER_ENTERED")
 
 def marcar_completada_detallada(ws_sol, id_solicitud, fecha_solicitud_str, fecha_retiro, hora_retiro, chofer_retiro):
     """
@@ -403,11 +411,15 @@ def _parsear_fecha_hora(fecha_hora_str):
     except Exception:
         return ahora_vzla()
 
-def render_tarjeta(r, ws_sol, subinfo, accion_label=None, accion_fn=None, confirmar_entrega=False):
+def render_tarjeta(r, ws_sol, subinfo, accion_label=None, accion_fn=None, confirmar_entrega=False, confirmar_aviso=False):
     """
     Dibuja una tarjeta de solicitud con: info + botón de acción principal
     (opcional, ej. "Ya avisé al chofer") + mensaje para el chofer + Editar/Borrar.
     Se usa igual en Pendientes, Avisadas y Completadas.
+
+    confirmar_aviso=True (solo en Pendientes) reemplaza el botón simple por un
+    mini-panel "📣 Avisar al chofer" donde se puede editar la fecha y hora del
+    aviso (por defecto ahora, pero editable por si se está cargando después).
 
     confirmar_entrega=True (solo en Avisadas) reemplaza el botón simple por un
     mini-panel "📥 Confirmar Entrega" donde se valida fecha, hora y chofer real
@@ -419,10 +431,22 @@ def render_tarjeta(r, ws_sol, subinfo, accion_label=None, accion_fn=None, confir
         proveedor_linea = f" · Proveedor: {r['Proveedor']}" if r.get("Proveedor") else ""
         cA, cB = st.columns([4, 1])
         cA.markdown(f"**{id_sol}** — {r['Tipo de Retiro']}{detalle_linea} · {r['Ruta / Destino']}{proveedor_linea}  \n{subinfo}")
-        if accion_label and accion_fn and not confirmar_entrega and cB.button(accion_label, key=f"accion_{id_sol}", use_container_width=True):
+        if accion_label and accion_fn and not confirmar_entrega and not confirmar_aviso and cB.button(accion_label, key=f"accion_{id_sol}", use_container_width=True):
             accion_fn()
             st.session_state["recargar_solicitudes"] += 1
             st.rerun()
+
+        if confirmar_aviso:
+            with st.expander("📣 Avisar al chofer", expanded=False):
+                with st.form(f"form_avisar_{id_sol}"):
+                    af1, af2 = st.columns(2)
+                    fecha_aviso = af1.date_input("Fecha del aviso:", value=date.today(), key=f"favi_{id_sol}")
+                    hora_aviso = af2.time_input("Hora del aviso:", value=ahora_vzla().time(), key=f"havi_{id_sol}")
+                    avisar = st.form_submit_button("📣 Ya avisé al chofer", type="primary", use_container_width=True)
+                    if avisar:
+                        marcar_avisado(ws_sol, id_sol, fecha_aviso, hora_aviso)
+                        st.session_state["recargar_solicitudes"] += 1
+                        st.rerun()
 
         if confirmar_entrega:
             msg_key = f"msg_confirmado_{id_sol}"
@@ -636,8 +660,7 @@ with tab_pend:
         render_tarjeta(
             r, ws_sol,
             subinfo=f"Solicitó: {r['Solicitante']} ({r['Fecha']}) · Chofer: {r['Chofer Asignado']}",
-            accion_label="📣 Ya avisé al chofer",
-            accion_fn=lambda r=r: marcar_avisado(ws_sol, r["ID"]),
+            confirmar_aviso=True,
         )
 
 with tab_avis:
