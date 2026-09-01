@@ -152,10 +152,11 @@ EXTENSIONES_FOTO_VALIDAS = ('png', 'jpg', 'jpeg', 'webp')
 # ==========================================
 # El GPS no mide combustible real (no hay sensor de nivel ni de inyección),
 # así que esto es una ESTIMACIÓN: Litros = KM del día / rendimiento del
-# modelo, y Costo = Litros × precio del tipo de combustible (definido en
-# Configuración). Los rendimientos de abajo son un punto de partida
-# razonable por tipo/tamaño de vehículo — si tienes el dato real de fábrica
-# o de tus propias cargas de combustible, ajústalo aquí.
+# modelo, y Costo = Litros × precio del tipo de combustible (predeterminado
+# en el sistema, ver PRECIO_GASOIL_USD / PRECIO_GASOLINA_USD más abajo — el
+# precio es en DÓLARES, no en bolívares). Los rendimientos de abajo son un
+# punto de partida razonable por tipo/tamaño de vehículo — si tienes el dato
+# real de fábrica o de tus propias cargas de combustible, ajústalo aquí.
 TIPO_COMBUSTIBLE_VEHICULOS = {
     'ENCAVA': 'GASOIL',
     'CHANGAN HUNTER 4X2': 'GASOIL',
@@ -175,6 +176,24 @@ RENDIMIENTO_KM_POR_LITRO = {
     'MITSUBISHI LANCER': 13,  # sedán, gasolina
     'RICH P11': 11,           # pick-up, gasolina
 }
+
+# ==========================================
+# PARÁMETROS PREDETERMINADOS DEL SISTEMA
+# ==========================================
+# Antes eran campos editables en la pantalla de Configuración. Como en la
+# práctica casi nunca cambian, quedaron fijos aquí (predeterminados) para
+# simplificar la pantalla principal. Si algún día necesitas ajustarlos,
+# edítalos directamente en estas líneas.
+DESPACHO_DEFECTO_SISTEMA = "EL TIGRITO"
+CHOFER_DEFECTO_SISTEMA = ""
+AUTO_RESGUARDO_SISTEMA = True
+HORA_RESGUARDO_MANUAL_SISTEMA = datetime.strptime("18:00", "%H:%M").time()
+
+# Precio por litro de combustible — en DÓLARES ($), no en bolívares.
+# Se usa solo para la estimación de costo (Litros × Precio) que se guarda
+# en Google Sheets. Ponlo en 0.0 si no quieres que se calcule el costo.
+PRECIO_GASOIL_USD = 0.62
+PRECIO_GASOLINA_USD = 0.50
 
 ICONO_GENERICO_SVG = """
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="100%" height="100%">
@@ -387,12 +406,6 @@ if 'reportes_con_datos' not in st.session_state:
     st.session_state['reportes_con_datos'] = {}
 if 'rutas_gps' not in st.session_state:
     st.session_state['rutas_gps'] = {}
-if 'chofer_defecto' not in st.session_state:
-    st.session_state['chofer_defecto'] = ""
-if 'precio_gasoil' not in st.session_state:
-    st.session_state['precio_gasoil'] = 0.62
-if 'precio_gasolina' not in st.session_state:
-    st.session_state['precio_gasolina'] = 0.50
 if 'fecha_operativa' not in st.session_state:
     st.session_state['fecha_operativa'] = datetime.now().date()
 
@@ -429,31 +442,8 @@ with t_config:
         elif not archivo_geocercas:
             st.caption(f"⚠️ No se encontró `{GEOCERCAS_ARCHIVO_REPO}` en el repo — sube el Excel aquí o agrégalo al repositorio.")
 
-    st.markdown("---")
-    st.subheader("2. Parámetros Globales")
-    c1, c2, c3 = st.columns(3)
-    st.session_state['chofer_defecto'] = c1.text_input(
-        "Chofer por defecto:", value="",
-        help="Se usa solo para las placas que todavía no tengan un chofer propio guardado. "
-             "El nombre de cada chofer por placa se define después de procesar, en la pestaña "
-             "'Pizarra Ejecutiva' → tabla editable (columna Chofer) → botón 'Guardar Rutas y Choferes "
-             "Definitivos' — y queda recordado para los próximos reportes."
-    ).upper()
-    despacho_defecto = c2.text_input("Despacho por defecto:", value="EL TIGRITO").upper()
-    auto_resguardo = c3.checkbox("Detectar Hora de Resguardo Automáticamente", value=True)
-    hora_manual = c3.time_input("Hora de Resguardo (Manual):", value=datetime.strptime("18:00", "%H:%M").time(), disabled=auto_resguardo)
-
-    st.markdown("---")
-    st.subheader("3. Consumo de Combustible (estimado)")
-    st.caption("Estimado a partir del KM del día y el rendimiento (km/l) de cada modelo — el GPS no mide "
-               "combustible real. Deja los precios en 0 si no quieres que se calcule el costo.")
-    cc1, cc2 = st.columns(2)
-    st.session_state['precio_gasoil'] = cc1.number_input(
-        "Precio por litro — Gasoil (Bs):", min_value=0.0, value=st.session_state.get('precio_gasoil', 0.62), step=0.01, format="%.2f"
-    )
-    st.session_state['precio_gasolina'] = cc2.number_input(
-        "Precio por litro — Gasolina (Bs):", min_value=0.0, value=st.session_state.get('precio_gasolina', 0.50), step=0.01, format="%.2f"
-    )
+    st.caption("Chofer, despacho, hora de resguardo y precios de combustible ya están predeterminados "
+               "en el sistema (editables directamente en el código si algún día cambian).")
 
     if st.button("🚀 Procesar Cruce GPS vs Geocercas", type="primary", use_container_width=True):
         fuente_geocercas = archivo_geocercas if archivo_geocercas else (ruta_geocercas_repo if geocercas_en_repo else None)
@@ -503,12 +493,12 @@ with t_config:
                         # si tampoco hay eso, queda en blanco (no se inventa ni se escribe "POR DEFINIR").
                         chofer_guardado = st.session_state['choferes_guardados'].get(placa)
                         chofer_para_esta_placa = (
-                            chofer_guardado or st.session_state['chofer_defecto'] or ""
+                            chofer_guardado or CHOFER_DEFECTO_SISTEMA or ""
                         )
                         # Sufijo para el encabezado del reporte: si hay chofer, "- NOMBRE"; si no, nada.
                         sufijo_chofer = f" - {chofer_para_esta_placa}" if chofer_para_esta_placa else ""
                         despacho_guardado_manual = st.session_state['despachos_guardados'].get(placa)
-                        despacho_actual = despacho_guardado_manual if despacho_guardado_manual else despacho_defecto
+                        despacho_actual = despacho_guardado_manual if despacho_guardado_manual else DESPACHO_DEFECTO_SISTEMA
 
                         ubicacion_final_gps = "N/A"
                         reporte_texto = ""
@@ -541,10 +531,10 @@ with t_config:
                                     ubicacion_final_gps = "SIN MOVIMIENTO"
                                 else:
                                     hora_salida = mov_dia.iloc[0]['Fecha De Reporte']
-                                    if auto_resguardo:
+                                    if AUTO_RESGUARDO_SISTEMA:
                                         fecha_resguardo = mov_dia.iloc[-1]['Fecha De Reporte']
                                     else:
-                                        fecha_resguardo = datetime.combine(hora_salida.date(), hora_manual)
+                                        fecha_resguardo = datetime.combine(hora_salida.date(), HORA_RESGUARDO_MANUAL_SISTEMA)
 
                                     ultimo_punto = hist_dia.iloc[-1]
                                     ubicacion_final_calculada = encontrar_punto_mas_cercano(ultimo_punto['Latitud'], ultimo_punto['Longitud'], df_base_loc, DISTANCIA_MAXIMA_METROS) or "Ubicación Desconocida"
@@ -618,8 +608,8 @@ with t_config:
                         rendimiento = RENDIMIENTO_KM_POR_LITRO.get(modelo)
                         litros_estimados = round(total_km / rendimiento, 1) if rendimiento else 0
                         precio_litro = (
-                            st.session_state.get('precio_gasoil', 0.0) if tipo_combustible == 'GASOIL'
-                            else st.session_state.get('precio_gasolina', 0.0) if tipo_combustible == 'GASOLINA'
+                            PRECIO_GASOIL_USD if tipo_combustible == 'GASOIL'
+                            else PRECIO_GASOLINA_USD if tipo_combustible == 'GASOLINA'
                             else 0.0
                         )
                         costo_estimado = round(litros_estimados * precio_litro, 2)
@@ -761,15 +751,34 @@ with t_resumen:
 
         # --- GENERADOR HTML PARA FOTO: TARJETAS POR MODELO CON FOTOS ---
         fecha_pizarra = st.session_state['fecha_operativa'].strftime('%d/%m/%Y')
-        df_agrupado = df_editado.copy()
+        # Se trae LITROS_EST y COMBUSTIBLE desde df_res (no son editables en la
+        # tabla de arriba, solo se usan aquí para mostrar el consumo en la pizarra).
+        df_agrupado = df_editado.merge(df_res[['PLACA', 'LITROS_EST', 'COMBUSTIBLE']], on='PLACA', how='left')
         df_agrupado['MODELO'] = df_agrupado['MODELO'].astype(str)
+        df_agrupado['LITROS_EST'] = pd.to_numeric(df_agrupado['LITROS_EST'], errors='coerce').fillna(0)
         orden_modelos = list(dict.fromkeys(df_agrupado.sort_values('MODELO')['MODELO']))
+
+        # Totales de consumo estimado, agrupados por tipo de combustible, para el
+        # recuadro-resumen de la pizarra (y para lo que se manda a Google Sheets).
+        total_litros_gasolina = df_agrupado.loc[df_agrupado['COMBUSTIBLE'] == 'GASOLINA', 'LITROS_EST'].sum()
+        total_litros_gasoil = df_agrupado.loc[df_agrupado['COMBUSTIBLE'] == 'GASOIL', 'LITROS_EST'].sum()
+        total_litros_comb = total_litros_gasolina + total_litros_gasoil
+        pct_gasolina = (total_litros_gasolina / total_litros_comb * 100) if total_litros_comb else 0
+        pct_gasoil = (total_litros_gasoil / total_litros_comb * 100) if total_litros_comb else 0
+        st.session_state['resumen_combustible'] = {
+            'total_gasolina_lts': round(total_litros_gasolina, 1),
+            'total_gasoil_lts': round(total_litros_gasoil, 1),
+            'pct_gasolina': round(pct_gasolina, 1),
+            'pct_gasoil': round(pct_gasoil, 1),
+        }
 
         tarjetas_html = ""
         for modelo in orden_modelos:
             grupo = df_agrupado[df_agrupado['MODELO'] == modelo].sort_values('PLACA')
             unidades = len(grupo)
             km_modelo = grupo['KM'].sum()
+            litros_modelo = grupo['LITROS_EST'].sum()
+            tipo_comb_modelo = TIPO_COMBUSTIBLE_VEHICULOS.get(modelo, '')
             foto_b64 = obtener_foto_vehiculo(modelo)
 
             filas_modelo = ""
@@ -779,6 +788,7 @@ with t_resumen:
                     <td style="padding:6px 8px; font-weight:700;">{r['PLACA']}</td>
                     <td style="padding:6px 8px;">{r['COLOR']}</td>
                     <td style="padding:6px 8px; text-align:right;">{formatear_km(r['KM'])}</td>
+                    <td style="padding:6px 8px; text-align:right; color:#2E7D32;">{r['LITROS_EST']:.1f}</td>
                     <td style="padding:6px 8px; color:#0D47A1; font-weight:600;">{r['RUTA']}</td>
                 </tr>"""
 
@@ -793,9 +803,13 @@ with t_resumen:
                         <div style="font-size:11px; color:#666; font-weight:600;">UNIDADES</div>
                         <div style="font-size:20px; font-weight:900; color:#0d47a1;">{unidades}</div>
                     </div>
-                    <div style="flex:1; text-align:center; padding:8px; background:#f4f6fa;">
+                    <div style="flex:1; text-align:center; padding:8px; background:#f4f6fa; border-right:1px solid #eee;">
                         <div style="font-size:11px; color:#666; font-weight:600;">TOTAL KM</div>
                         <div style="font-size:20px; font-weight:900; color:#F57F17;">{formatear_km(km_modelo)}</div>
+                    </div>
+                    <div style="flex:1; text-align:center; padding:8px;">
+                        <div style="font-size:11px; color:#666; font-weight:600;">LTS EST. ({tipo_comb_modelo})</div>
+                        <div style="font-size:20px; font-weight:900; color:#2E7D32;">{litros_modelo:.1f}</div>
                     </div>
                 </div>
                 <table style="width:100%; border-collapse:collapse; font-size:12.5px;">
@@ -804,6 +818,7 @@ with t_resumen:
                             <th style="padding:6px 8px;">PLACA</th>
                             <th style="padding:6px 8px;">COLOR</th>
                             <th style="padding:6px 8px; text-align:right;">KM</th>
+                            <th style="padding:6px 8px; text-align:right;">LTS</th>
                             <th style="padding:6px 8px;">RUTA</th>
                         </tr>
                     </thead>
@@ -811,6 +826,31 @@ with t_resumen:
                 </table>
             </div>
             """
+
+        # --- TARJETA-RESUMEN DE CONSUMO DE COMBUSTIBLE (ocupa el espacio que antes
+        # quedaba en blanco en la grilla de la pizarra, junto a la última tarjeta) ---
+        tarjetas_html += f"""
+        <div style="background:white; border:2px solid #000; border-radius:10px; overflow:hidden; box-shadow:0 3px 8px rgba(0,0,0,0.08); display:flex; flex-direction:column; justify-content:center;">
+            <div style="background:#2E7D32; color:white; padding:8px 14px;">
+                <div style="font-weight:800; font-size:15px; letter-spacing:.3px;">⛽ RESUMEN DE COMBUSTIBLE (ESTIMADO)</div>
+            </div>
+            <div style="display:flex; padding:14px; gap:10px;">
+                <div style="flex:1; text-align:center; padding:10px; background:#f4f6fa; border-radius:8px;">
+                    <div style="font-size:12px; color:#666; font-weight:600;">GASOLINA</div>
+                    <div style="font-size:22px; font-weight:900; color:#0d47a1;">{total_litros_gasolina:.1f} lts</div>
+                    <div style="font-size:13px; color:#999; font-weight:700;">{pct_gasolina:.0f}%</div>
+                </div>
+                <div style="flex:1; text-align:center; padding:10px; background:#f4f6fa; border-radius:8px;">
+                    <div style="font-size:12px; color:#666; font-weight:600;">GASOIL</div>
+                    <div style="font-size:22px; font-weight:900; color:#F57F17;">{total_litros_gasoil:.1f} lts</div>
+                    <div style="font-size:13px; color:#999; font-weight:700;">{pct_gasoil:.0f}%</div>
+                </div>
+            </div>
+            <div style="text-align:center; padding:0 14px 12px 14px; font-size:12px; color:#666;">
+                TOTAL FLOTA: <b>{total_litros_comb:.1f} lts</b>
+            </div>
+        </div>
+        """
 
         logo_b64 = obtener_logo_base64() or ICONO_GENERICO_B64
 
@@ -972,6 +1012,15 @@ with t_historico:
                     dia_nombre = dias_es.get(fecha_actual.strftime("%A"), fecha_actual.strftime("%A"))
                     mes_nombre = meses_es.get(fecha_actual.strftime("%B"), fecha_actual.strftime("%B"))
 
+                    # Totales de consumo de combustible de la flota (calculados en la pestaña
+                    # "Pizarra Ejecutiva"). Se repiten en cada fila para que el histórico en
+                    # Sheets quede completo también cuando se filtra/exporta por placa.
+                    resumen_comb = st.session_state.get('resumen_combustible', {})
+                    total_gasolina_lts = resumen_comb.get('total_gasolina_lts', 0)
+                    total_gasoil_lts = resumen_comb.get('total_gasoil_lts', 0)
+                    pct_gasolina_flota = resumen_comb.get('pct_gasolina', 0)
+                    pct_gasoil_flota = resumen_comb.get('pct_gasoil', 0)
+
                     for d in st.session_state['datos_resumen']:
                         chofer = d.get('CHOFER') or ""
 
@@ -987,12 +1036,17 @@ with t_historico:
                             d.get('COMBUSTIBLE', ''),
                             d.get('LITROS_EST', 0),
                             d.get('COSTO_EST', 0),
+                            total_gasolina_lts,
+                            total_gasoil_lts,
+                            pct_gasolina_flota,
+                            pct_gasoil_flota,
                         ]
                         datos_a_enviar.append(fila)
 
                     guardar_en_googlesheets(datos_a_enviar)
-                    st.success("✅ ¡Datos registrados en Google Sheets exitosamente! (incluye combustible estimado: "
-                               "columnas Combustible, Litros Est. y Costo Est. al final de la fila).")
+                    st.success("✅ ¡Datos registrados en Google Sheets exitosamente! (incluye combustible estimado por "
+                               "unidad — Combustible, Litros Est., Costo Est. — y los totales de flota — Total "
+                               "Gasolina Lts, Total Gasoil Lts, % Gasolina, % Gasoil — al final de la fila).")
             except Exception as e:
                 st.error(f"Error al conectar con Sheets: {e}")
                 st.code(traceback.format_exc())
