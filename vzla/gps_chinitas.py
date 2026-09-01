@@ -784,11 +784,11 @@ with t_resumen:
             filas_modelo = ""
             for _, r in grupo.iterrows():
                 filas_modelo += f"""
-                <tr style="border-bottom:1px solid #dde3ec;">
-                    <td style="padding:6px 8px; font-weight:700;">{r['PLACA']}</td>
-                    <td style="padding:6px 8px;">{r['COLOR']}</td>
-                    <td style="padding:6px 8px; text-align:right;">{formatear_km(r['KM'])}</td>
-                    <td style="padding:6px 8px; text-align:right; color:#2E7D32;">{r['LITROS_EST']:.1f}</td>
+                <tr style="border-bottom:1px solid #000;">
+                    <td style="padding:6px 8px; font-weight:700; border-right:1px solid #000;">{r['PLACA']}</td>
+                    <td style="padding:6px 8px; border-right:1px solid #000;">{r['COLOR']}</td>
+                    <td style="padding:6px 8px; text-align:right; border-right:1px solid #000;">{formatear_km(r['KM'])}</td>
+                    <td style="padding:6px 8px; text-align:right; color:#2E7D32; border-right:1px solid #000;">{r['LITROS_EST']:.1f}</td>
                     <td style="padding:6px 8px; color:#0D47A1; font-weight:600;">{r['RUTA']}</td>
                 </tr>"""
 
@@ -798,12 +798,12 @@ with t_resumen:
                     <img src="{foto_b64}" style="width:110px; height:58px; object-fit:contain; object-position:left center; border-radius:6px; background:white; flex-shrink:0;">
                     <div style="font-weight:800; font-size:15px; letter-spacing:.3px;">{modelo}</div>
                 </div>
-                <div style="display:flex; border-bottom:1px solid #eee;">
-                    <div style="flex:1; text-align:center; padding:8px; border-right:1px solid #eee;">
+                <div style="display:flex; border-bottom:2px solid #000;">
+                    <div style="flex:1; text-align:center; padding:8px; border-right:1px solid #000;">
                         <div style="font-size:11px; color:#666; font-weight:600;">UNIDADES</div>
                         <div style="font-size:20px; font-weight:900; color:#0d47a1;">{unidades}</div>
                     </div>
-                    <div style="flex:1; text-align:center; padding:8px; background:#f4f6fa; border-right:1px solid #eee;">
+                    <div style="flex:1; text-align:center; padding:8px; background:#f4f6fa; border-right:1px solid #000;">
                         <div style="font-size:11px; color:#666; font-weight:600;">TOTAL KM</div>
                         <div style="font-size:20px; font-weight:900; color:#F57F17;">{formatear_km(km_modelo)}</div>
                     </div>
@@ -814,11 +814,11 @@ with t_resumen:
                 </div>
                 <table style="width:100%; border-collapse:collapse; font-size:12.5px;">
                     <thead>
-                        <tr style="background:#eef1f7; text-align:left;">
-                            <th style="padding:6px 8px;">PLACA</th>
-                            <th style="padding:6px 8px;">COLOR</th>
-                            <th style="padding:6px 8px; text-align:right;">KM</th>
-                            <th style="padding:6px 8px; text-align:right;">LTS</th>
+                        <tr style="background:#eef1f7; text-align:left; border-bottom:2px solid #000;">
+                            <th style="padding:6px 8px; border-right:1px solid #000;">PLACA</th>
+                            <th style="padding:6px 8px; border-right:1px solid #000;">COLOR</th>
+                            <th style="padding:6px 8px; text-align:right; border-right:1px solid #000;">KM</th>
+                            <th style="padding:6px 8px; text-align:right; border-right:1px solid #000;">LTS</th>
                             <th style="padding:6px 8px;">RUTA</th>
                         </tr>
                     </thead>
@@ -834,19 +834,19 @@ with t_resumen:
             <div style="background:#2E7D32; color:white; padding:8px 14px;">
                 <div style="font-weight:800; font-size:15px; letter-spacing:.3px;">⛽ RESUMEN DE COMBUSTIBLE (ESTIMADO)</div>
             </div>
-            <div style="display:flex; padding:14px; gap:10px;">
-                <div style="flex:1; text-align:center; padding:10px; background:#f4f6fa; border-radius:8px;">
+            <div style="display:flex; padding:14px; gap:10px; border-bottom:2px solid #000;">
+                <div style="flex:1; text-align:center; padding:10px; background:#f4f6fa; border:1px solid #000; border-radius:8px;">
                     <div style="font-size:12px; color:#666; font-weight:600;">GASOLINA</div>
                     <div style="font-size:22px; font-weight:900; color:#0d47a1;">{total_litros_gasolina:.1f} lts</div>
                     <div style="font-size:13px; color:#999; font-weight:700;">{pct_gasolina:.0f}%</div>
                 </div>
-                <div style="flex:1; text-align:center; padding:10px; background:#f4f6fa; border-radius:8px;">
+                <div style="flex:1; text-align:center; padding:10px; background:#f4f6fa; border:1px solid #000; border-radius:8px;">
                     <div style="font-size:12px; color:#666; font-weight:600;">GASOIL</div>
                     <div style="font-size:22px; font-weight:900; color:#F57F17;">{total_litros_gasoil:.1f} lts</div>
                     <div style="font-size:13px; color:#999; font-weight:700;">{pct_gasoil:.0f}%</div>
                 </div>
             </div>
-            <div style="text-align:center; padding:0 14px 12px 14px; font-size:12px; color:#666;">
+            <div style="text-align:center; padding:10px 14px; font-size:12px; color:#666;">
                 TOTAL FLOTA: <b>{total_litros_comb:.1f} lts</b>
             </div>
         </div>
