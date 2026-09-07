@@ -1,4 +1,3 @@
-streamlit
 pandas
 gspread
 google-auth
@@ -12,8 +11,6 @@ lxml
 html5lib
 extra-streamlit-components
 pdfplumber
-fpdf
-google-auth
 geopy
 fpdf2
 google-generativeai
