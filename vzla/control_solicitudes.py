@@ -371,6 +371,25 @@ def armar_resumen_proveedores(df_informe):
     )
     return resumen
 
+def _pdf_a_bytes(pdf):
+    """
+    pdf.output() se comporta distinto según la versión de fpdf2 instalada
+    (y hay una librería vieja y ya abandonada en PyPI llamada literalmente
+    "fpdf" — sin el 2 — que también expone `from fpdf import FPDF`, así que
+    si el requirements.txt del repo tiene "fpdf" en vez de "fpdf2" por error,
+    pip instala esa otra librería sin que nadie note la diferencia hasta que
+    truena en producción). En versiones viejas, pdf.output() sin argumentos
+    puede devolver None, y bytes(None) revienta con TypeError — que es
+    justo el error que salió en Streamlit Cloud. Esto cubre los 3 casos:
+    bytearray/bytes (fpdf2 moderno), str (fpdf2 viejo con dest="S"), o None.
+    """
+    resultado = pdf.output()
+    if resultado is None:
+        resultado = pdf.output(dest="S")
+    if isinstance(resultado, str):
+        resultado = resultado.encode("latin-1", errors="replace")
+    return bytes(resultado)
+
 def generar_pdf_informe(df_informe, titulo_rango, resumen_proveedores=None):
     """Genera el informe en PDF (apaisado) con el resumen y la tabla de solicitudes del rango elegido.
     Si se pasa resumen_proveedores (ver armar_resumen_proveedores), se agrega una segunda página
@@ -448,7 +467,7 @@ def generar_pdf_informe(df_informe, titulo_rango, resumen_proveedores=None):
             pdf.cell(col_fec, 7, fechas_txt, border=1)
             pdf.ln()
 
-    return bytes(pdf.output())
+    return _pdf_a_bytes(pdf)
 
 def _parsear_fecha(fecha_str):
     try:
