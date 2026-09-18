@@ -709,12 +709,45 @@ solicitante_otro = ""
 if solicitante_sel == "OTROS":
     solicitante_otro = sc2.text_input("Especifique quién solicita:", key="solicitante_otro_nueva")
 
+# El selector de "Proveedor" también va FUERA del formulario: al elegir uno ya
+# usado antes, se autocompletan Ruta/Destino y Chofer Asignado con los datos
+# de la última solicitud registrada para ese proveedor (pedido del supervisor,
+# para no tener que escribirlos de nuevo cada vez) — y esto solo puede
+# reaccionar al instante si vive fuera del st.form.
+proveedores_existentes = []
+if not df.empty and "Proveedor" in df.columns:
+    proveedores_existentes = sorted(
+        p for p in df["Proveedor"].astype(str).str.strip().unique() if p and p.upper() != "NAN"
+    )
+OPCION_PROVEEDOR_NUEVO = "➕ Proveedor nuevo (escribir)"
+opciones_proveedor = [OPCION_PROVEEDOR_NUEVO] + proveedores_existentes
+
+pv1, pv2 = st.columns(2)
+proveedor_sel = pv1.selectbox("Proveedor:", opciones_proveedor, key="proveedor_sel_nueva")
+proveedor_otro = ""
+if proveedor_sel == OPCION_PROVEEDOR_NUEVO:
+    proveedor_otro = pv2.text_input("Nombre del proveedor nuevo:", key="proveedor_otro_nueva", placeholder="Ej: DISTRIBUIDORA XYZ")
+
+# Buscamos la última solicitud registrada para ese proveedor (la fila más
+# reciente que tenga ese Proveedor) para sugerir su Ruta y Chofer.
+ruta_sugerida, chofer_sugerido = "", ""
+if proveedor_sel != OPCION_PROVEEDOR_NUEVO and not df.empty:
+    filas_proveedor = df[df["Proveedor"].astype(str).str.strip() == proveedor_sel]
+    if not filas_proveedor.empty:
+        ultima_fila_proveedor = filas_proveedor.iloc[-1]
+        ruta_sugerida = str(ultima_fila_proveedor.get("Ruta / Destino", "") or "")
+        chofer_sugerido = str(ultima_fila_proveedor.get("Chofer Asignado", "") or "")
+        pv2.caption(f"📋 Última vez: Ruta **{ruta_sugerida}** · Chofer **{chofer_sugerido}** (editable abajo).")
+
 with st.form("form_nueva_solicitud", clear_on_submit=True):
     detalle = st.text_input("¿Qué se solicita? (detalle):", placeholder="Ej: 2 BOTELLAS DE AGUA")
     fc3, fc4 = st.columns(2)
-    ruta = fc3.text_input("Ruta / Destino:")
-    chofer = fc4.text_input("Chofer Asignado:")
-    proveedor = st.text_input("Proveedor:", placeholder="Ej: DISTRIBUIDORA XYZ")
+    # La key incluye el proveedor elegido para que, al cambiar de proveedor,
+    # el campo se "reinicie" con la sugerencia nueva — Streamlit no actualiza
+    # el valor de un widget ya creado solo por cambiarle el `value=`, pero si
+    # cambia la key sí lo trata como un campo nuevo con su propio default.
+    ruta = fc3.text_input("Ruta / Destino:", value=ruta_sugerida, key=f"ruta_nueva_{proveedor_sel}")
+    chofer = fc4.text_input("Chofer Asignado:", value=chofer_sugerido, key=f"chofer_nueva_{proveedor_sel}")
     fecha_solicitud = st.date_input(
         "Fecha de la solicitud:", value=date.today(),
         help="Por defecto es hoy, pero la puedes cambiar — por ejemplo si estás cargando algo que pidieron el lunes."
@@ -723,17 +756,20 @@ with st.form("form_nueva_solicitud", clear_on_submit=True):
 
     if enviado:
         solicitante_final = solicitante_otro.strip() if solicitante_sel == "OTROS" else solicitante_sel
+        proveedor_final = proveedor_otro.strip() if proveedor_sel == OPCION_PROVEEDOR_NUEVO else proveedor_sel
         if not solicitante_final or not ruta or not chofer:
             st.error("Completa Solicitante (si elegiste 'OTROS', escribe quién), Ruta/Destino y Chofer Asignado.")
         else:
-            nuevo_id = crear_solicitud(ws_sol, solicitante_final, detalle, ruta, chofer, fecha_solicitud, proveedor)
+            nuevo_id = crear_solicitud(ws_sol, solicitante_final, detalle, ruta, chofer, fecha_solicitud, proveedor_final)
             st.success(f"✅ Solicitud {nuevo_id} creada como Pendiente ({fecha_solicitud.strftime('%d/%m/%Y')}).")
-            # El selector de "Solicitante" y el campo de "OTROS" viven FUERA del
-            # st.form (ver comentario arriba), así que clear_on_submit no los
-            # limpia solo — hay que borrarlos a mano para que el formulario
-            # quede completamente en blanco y listo para cargar otra solicitud.
+            # El selector de "Solicitante" y "Proveedor" (y sus campos de texto
+            # "nuevo") viven FUERA del st.form (ver comentario arriba), así que
+            # clear_on_submit no los limpia solo — hay que borrarlos a mano
+            # para que el formulario quede en blanco y listo para la siguiente.
             st.session_state.pop("solicitante_sel_nueva", None)
             st.session_state.pop("solicitante_otro_nueva", None)
+            st.session_state.pop("proveedor_sel_nueva", None)
+            st.session_state.pop("proveedor_otro_nueva", None)
             st.session_state["recargar_solicitudes"] += 1
             st.rerun()
 
