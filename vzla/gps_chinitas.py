@@ -130,7 +130,7 @@ MASTER_VEHICULOS = {
     'A87EZ8P': {'modelo': 'RICH P11', 'color': 'BLANCO'},
     # Unidades nuevas (color por confirmar: edítalo aquí cuando lo tengas)
     'A72AZ2R': {'modelo': 'CHANGAN HUNTER 4X4', 'color': 'BLANCO'},   # 2026
-    'A76AP4R': {'modelo': 'FOTON BJ2037Y', 'color': 'BLANCO'},        # 2025, BJ2037Y 3MAV DM
+    'A76AP4R': {'modelo': 'FOTON TUNLAND G7', 'color': 'BLANCO'},        # 2025, BJ2037Y 3MAV DM
     'AI554MG': {'modelo': 'FORD FIESTA', 'color': 'AZUL'},          # 2017, sedán
 }
 
@@ -157,7 +157,7 @@ FOTOS_VEHICULOS = {
     'REY CAMION': 'rey_camion',
     'RICH P11': 'rich_p11',
     'CHANGAN HUNTER 4X4': 'changan_hunter_4x4',
-    'FOTON BJ2037Y': 'foton_bj2037y',
+    'FOTON TUNLAND G7': 'foton_tunland_g7',
     'FORD FIESTA': 'ford_fiesta',
 }
 
@@ -182,7 +182,7 @@ TIPO_COMBUSTIBLE_VEHICULOS = {
     'MITSUBISHI LANCER': 'GASOLINA',
     'RICH P11': 'GASOLINA',         # Dong Feng
     'CHANGAN HUNTER 4X4': 'GASOIL',
-    'FOTON BJ2037Y': 'GASOIL',      # pick-up diésel
+    'FOTON TUNLAND G7': 'GASOIL',      # pick-up diésel
     'FORD FIESTA': 'GASOLINA',      # sedán 2017
 }
 
@@ -195,7 +195,7 @@ RENDIMIENTO_KM_POR_LITRO = {
     'MITSUBISHI LANCER': 13,  # sedán, gasolina
     'RICH P11': 11,           # pick-up, gasolina
     'CHANGAN HUNTER 4X4': 11,  # pick-up 4x4 2026, diesel (algo menos que el 4x2 por tracción)
-    'FOTON BJ2037Y': 10,      # pick-up diésel 2025
+    'FOTON TUNLAND G7': 10,      # pick-up diésel 2025
     'FORD FIESTA': 13,        # sedán compacto 2017, gasolina
 }
 
