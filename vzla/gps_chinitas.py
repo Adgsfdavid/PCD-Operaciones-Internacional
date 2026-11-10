@@ -626,6 +626,16 @@ with t_config:
                         else:
                             ruta_resumen = ubicacion_final_gps
 
+                        # Si la ruta propuesta vino de Sheets o de la ubicación base (no hay GPS hoy),
+                        # el reporte también la muestra como DESPACHO en vez del valor por defecto.
+                        if (not despacho_guardado_manual and ubicacion_final_gps == "Plantilla Manual"
+                                and ruta_resumen != ubicacion_final_gps):
+                            reportes[placa] = re.sub(
+                                r'^\*DESPACHO:\* .*$',
+                                lambda _m: f'*DESPACHO:* {str(ruta_resumen).upper()}',
+                                reportes[placa], count=1, flags=re.MULTILINE,
+                            )
+
                         # Combustible estimado: KM del día / rendimiento del modelo (km/l).
                         # No es una lectura real (el GPS no mide combustible), es una estimación
                         # para tener una referencia de gasto por unidad y por ruta.
@@ -732,13 +742,24 @@ with t_resumen:
                 texto_actual = st.session_state['reportes_texto'].get(placa_r)
                 if texto_actual:
                     sufijo_nuevo = f' - {chofer_r}' if chofer_r else ''
-                    st.session_state['reportes_texto'][placa_r] = re.sub(
+                    texto_nuevo = re.sub(
                         rf'^🚛 {re.escape(placa_r)}(?: - .*)?$',
                         f'🚛 {placa_r}{sufijo_nuevo}',
                         texto_actual,
                         count=1,
                         flags=re.MULTILINE,
                     )
+                    # La ruta que editaste en la tabla ES el despacho del reporte: se respeta
+                    # tal cual (ya no queda "EL TIGRITO" por defecto en el texto).
+                    if ruta_r:
+                        texto_nuevo = re.sub(
+                            r'^\*DESPACHO:\* .*$',
+                            lambda _m: f'*DESPACHO:* {ruta_r}',
+                            texto_nuevo,
+                            count=1,
+                            flags=re.MULTILINE,
+                        )
+                    st.session_state['reportes_texto'][placa_r] = texto_nuevo
 
                 # El text_area de "Reportes Individuales" tiene su propia clave
                 # (txt_{placa}) y, una vez creado, Streamlit ignora el `value=` nuevo
