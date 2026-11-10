@@ -111,7 +111,8 @@ GEOCERCAS_ARCHIVO_REPO = "BaseLocalizaciones.xlsx"
 PLACAS_AUTORIZADAS = {
     'A36AC9X', 'A37CS2D', 'A38BA4N', 'A48AU5T',
     'A71EB8P', 'A72EB0P', 'A88BD0J', 'A84EZ6P', 'A87EZ8P',
-    'AB893NB', 'A00DS2V', 'A73CL7D'
+    'AB893NB', 'A00DS2V', 'A73CL7D',
+    'A72AZ2R', 'A76AP4R', 'AI554MG'
 }
 
 MASTER_VEHICULOS = {
@@ -127,6 +128,18 @@ MASTER_VEHICULOS = {
     'A73CL7D': {'modelo': 'REY CAMION', 'color': 'PLATA'},
     'A84EZ6P': {'modelo': 'RICH P11', 'color': 'BLANCO'},
     'A87EZ8P': {'modelo': 'RICH P11', 'color': 'BLANCO'},
+    # Unidades nuevas (color por confirmar: edítalo aquí cuando lo tengas)
+    'A72AZ2R': {'modelo': 'CHANGAN HUNTER 4X4', 'color': 'BLANCO'},   # 2026
+    'A76AP4R': {'modelo': 'FOTON BJ2037Y', 'color': 'BLANCO'},        # 2025, BJ2037Y 3MAV DM
+    'AI554MG': {'modelo': 'FORD FIESTA', 'color': 'AZUL'},          # 2017, sedán
+}
+
+# Ubicación/ruta base de las unidades nuevas. Se usa como ruta propuesta cuando hoy NO hay
+# datos GPS y tampoco hay una ruta guardada en Google Sheets (se puede editar en la Pizarra).
+UBICACION_BASE_PLACAS = {
+    'A72AZ2R': 'PORLAMAR',
+    'A76AP4R': 'EL TIGRE',
+    'AI554MG': 'CARACAS',
 }
 
 # Mapa MODELO -> nombre BASE de archivo esperado dentro de la carpeta "fotos/"
@@ -143,6 +156,9 @@ FOTOS_VEHICULOS = {
     'MITSUBISHI LANCER': 'mitsubishi_lancer',
     'REY CAMION': 'rey_camion',
     'RICH P11': 'rich_p11',
+    'CHANGAN HUNTER 4X4': 'changan_hunter_4x4',
+    'FOTON BJ2037Y': 'foton_bj2037y',
+    'FORD FIESTA': 'ford_fiesta',
 }
 
 EXTENSIONES_FOTO_VALIDAS = ('png', 'jpg', 'jpeg', 'webp')
@@ -165,6 +181,9 @@ TIPO_COMBUSTIBLE_VEHICULOS = {
     'REY CAMION': 'GASOLINA',       # Chevrolet C3500 2014
     'MITSUBISHI LANCER': 'GASOLINA',
     'RICH P11': 'GASOLINA',         # Dong Feng
+    'CHANGAN HUNTER 4X4': 'GASOIL',
+    'FOTON BJ2037Y': 'GASOIL',      # pick-up diésel
+    'FORD FIESTA': 'GASOLINA',      # sedán 2017
 }
 
 RENDIMIENTO_KM_POR_LITRO = {
@@ -175,6 +194,9 @@ RENDIMIENTO_KM_POR_LITRO = {
     'REY CAMION': 6,          # camión/pick-up pesada más vieja (2014), gasolina
     'MITSUBISHI LANCER': 13,  # sedán, gasolina
     'RICH P11': 11,           # pick-up, gasolina
+    'CHANGAN HUNTER 4X4': 11,  # pick-up 4x4 2026, diesel (algo menos que el 4x2 por tracción)
+    'FOTON BJ2037Y': 10,      # pick-up diésel 2025
+    'FORD FIESTA': 13,        # sedán compacto 2017, gasolina
 }
 
 # ==========================================
@@ -598,6 +620,9 @@ with t_config:
                             # guardada en Google Sheets (en vez de dejarla en blanco/"Plantilla Manual").
                             ruta_resumen = ultimas_rutas_sheets[placa]
                             placas_ruta_de_sheets.append(placa)
+                        elif ubicacion_final_gps == "Plantilla Manual" and UBICACION_BASE_PLACAS.get(placa):
+                            # Unidad nueva sin GPS hoy ni historial en Sheets: ubicación base conocida.
+                            ruta_resumen = UBICACION_BASE_PLACAS[placa]
                         else:
                             ruta_resumen = ubicacion_final_gps
 
